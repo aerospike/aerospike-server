@@ -30,6 +30,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <libgen.h>
 #include <limits.h>
 #include <malloc.h>
 #include <mcheck.h>
@@ -37,6 +38,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/resource.h>
@@ -2020,6 +2022,110 @@ cmd_index_pressure(as_info_cmd_args* args)
 	cf_dyn_buf_chomp(db);
 }
 
+// Resolve and validate the jem-stats output file path. Relative paths are
+// taken relative to the output directory inside the working directory, and
+// absolute paths must reside under either "/tmp" or the output directory.
+// The parent directory must exist and be writable. On success, the resolved
+// path is written to file_path and true is returned.  On failure,
+// an error is appended to db and false is returned.
+bool
+jem_stats_resolve_file_path(cf_dyn_buf* db, const char* file_str,
+		char* file_path, size_t file_path_sz)
+{
+	cf_assert(file_str[0] != '\0', AS_INFO, "empty file path");
+
+	const char* work_dir = g_config.work_directory;
+	const char output_subdir[] = "output";
+
+	// Disallow path traversal. Note that this is deliberately simple and broad
+	// — it also rejects legitimate filenames that merely contain "..", i.e.,
+	// "ab..c.txt".
+	if (strstr(file_str, "..") != NULL) {
+		as_info_respond_error(db, AS_ERR_PARAMETER,
+				"File path must not contain '..': '%s'", file_str);
+		return false;
+	}
+
+	if (strlen(file_str) >= file_path_sz) {
+		as_info_respond_error(db, AS_ERR_PARAMETER, "File path too long: '%s'",
+				file_str);
+		return false;
+	}
+
+	// Length of the "<work_dir>/output" string (excluding the null terminator).
+	size_t output_dir_len = strlen(work_dir) + 1 + strlen(output_subdir);
+
+	char output_dir[output_dir_len + 1];
+	snprintf(output_dir, sizeof(output_dir), "%s/%s", work_dir, output_subdir);
+
+	if (file_str[0] == '/') {
+		// Absolute path - restrict to "/tmp" or the output directory.
+		bool under_tmp = strncmp(file_str, "/tmp/", 5) == 0;
+		bool under_output_dir =
+				strncmp(file_str, output_dir, output_dir_len) == 0 &&
+				file_str[output_dir_len] == '/';
+
+		if (! under_tmp && ! under_output_dir) {
+			as_info_respond_error(db, AS_ERR_PARAMETER,
+					"File path is not under '/tmp' or '%s': '%s'",
+					output_dir, file_str);
+			return false;
+		}
+
+		strcpy(file_path, file_str);
+	}
+	else {
+		// Relative path - resolve against the work directory.
+		if ((size_t)snprintf(file_path, file_path_sz, "%s/%s", output_dir,
+					file_str) >= file_path_sz) {
+			as_info_respond_error(db, AS_ERR_PARAMETER,
+					"File path too long: '%s'", file_str);
+			return false;
+		}
+	}
+
+	// Verify the parent directory, disallowing symbolic links. The file itself
+	// need not exist (it may be created later), so we resolve the parent rather
+	// than the full path. realpath() collapses any symlinks (at any level) and
+	// "." components; requiring the result to match the given parent rejects
+	// any path that traverses a symbolic link.
+	char dir_str[PATH_MAX];
+
+	if (strlen(file_path) >= sizeof(dir_str)) {
+		as_info_respond_error(db, AS_ERR_PARAMETER,
+				"Resolved file path too long: '%s'", file_path);
+		return false;
+	}
+
+	strcpy(dir_str, file_path);
+
+	const char* dir = dirname(dir_str);
+	char canon_dir[PATH_MAX];
+
+	if (realpath(dir, canon_dir) == NULL) {
+		as_info_respond_error(db, AS_ERR_PARAMETER,
+				"Parent directory is not a valid path: %s ('%s' from file '%s')",
+				cf_strerror(errno), dir, file_str);
+		return false;
+	}
+
+	if (strcmp(canon_dir, dir) != 0) {
+		as_info_respond_error(db, AS_ERR_PARAMETER,
+				"Parent directory must not contain symbolic links: '%s' (from file '%s')",
+				dir, file_str);
+		return false;
+	}
+
+	if (access(dir, W_OK | X_OK) != 0) {
+		as_info_respond_error(db, AS_ERR_PARAMETER,
+				"Parent directory is not a writable path: '%s' (from file '%s')",
+				dir, file_str);
+		return false;
+	}
+
+	return true;
+}
+
 static void
 cmd_jem_stats(as_info_cmd_args* args)
 {
@@ -2059,7 +2165,7 @@ cmd_jem_stats(as_info_cmd_args* args)
 	}
 
 	char sites_str[100] = { 0 };
-	int sites_len = sizeof(options_str);
+	int sites_len = sizeof(sites_str);
 
 	rv = as_info_parameter_get(params, "sites", sites_str, &sites_len);
 	rv = as_info_optional_param_is_ok(db, "sites", sites_str, rv);
@@ -2068,11 +2174,29 @@ cmd_jem_stats(as_info_cmd_args* args)
 		return;
 	}
 
-	cf_alloc_log_stats(*file_str != '\0' ? file_str : NULL,
+	// Resolve and validate both paths up front, so that we only start logging
+	// once both are known to be valid.
+	char file_path[PATH_MAX] = { 0 };
+
+	if (*file_str != '\0' &&
+			! jem_stats_resolve_file_path(db, file_str, file_path,
+					sizeof(file_path))) {
+		return;
+	}
+
+	char sites_path[PATH_MAX] = { 0 };
+
+	if (*sites_str != '\0' &&
+			! jem_stats_resolve_file_path(db, sites_str, sites_path,
+					sizeof(sites_path))) {
+		return;
+	}
+
+	cf_alloc_log_stats(*file_str != '\0' ? file_path : NULL,
 			*options_str != '\0' ? options_str : NULL);
 
 	if (*sites_str != '\0') {
-		cf_alloc_log_site_infos(sites_str);
+		cf_alloc_log_site_infos(sites_path);
 	}
 
 	as_info_respond_ok(db);

@@ -74,6 +74,7 @@ endif
 
 	install -d $(OPT_AS)/data
 	install -d $(OPT_AS)/smd
+	install -d $(OPT_AS)/output
 	install -d $(OPT_AS)/usr/udf/lua
 
 	install -d $(OPT_AS)/schema
