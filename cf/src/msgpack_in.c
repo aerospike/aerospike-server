@@ -260,7 +260,7 @@ const uint8_t*
 msgpack_get_bin_vec(msgpack_in_vec* mv, uint32_t* sz_r)
 {
 	if (mv->idx >= mv->n_vecs) {
-		return false;
+		return NULL;
 	}
 
 	const uint8_t* buf = mv->vecs[mv->idx].buf + mv->vecs[mv->idx].offset;
@@ -539,11 +539,11 @@ msgpack_cmp_peek(const msgpack_in* mp0, const msgpack_in* mp1)
 	return msgpack_cmp_internal(&meta0, &meta1);
 }
 
-// Does not check buf_sz.
 msgpack_type
 msgpack_peek_type(const msgpack_in* mp)
 {
 	const uint8_t* buf = mp->buf + mp->offset;
+	const uint8_t* end = mp->buf + mp->buf_sz;
 	uint8_t b = *buf++;
 
 	switch (b) {
@@ -558,6 +558,9 @@ msgpack_peek_type(const msgpack_in* mp)
 	case 0xd1: // signed 16 bit integer
 	case 0xd2: // signed 32 bit integer
 	case 0xd3: // signed 64 bit integer
+		if (buf >= end) {
+			return MSGPACK_TYPE_ERROR;
+		}
 		return (*buf & 0x80) == 0 ? MSGPACK_TYPE_INT : MSGPACK_TYPE_NEGINT;
 	case 0xcc: // unsigned 8 bit integer
 	case 0xcd: // unsigned 16 bit integer
@@ -571,13 +574,22 @@ msgpack_peek_type(const msgpack_in* mp)
 
 	case 0xc4:
 	case 0xd9: // string/raw bytes with 8 bit header
+		if (buf + 1 >= end) {
+			return MSGPACK_TYPE_ERROR;
+		}
 		return bytes_internal_to_type(*(buf + 1), *buf);
 	case 0xc5:
 	case 0xda: // string/raw bytes with 16 bit header
+		if (buf + 2 >= end) {
+			return MSGPACK_TYPE_ERROR;
+		}
 		return bytes_internal_to_type(*(buf + 2),
 				cf_swap_from_be16(*(uint16_t*)buf));
 	case 0xc6:
 	case 0xdb: // string/raw bytes with 32 bit header
+		if (buf + 4 >= end) {
+			return MSGPACK_TYPE_ERROR;
+		}
 		return bytes_internal_to_type(*(buf + 4),
 				cf_swap_from_be32(*(uint32_t*)buf));
 	case 0xdc: // list with 16 bit header
@@ -588,6 +600,9 @@ msgpack_peek_type(const msgpack_in* mp)
 		return MSGPACK_TYPE_MAP;
 
 	case 0xd4: // fixext 1
+		if (buf + 1 >= end) {
+			return MSGPACK_TYPE_ERROR;
+		}
 		if (*buf++ == CMP_EXT_TYPE) {
 			if (*buf == CMP_WILDCARD) {
 				return MSGPACK_TYPE_CMP_WILDCARD;
@@ -605,6 +620,9 @@ msgpack_peek_type(const msgpack_in* mp)
 		return MSGPACK_TYPE_EXT;
 
 	case 0xc7: // ext 8
+		if (buf + 2 >= end) {
+			return MSGPACK_TYPE_ERROR;
+		}
 		if (*buf++ == 1) {
 			if (*buf++ == CMP_EXT_TYPE) {
 				if (*buf == CMP_WILDCARD) {
