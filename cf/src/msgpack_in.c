@@ -652,6 +652,9 @@ msgpack_peek_type(const msgpack_in* mp)
 	}
 
 	if ((b & 0xe0) == 0xa0) { // raw bytes with 8 bit combined header
+		if (buf >= end) {
+			return MSGPACK_TYPE_ERROR;
+		}
 		return bytes_internal_to_type(*buf, (b & 0x1f));
 	}
 
