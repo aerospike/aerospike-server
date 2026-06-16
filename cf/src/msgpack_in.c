@@ -1352,17 +1352,41 @@ msgpack_sz_internal(const uint8_t* buf, const uint8_t* const end,
 static inline uint64_t
 extract_uint64(const uint8_t* ptr, uint8_t sz)
 {
-	const uint64_t* p64 = (const uint64_t*)(ptr - 8 + sz);
-	return cf_swap_from_be64(*p64) &
-			((~0ULL) >> (64 - 8 * sz)); // little endian mask
+	switch (sz) {
+	// case 1 always handled inline
+	case 2:
+		return (uint64_t)cf_swap_from_be16(*(const uint16_t*)ptr);
+	case 4:
+		return (uint64_t)cf_swap_from_be32(*(const uint32_t*)ptr);
+	case 8:
+		return cf_swap_from_be64(*(const uint64_t*)ptr);
+	default:
+		cf_crash(AS_PARTICLE, "extract_uint64: bad sz %u", sz);
+	}
+
+	return 0;
 }
 
 static inline uint64_t
 extract_neg_int64(const uint8_t* ptr, uint8_t sz)
 {
-	const uint64_t* p64 = (const uint64_t*)(ptr - 8 + sz);
-	return cf_swap_from_be64(*p64) |
-			~((~0ULL) >> (64 - 8 * sz)); // little endian mask
+	switch (sz) {
+	// case 1 always handled inline
+	case 2: {
+		uint16_t v = cf_swap_from_be16(*(const uint16_t*)ptr);
+		return (uint64_t)(int64_t)(int16_t)v;
+	}
+	case 4: {
+		uint32_t v = cf_swap_from_be32(*(const uint32_t*)ptr);
+		return (uint64_t)(int64_t)(int32_t)v;
+	}
+	case 8:
+		return cf_swap_from_be64(*(const uint64_t*)ptr);
+	default:
+		cf_crash(AS_PARTICLE, "extract_neg_int64: bad sz %u", sz);
+	}
+
+	return 0;
 }
 
 static inline void
