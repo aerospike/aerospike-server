@@ -34,7 +34,10 @@ public:
 
 	virtual void handle_point(S2CellId const& cellid);
 
-	virtual void handle_region(S2Region* i_regionp);
+	// Takes ownership of i_regionp; an override must store it or delete it.
+	// Pure virtual so GeometryHandler cannot be instantiated directly — all
+	// geometry must go through a derived handler.
+	virtual void handle_region(S2Region* i_regionp) = 0;
 
 	virtual double earth_radius_meters()
 	{

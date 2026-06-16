@@ -304,12 +304,6 @@ GeometryHandler::handle_point(S2CellId const& i_cellid)
 }
 
 void
-GeometryHandler::handle_region(S2Region* i_regionp)
-{
-	// nothing by default
-}
-
-void
 parse(GeometryHandler& geohand, string const& geostr)
 {
 	json_error_t err;
