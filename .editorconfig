@@ -8,6 +8,16 @@ end_of_line = lf
 insert_final_newline = false
 trim_trailing_whitespace = true
 
+# Makefiles mix tabs (recipe lines -- required by Make) and spaces (ifeq/ifdef
+# bodies); editorconfig can't express that per-context, so indent_style is
+# left unset and tab_width just pins a tab at 4 columns.
+[{Makefile,Makefile.*,*.mk}]
+tab_width = 4
+charset = utf-8
+end_of_line = lf
+insert_final_newline = false
+trim_trailing_whitespace = true
+
 [*.{sh,bash}]
 charset = utf-8
 end_of_line = lf
