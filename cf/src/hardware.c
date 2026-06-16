@@ -2291,11 +2291,11 @@ get_mounted_device(const char* fs_path)
 					best_len);
 		}
 
-		free(mount_real);
+		cf_free(mount_real);
 	}
 
 	endmntent(fh);
-	free(fs_real);
+	cf_free(fs_real);
 
 	if (best_len == 0) {
 		cf_warning(CF_HARDWARE, "no mount point found for %s", fs_path);
@@ -2321,7 +2321,7 @@ get_mounted_device(const char* fs_path)
 	// Return a result allocated with the cf_*() allocation functions.
 
 	char* res = cf_strdup(best_real);
-	free(best_real);
+	cf_free(best_real);
 
 	cf_detail(CF_HARDWARE, "mount point is %s", res);
 	return res;
@@ -2396,7 +2396,7 @@ get_numa_node(const char* sys_path)
 		sys_real[i_slash] = 0;
 	}
 
-	free(sys_real);
+	cf_free(sys_real);
 	return res;
 }
 

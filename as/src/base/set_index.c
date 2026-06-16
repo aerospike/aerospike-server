@@ -1569,7 +1569,7 @@ uarena_add_stage(uarena* ua)
 	uint8_t* stage = cf_malloc(STAGE_SIZE);
 
 	if (ua->n_stages % STAGES_STEP == 0) {
-		ua->stages = realloc(ua->stages,
+		ua->stages = cf_realloc(ua->stages,
 				(ua->n_stages + STAGES_STEP) * sizeof(uint8_t*));
 	}
 

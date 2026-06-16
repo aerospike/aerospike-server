@@ -1294,7 +1294,7 @@ find_sindex_key(const cf_vector* items, void* udata)
 		fsk->n_name_matches++;
 
 		if (fsk->n_name_matches == 1) {
-			fsk->found_key = strdup(item->key);
+			fsk->found_key = cf_strdup(item->key);
 		}
 		else {
 			cf_free(fsk->found_key); // only return when unique

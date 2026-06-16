@@ -2502,7 +2502,7 @@ cmd_log_set(as_info_cmd_args* args)
 
 	cf_debug(AS_INFO, "received log-set:%s", params);
 
-	char* params_cpy = strdup(params);
+	char* params_cpy = cf_strdup(params);
 
 	char* save_ptr = NULL;
 	const char* tok = strtok_r(params_cpy, "=", &save_ptr);
