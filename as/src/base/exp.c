@@ -493,6 +493,7 @@ static bool build_count_sz(msgpack_in* mp, uint32_t* total_sz,
 		uint32_t* cleanup_count, uint32_t* counter_r);
 static var_entry* build_find_var_entry(build_args* args, const uint8_t* name,
 		uint32_t name_sz);
+static bool build_check_cdt(const uint8_t* buf, uint32_t buf_sz);
 static bool build_default(build_args* args);
 static bool build_meta_default(build_args* args);
 static bool build_compare(build_args* args);
@@ -1787,6 +1788,34 @@ build_find_var_entry(build_args* args, const uint8_t* name, uint32_t name_sz)
 }
 
 static bool
+build_check_cdt(const uint8_t* buf, uint32_t buf_sz)
+{
+	// has_toplvl false strips any top-level persist-index flag, so the rewrite
+	// only reorders/compactifies and can never exceed buf_sz.
+	// Need more options for cdt_untrusted_rewrite() if we want to support
+	// PERSIST_INDEX in exp literals in the future.
+	uint8_t* temp = cf_malloc(buf_sz);
+	uint32_t new_sz = cdt_untrusted_rewrite(temp, buf, buf_sz, false);
+	DEFER_FREE(temp);
+
+	if (new_sz != buf_sz) {
+		cf_warning(AS_EXP,
+			"build_check_cdt - error %u cdt not compactified",
+			AS_ERR_PARAMETER);
+		return false;
+	}
+
+	if (memcmp(buf, temp, buf_sz) != 0) {
+		cf_warning(AS_EXP,
+			"build_check_cdt - error %u cdt not ordered as expected",
+			AS_ERR_PARAMETER);
+		return false;
+	}
+
+	return true;
+}
+
+static bool
 build_default(build_args* args)
 {
 	return build_args_setup(args, "build_default");
@@ -2922,6 +2951,10 @@ build_quote(build_args* args)
 		return false;
 	}
 
+	if (! build_check_cdt(op->value, op->value_sz)) {
+		return false;
+	}
+
 	op->base.code = VOP_VALUE_LIST;
 
 	return true;
@@ -3168,6 +3201,10 @@ build_value_msgpack(build_args* args)
 	}
 
 	if (type == MSGPACK_TYPE_MAP) {
+		if (! build_check_cdt(op->value, op->value_sz)) {
+			return false;
+		}
+
 		args->entry = &op_table[VOP_VALUE_MAP];
 	}
 	else if (type == MSGPACK_TYPE_BYTES) {
