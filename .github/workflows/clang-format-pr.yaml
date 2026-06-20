@@ -1,0 +1,42 @@
+# Run clang-format only on C/C++ files changed in the PR (base..head SHAs).
+# All PRs / all target branches; default activity types: opened, synchronize, reopened.
+# Style: -style=file resolves the repo .clang-format (closest parent of each path); compatible with clang-format 18–21 per .clang-format header.
+# This workflow is standalone — it does not modify or call other CI workflows.
+name: clang-format (PR)
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  clang-format:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Install clang-format
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y && sudo apt-get install -y clang-format-18
+
+      - name: Verify changed files are formatted
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          echo "Comparing BASE_SHA=$BASE_SHA to HEAD_SHA=$HEAD_SHA"
+          .github/bin/check_clang_format_changes.bash --base "$BASE_SHA" --head "$HEAD_SHA"
