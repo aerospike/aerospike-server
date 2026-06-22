@@ -9,7 +9,7 @@
 #   -a, --arch ARCH     Only run when current arch matches. ARCH: amd64, x86_64, arm64, or aarch64.
 #   -e, --edition EDITION  Add EDITION to build list (use -e for each). EDITION: community, enterprise, fips.
 #
-# Requires: DISTRO (e.g. el8, el9, ubuntu24.04), HOST (e.g. ubuntu-24.04, ubuntu-24.04-arm).
+# Requires: DISTRO (e.g. el8, el9, ubuntu24.04, ubuntu26.04), HOST (e.g. ubuntu-24.04, ubuntu-24.04-arm).
 #
 # Examples:
 #   build_edition.bash

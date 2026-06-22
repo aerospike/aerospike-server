@@ -55,6 +55,7 @@ get_codename_for_deb() {
     *ubuntu20.04*) echo "focal" ;;
     *ubuntu22.04*) echo "jammy" ;;
     *ubuntu24.04*) echo "noble" ;;
+    *ubuntu26.04*) echo "resolute" ;;
     *debian11*)    echo "bullseye" ;;
     *debian12*)    echo "bookworm" ;;
     *debian13*)    echo "trixie" ;;

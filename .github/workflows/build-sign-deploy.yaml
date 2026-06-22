@@ -49,7 +49,7 @@ jobs:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -94,7 +94,7 @@ jobs:
       - name: Set distro list
         id: distros
         run: |
-          echo 'distros=["amzn2023","debian12","debian13","el10","el8","el9","ubuntu22.04","ubuntu24.04"]' >> "$GITHUB_OUTPUT"
+          echo 'distros=["amzn2023","debian12","debian13","el10","el8","el9","ubuntu22.04","ubuntu24.04","ubuntu26.04"]' >> "$GITHUB_OUTPUT"
 
   build-artifacts:
     needs: setup
@@ -109,7 +109,8 @@ jobs:
     # Pinned base images for reproducible builds; update periodically for security and toolchain updates.
     # Pinned base images; el8 works with OpenSSL 1.1 or 3 via enterprise tls_ee compat (TLS_GET_PEER_CERT).
     container: >-
-      ${{ matrix.distro == 'ubuntu24.04' && 'ubuntu:24.04' ||
+      ${{ matrix.distro == 'ubuntu26.04' && 'ubuntu:26.04' ||
+        matrix.distro == 'ubuntu24.04' && 'ubuntu:24.04' ||
         matrix.distro == 'ubuntu22.04' && 'ubuntu:22.04' ||
         matrix.distro == 'ubuntu20.04' && 'ubuntu:20.04' ||
         matrix.distro == 'el8' && 'registry.access.redhat.com/ubi8/ubi-minimal:8.10' ||
@@ -156,7 +157,7 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Checkout aerospike-server
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: citrusleaf/aerospike-server
           submodules: true
@@ -219,6 +220,13 @@ jobs:
           HOST: ${{ matrix.host }}
           EXT: ${{ github.event_name == 'push' && 'TEST' || github.event.inputs.ext }}
         run: |
+          # Ubuntu 26.04 ships CMake 4.x, which removed compatibility with
+          # cmake_minimum_required(VERSION <3.5). Set explicitly only for that
+          # distro so the legacy CMakeLists in the EE 'snappy' submodule still
+          # configures. Other matrix cells leave this unset.
+          if [[ "${DISTRO}" == "ubuntu26.04" ]]; then
+            export CMAKE_POLICY_VERSION_MINIMUM=3.5
+          fi
           if [[ "${MATRIX_HOST}" == *arm* ]]; then
             bash .github/bin/build_edition.bash -e community -e enterprise
           else
@@ -247,7 +255,7 @@ jobs:
           egress-policy: audit
 
       - name: Checkout (for extract_version.bash)
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           sparse-checkout: .github/bin/extract_version.bash
           sparse-checkout-cone-mode: false
@@ -301,7 +309,7 @@ jobs:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
 
@@ -376,11 +384,11 @@ jobs:
   sign-artifacts:
     needs: [setup, artifacts-ready]
     if: always() && needs.artifacts-ready.result == 'success'
-    uses: aerospike/shared-workflows/.github/workflows/reusable_sign-artifacts.yaml@v3.6.0
+    uses: aerospike/shared-workflows/.github/workflows/reusable_sign-artifacts.yaml@v3.7.0
     with:
       gh-artifact-name: signed-artifacts-${{ needs.setup.outputs.VERSION }}      
       gh-unsigned-artifacts: unsigned-artifacts-${{ needs.setup.outputs.VERSION }}      
-      gh-workflows-ref: "v3.4.1"
+      gh-workflows-ref: "v3.7.0"
     secrets:
       gpg-private-key: ${{ secrets.GPG_SECRET_KEY }}
       gpg-public-key: ${{ secrets.GPG_PUBLIC_KEY }}
@@ -389,7 +397,7 @@ jobs:
   upload-artifacts-to-jfrog:
     needs: [setup, sign-artifacts]
     if: always() && needs.sign-artifacts.result == 'success'
-    uses: aerospike/shared-workflows/.github/workflows/reusable_deploy-artifacts.yaml@v3.6.0
+    uses: aerospike/shared-workflows/.github/workflows/reusable_deploy-artifacts.yaml@v3.7.0
     with:
       jf-project: database
       jf-build-name: "aerospike-server"
@@ -401,7 +409,7 @@ jobs:
       dry-run: false
       jf-build-id: ${{ needs.setup.outputs.VERSION }}
       jf-metadata-build-id: ${{ needs.setup.outputs.VERSION }}-metadata
-      gh-workflows-ref: "v3.4.1"
+      gh-workflows-ref: "v3.7.0"
 
   create-release-bundle:
     permissions:
@@ -410,7 +418,7 @@ jobs:
       attestations: write
     needs: [setup, sign-artifacts, upload-artifacts-to-jfrog, docker-deploy]
     if: always() && needs.upload-artifacts-to-jfrog.result == 'success' && needs.docker-deploy.result == 'success'
-    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.6.0
+    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.7.0
     with:
       jf-project: "database"
       jf-build-names: "aerospike-server:${{ needs.setup.outputs.VERSION }}"
@@ -418,7 +426,7 @@ jobs:
       oidc-provider-name: gh-citrusleaf
       oidc-audience: citrusleaf
       version: ${{ needs.setup.outputs.BUNDLE_VERSION }}
-      gh-workflows-ref: "v3.4.1"
+      gh-workflows-ref: "v3.7.0"
       dry-run: false
 
   docker-deploy:
@@ -436,7 +444,7 @@ jobs:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -459,14 +467,14 @@ jobs:
           oidc-audience: database-gh-citrusleaf
 
       - name: Docker login to Artifactory
-        uses: step-security/docker-login-action@870af644803bf9f204aed474adbad2958fec048b # v4.1.0
+        uses: step-security/docker-login-action@164e21d7e52229904128e2f946001cb88278c33d # v4.2.0
         with:
           registry: artifact.aerospike.io
           username: ${{ steps.jf.outputs.oidc-user }}
           password: ${{ steps.jf.outputs.oidc-token }}
 
       - name: Checkout aerospike-server.docker repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: aerospike/aerospike-server.docker
           path: pkg/docker
@@ -477,7 +485,7 @@ jobs:
         uses: step-security/setup-qemu-action@109c6ed9f089be1a250c75fd6a534e30df44e030 # v4.0.0
 
       - name: Set up Docker Buildx
-        uses: step-security/setup-buildx-action@f931205d68723ad9589fd2a7e2ece238bf9de341 # v4.0.0
+        uses: step-security/setup-buildx-action@6997872a55d77391e51b87609556578131f44402 # v4.1.0
 
       - name: Get current timestamp
         id: timestamp
@@ -589,7 +597,7 @@ jobs:
           egress-policy: audit
 
       - name: Checkout (for changelog)
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           fetch-tags: true

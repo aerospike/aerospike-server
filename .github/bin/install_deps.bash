@@ -4,7 +4,7 @@
 # Usage: install_deps.bash <distro>
 #
 #   distro: debian11, debian12, debian13, ubuntu20.04, ubuntu22.04, ubuntu24.04,
-#           el8, el9, el10, amzn2023
+#           ubuntu26.04, el8, el9, el10, amzn2023
 set -xeuo pipefail
 
 OPENSSL_VERSION="3.0.19"
@@ -51,6 +51,10 @@ install_deps_ubuntu2204() {
 }
 
 install_deps_ubuntu2404() {
+    install_debian_common
+}
+
+install_deps_ubuntu2604() {
     install_debian_common
 }
 
@@ -212,6 +216,7 @@ main() {
     ubuntu20.04) install_deps_ubuntu2004 ;;
     ubuntu22.04) install_deps_ubuntu2204 ;;
     ubuntu24.04) install_deps_ubuntu2404 ;;
+    ubuntu26.04) install_deps_ubuntu2604 ;;
     el8) install_deps_el8 ;;
     el9) install_deps_el9 ;;
     el10) install_deps_el10 ;;

@@ -164,7 +164,7 @@ void as_sindex_manager_start(void);
 void as_sindex_manager_sindex_create(struct as_info_cmd_args_s* args);
 void as_sindex_manager_sindex_delete(struct as_info_cmd_args_s* args);
 void as_sindex_manager_sindex_exists(struct as_info_cmd_args_s* args);
-bool as_sindex_manager_stats_str(struct as_namespace_s* ns, char* iname,
+bool as_sindex_manager_stats_str(struct as_namespace_s* ns, const char* iname,
 		struct cf_dyn_buf_s* db);
 void as_sindex_manager_list_str(struct as_info_cmd_args_s* args);
 
