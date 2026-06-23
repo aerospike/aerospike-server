@@ -12,12 +12,12 @@
 #   base="$(gh pr view 123 --json baseRefOid -q .baseRefOid)"
 #   head="$(gh pr view 123 --json headRefOid -q .headRefOid)"
 #   ./.github/bin/check_clang_format_changes.bash --base "$base" --head "$head"
-#   CLANG_FORMAT=clang-format-18 ./.github/bin/check_clang_format_changes.bash
+#   CLANG_FORMAT=clang-format-19 ./.github/bin/check_clang_format_changes.bash
 #
 # Full usage and modes:  ./.github/bin/check_clang_format_changes.bash --help
 #
 # Exit: 0 ok, 1 formatting diffs, 2 usage/repo/tool errors.
-# Fix (from repo root):  clang-format-18 -style=file -i <paths>
+# Fix (from repo root):  clang-format-19 -style=file -i <paths>
 #
 set -euo pipefail
 
@@ -36,7 +36,7 @@ OPTIONS
   -h, --help   Print this message (includes examples).
 
 ENVIRONMENT
-  CLANG_FORMAT  Clang-format binary (default: clang-format-18 on PATH, else clang-format).
+  CLANG_FORMAT  Clang-format binary (default: clang-format-19 on PATH, else clang-format-18, else clang-format).
 
 MODES
   Default (no --base, no positional args)
@@ -176,12 +176,14 @@ fi
 
 cf="${CLANG_FORMAT:-}"
 if [[ -z "$cf" ]]; then
-    if command -v clang-format-18 >/dev/null 2>&1; then
+    if command -v clang-format-19 >/dev/null 2>&1; then
+        cf="clang-format-19"
+    elif command -v clang-format-18 >/dev/null 2>&1; then
         cf="clang-format-18"
     elif command -v clang-format >/dev/null 2>&1; then
         cf="clang-format"
     else
-        echo "error: no clang-format-18 or clang-format in PATH; install one or set CLANG_FORMAT" >&2
+        echo "error: no clang-format-19, clang-format-18, or clang-format in PATH; install one or set CLANG_FORMAT" >&2
         exit 2
     fi
 fi

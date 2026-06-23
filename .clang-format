@@ -1,5 +1,5 @@
 # Aerospike Server C Coding Style - clang-format config
-# Compatible with clang-format 18–21
+# Compatible with clang-format 19–21
 
 BasedOnStyle: LLVM
 Language: Cpp
@@ -51,6 +51,7 @@ SortIncludes: CaseSensitive
 
 # Misc
 AlignAfterOpenBracket: DontAlign
+SpaceAfterCStyleCast: false
 AlignConsecutiveAssignments: None
 AlignConsecutiveDeclarations: None
 AlignOperands: DontAlign
