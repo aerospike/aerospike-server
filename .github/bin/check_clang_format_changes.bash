@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # check_clang_format_changes.bash — local clang-format check for *changed* C/C++ files only.
 #
-# Used by CI (.github/workflows/clang-format-pr.yaml) and as a local pre-push helper.
+# Used by CI (.github/workflows/format.yaml) and as a local pre-push helper.
 # Rules: git diff --name-only -z --diff-filter=ACMRT, suffix filter (.c .h .cc .cpp .hpp .cxx .inc),
 #        then:  clang-format -style=file FILE  |  diff -u FILE -
 #
@@ -31,7 +31,7 @@ SYNOPSIS
   check_clang_format_changes.bash BASE_REF HEAD_REF
 
 OPTIONS
-  --base REF   Left side of a two-dot diff: git diff REF..HEAD (see MODES).
+  --base REF   Left side of a three-dot diff: git diff REF...HEAD (see MODES).
   --head REF   Right side of the diff (default: HEAD).
   -h, --help   Print this message (includes examples).
 
@@ -45,14 +45,19 @@ MODES
       i.e. three-dot: changes on your branch since the merge-base with upstream (good before a PR).
 
   With --base REF and/or two positional args BASE_REF HEAD_REF
-        git diff --diff-filter=ACMRT 'BASE..HEAD'
-      Same *shape* as CI when BASE and HEAD are the PR base OID and head OID from GitHub.
+        git diff --diff-filter=ACMRT 'BASE...HEAD'
+      Three-dot: changes on the head side since the merge-base with BASE -- i.e.
+      only what this branch introduced. Same file set as CI (and as GitHub's
+      "Files changed" tab) when BASE and HEAD are the PR base and head OIDs.
+      Three-dot matters because the PR base OID tracks the moving base-branch
+      tip: a two-dot diff would wrongly include files the base branch changed
+      after this branch was cut.
 
 EXAMPLES
   # 1) Default: your work vs upstream (three-dot; closest to “my PR diff” before you open one):
   ./.github/bin/check_clang_format_changes.bash
 
-  # 2) Two-dot: everything that differs between master tip and your HEAD (can be larger than three-dot):
+  # 2) Explicit base (three-dot): what your branch introduced since it diverged from master:
   ./.github/bin/check_clang_format_changes.bash --base origin/master --head HEAD
 
   # 3) Match the PR check for GitHub PR #123 (same base/head commits the workflow uses):
@@ -66,7 +71,7 @@ EXAMPLES
   # 5) Match CI’s clang-format binary name on Ubuntu:
   CLANG_FORMAT=clang-format-18 ./.github/bin/check_clang_format_changes.bash
 
-See also: .github/workflows/clang-format-pr.yaml
+See also: .github/workflows/format.yaml
 EOF
     exit "$1"
 }
@@ -144,8 +149,10 @@ if [[ -z "$base_ref" ]]; then
     diff_range="${base_ref}...${head_ref}"
     echo "Using diff range: ${diff_range}"
 else
-    # Two-dot: exact same as CI when you pass the PR base and head SHAs/refs.
-    diff_range="${base_ref}..${head_ref}"
+    # Three-dot: changes on the head side since the merge-base with base. The
+    # PR base OID tracks the moving base-branch tip, so two-dot would pull in
+    # files the base branch changed after this branch was cut (not PR changes).
+    diff_range="${base_ref}...${head_ref}"
     echo "Using diff range: ${diff_range}"
 fi
 
