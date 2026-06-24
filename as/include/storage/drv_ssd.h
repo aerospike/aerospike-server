@@ -66,43 +66,63 @@ struct drv_ssd_s;
 // Write buffer - where records accumulate until
 // (the full buffer is) flushed to a device.
 //
-typedef struct {
-	uint32_t rc;
-	uint32_t n_writers; // number of concurrent writers
+// Common fields live in the embedded drv_write_buffer base (see
+// drv_common.h); only fields that are SSD-specific (heap I/O buffer,
+// post-write-q toggle, EE encrypted buffer) live in this extension.
+//
+typedef struct ssd_write_buf_s {
+	drv_write_buffer base;
 	bool use_post_write_q;
-	uint32_t flush_pos; // pos on last flush
-	uint32_t n_vacated;
-	uint32_t vacated_capacity;
-	vacated_wblock* vacated_wblocks;
-	struct drv_ssd_s* ssd;
-	uint32_t wblock_id;
-	uint32_t pos;
-	uint8_t* buf;
+	uint8_t* buf; // SSD heap I/O buffer
 	uint8_t* encrypted_buf; // relevant for enterprise edition only
 } ssd_write_buf;
 
 //------------------------------------------------
-// Per-wblock information.
+// Per-wblock information. Currently identical across engines, so it is
+// just a typedef of the unified base.
 //
-typedef struct ssd_wblock_state_s {
-	uint32_t inuse_sz; // number of bytes currently used in the wblock
-	cf_mutex LOCK; // transactions, write_worker, and defrag all are interested in wblock_state
-	ssd_write_buf* swb; // pending writes for the wblock, also treated as a cache for reads
-	uint8_t state;
-	bool short_lived; // relevant for enterprise edition only
-	uint32_t n_vac_dests; // number of wblocks into which this wblock defragged
-} ssd_wblock_state;
+typedef drv_wblock_state ssd_wblock_state;
 
 //------------------------------------------------
-// Per current write buffer information.
+// Per current write buffer information. Common fields live in the embedded
+// drv_current_wb base; SSD keeps EE encrypted commits and the partial-write
+// counter in the extension.
 //
 typedef struct current_swb_s {
-	cf_mutex lock; // lock protects writes to swb
-	ssd_write_buf* swb; // swb currently being filled by writes
+	drv_current_wb base;
 	uint8_t* encrypted_commits; // relevant for enterprise edition only
-	uint64_t n_wblock_writes; // total number of swbs added to the swb_write_q by writes
-	uint64_t n_wblock_partial_writes; // total number of swbs "partial flushed" by writes
+	uint64_t n_wblock_partial_writes; // total swbs "partial flushed" by writes
 } current_swb;
+
+// Convenience accessor for the engine-typed back-pointer kept on the base.
+static inline struct drv_ssd_s*
+swb_dev(const ssd_write_buf* swb)
+{
+	return swb->base.dev.ssd;
+}
+
+// Convenience accessor for the engine-typed write-buffer pointer in wblock
+// state. The base stores it as drv_write_buffer*; engine code consumes a
+// ssd_write_buf*.
+static inline ssd_write_buf*
+swb_of(const ssd_wblock_state* state)
+{
+	return (ssd_write_buf*)state->wb;
+}
+
+// Convenience accessor for the engine-typed write-buffer pointer in
+// current_swb. The base stores it as drv_write_buffer*.
+static inline ssd_write_buf*
+swb_of_cur(const current_swb* cur)
+{
+	return (ssd_write_buf*)cur->base.wb;
+}
+
+// Layout asserts: shared code casts ssd_write_buf* to drv_write_buffer* and
+// current_swb* to drv_current_wb*, so the embedded base must be the first
+// member. The wblock-state typedef is trivially equivalent.
+COMPILER_ASSERT(offsetof(ssd_write_buf, base) == 0);
+COMPILER_ASSERT(offsetof(current_swb, base) == 0);
 
 //------------------------------------------------
 // Per-device information.

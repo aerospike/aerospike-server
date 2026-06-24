@@ -63,39 +63,60 @@ struct drv_pmeta_s;
 // Typedefs & constants.
 //
 
-// Where records accumulate until flushed to device.
+// Where records accumulate until flushed to device. Common fields live in
+// the embedded drv_write_buffer base (see drv_common.h); only fields that
+// are MEM-specific (mmap base address, dirty bookkeeping, EE encrypted
+// buffer) live in this extension. MEM does not use the base's rc field -
+// it is dead-storage here, kept for layout uniformity.
 typedef struct mem_write_block_s {
-	uint32_t n_writers; // number of concurrent writers
-	uint32_t flush_pos; // pos on last flush
-	uint32_t n_vacated;
-	uint32_t vacated_capacity;
-	vacated_wblock* vacated_wblocks;
-	struct drv_mem_s* mem;
-	uint32_t wblock_id;
-	uint8_t* base_addr;
+	drv_write_buffer base;
+	uint8_t* base_addr; // mmap pointer into the device's mapped region
 	uint32_t first_dirty_pos;
-	uint32_t pos;
 	uint8_t* encrypted_buf; // relevant for enterprise edition only
 } mem_write_block;
 
-// Per-wblock information.
-typedef struct mem_wblock_state_s {
-	uint32_t inuse_sz; // number of bytes currently used in the wblock
-	cf_mutex LOCK; // transactions, write_worker, and defrag all are interested in wblock_state
-	mem_write_block* mwb; // pending writes for the wblock, also treated as a cache for reads
-	uint8_t state;
-	bool short_lived; // relevant for enterprise edition only
-	uint32_t n_vac_dests; // number of wblocks into which this wblock defragged
-} mem_wblock_state;
+// Per-wblock information. Currently identical across engines, so it is just
+// a typedef of the unified base.
+typedef drv_wblock_state mem_wblock_state;
 
-// Per current write buffer information.
+// Per current write buffer information. Common fields live in the embedded
+// drv_current_wb base; MEM keeps EE encrypted commits and the partial-write
+// counter in the extension.
 typedef struct current_mwb_s {
-	cf_mutex lock; // lock protects writes to mwb
-	mem_write_block* mwb; // mwb currently being filled by writes
+	drv_current_wb base;
 	uint8_t* encrypted_commits; // relevant for enterprise edition only
-	uint64_t n_wblock_writes; // total number of mwbs added to the mwb_write_q by writes
-	uint64_t n_wblock_partial_writes; // total number of mwbs "partial flushed" by writes
+	uint64_t n_wblock_partial_writes; // total mwbs "partial flushed" by writes
 } current_mwb;
+
+// Convenience accessor for the engine-typed back-pointer kept on the base.
+static inline struct drv_mem_s*
+mwb_dev(const mem_write_block* mwb)
+{
+	return mwb->base.dev.mem;
+}
+
+// Convenience accessor for the engine-typed write-buffer pointer in wblock
+// state. The base stores it as drv_write_buffer*; engine code consumes a
+// mem_write_block*.
+static inline mem_write_block*
+mwb_of(const mem_wblock_state* state)
+{
+	return (mem_write_block*)state->wb;
+}
+
+// Convenience accessor for the engine-typed write-buffer pointer in
+// current_mwb. The base stores it as drv_write_buffer*.
+static inline mem_write_block*
+mwb_of_cur(const current_mwb* cur)
+{
+	return (mem_write_block*)cur->base.wb;
+}
+
+// Layout asserts: shared code casts mem_write_block* to drv_write_buffer* and
+// current_mwb* to drv_current_wb*, so the embedded base must be the first
+// member. The wblock-state typedef is trivially equivalent.
+COMPILER_ASSERT(offsetof(mem_write_block, base) == 0);
+COMPILER_ASSERT(offsetof(current_mwb, base) == 0);
 
 // Per-device information.
 typedef struct drv_mem_s {
@@ -271,7 +292,7 @@ BYTES_UP_TO_IO_MIN(const drv_mem* mem, uint64_t bytes)
 static inline void
 mem_wait_writers_done(mem_write_block* mwb)
 {
-	while (mwb->n_writers != 0) {
+	while (mwb->base.n_writers != 0) {
 		as_arch_pause();
 	}
 

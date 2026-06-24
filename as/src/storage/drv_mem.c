@@ -298,7 +298,7 @@ as_storage_init_mem(as_namespace* ns)
 		mem->file_id = i;
 
 		for (uint8_t c = 0; c < N_CURRENT_SWBS; c++) {
-			cf_mutex_init(&mem->current_mwbs[c].lock);
+			cf_mutex_init(&mem->current_mwbs[c].base.lock);
 		}
 
 		cf_mutex_init(&mem->defrag_lock);
@@ -449,9 +449,9 @@ as_storage_shutdown_mem(struct as_namespace_s* ns)
 			current_mwb* cur_mwb = &mem->current_mwbs[c];
 
 			// Stop the maintenance thread from (also) flushing the mwbs.
-			cf_mutex_lock(&cur_mwb->lock);
+			cf_mutex_lock(&cur_mwb->base.lock);
 
-			mem_write_block* mwb = cur_mwb->mwb;
+			mem_write_block* mwb = mwb_of_cur(cur_mwb);
 
 			// Flush current mwb by pushing it to shadow-q.
 			if (mwb != NULL) {
@@ -459,7 +459,7 @@ as_storage_shutdown_mem(struct as_namespace_s* ns)
 					push_wblock_to_shadow_q(mem, mwb);
 				}
 
-				cur_mwb->mwb = NULL;
+				cur_mwb->base.wb = NULL;
 			}
 		}
 
@@ -820,7 +820,7 @@ as_storage_device_stats_mem(const as_namespace* ns, uint32_t device_ix,
 	stats->n_partial_writes = 0;
 
 	for (uint8_t c = 0; c < N_CURRENT_SWBS; c++) {
-		stats->n_writes += mem->current_mwbs[c].n_wblock_writes;
+		stats->n_writes += mem->current_mwbs[c].base.n_wblock_writes;
 		stats->n_partial_writes += mem->current_mwbs[c].n_wblock_partial_writes;
 	}
 
@@ -1571,7 +1571,7 @@ wblock_init(drv_mem* mem)
 
 		p_wblock_state->inuse_sz = 0;
 		cf_mutex_init(&p_wblock_state->LOCK);
-		p_wblock_state->mwb = NULL;
+		p_wblock_state->wb = NULL;
 		p_wblock_state->state = WBLOCK_STATE_FREE;
 		p_wblock_state->short_lived = false;
 		p_wblock_state->n_vac_dests = 0;
@@ -1706,8 +1706,7 @@ run_load_queues(void* pv_data)
 		}
 		else if (inuse_sz < lwm_size &&
 				! mem->wblock_state[wblock_id].short_lived) {
-			drv_defrag_pen_add(&pens[(inuse_sz * lwm_pct) / lwm_size],
-					wblock_id);
+			drv_defrag_pen_add(&pens[(inuse_sz * lwm_pct) / lwm_size], wblock_id);
 		}
 		else {
 			mem->wblock_state[wblock_id].state = WBLOCK_STATE_USED;
@@ -2436,17 +2435,17 @@ buffer_bins(as_storage_rd* rd)
 
 	current_mwb* cur_mwb = &mem->current_mwbs[rd->which_current_swb];
 
-	cf_mutex_lock(&cur_mwb->lock);
+	cf_mutex_lock(&cur_mwb->base.lock);
 
-	mem_write_block* mwb = cur_mwb->mwb;
+	mem_write_block* mwb = mwb_of_cur(cur_mwb);
 
 	if (! mwb) {
 		mwb = mwb_get(mem, false);
-		cur_mwb->mwb = mwb;
+		cur_mwb->base.wb = (drv_write_buffer*)mwb;
 
 		if (! mwb) {
 			cf_ticker_warning(AS_DRV_MEM, "{%s} out of space", ns->name);
-			cf_mutex_unlock(&cur_mwb->lock);
+			cf_mutex_unlock(&cur_mwb->base.lock);
 			return -AS_ERR_OUT_OF_SPACE;
 		}
 
@@ -2461,7 +2460,7 @@ buffer_bins(as_storage_rd* rd)
 
 	// Check if there's enough space in current buffer - if not, enqueue it to
 	// be flushed to device, and grab a new buffer.
-	if (write_sz > WBLOCK_SZ - mwb->pos) {
+	if (write_sz > WBLOCK_SZ - mwb->base.pos) {
 		if (mem->shadow_name != NULL) {
 			// Enqueue the buffer, to be flushed to device.
 			push_wblock_to_shadow_q(mem, mwb);
@@ -2470,15 +2469,15 @@ buffer_bins(as_storage_rd* rd)
 			old_mwb = mwb; // stash for release outside lock
 		}
 
-		cur_mwb->n_wblock_writes++;
+		cur_mwb->base.n_wblock_writes++;
 
 		// Get the new buffer.
 		mwb = mwb_get(mem, false);
-		cur_mwb->mwb = mwb;
+		cur_mwb->base.wb = (drv_write_buffer*)mwb;
 
 		if (! mwb) {
 			cf_ticker_warning(AS_DRV_MEM, "{%s} out of space", ns->name);
-			cf_mutex_unlock(&cur_mwb->lock);
+			cf_mutex_unlock(&cur_mwb->base.lock);
 
 			// Outside lock to not block other threads trying to write to new mwb.
 			release_old_mwb(mem, old_mwb);
@@ -2494,15 +2493,15 @@ buffer_bins(as_storage_rd* rd)
 	}
 
 	// There's enough space - save the position where this record will be
-	// written, and advance mwb->pos for the next writer.
+	// written, and advance mwb->base.pos for the next writer.
 
-	uint32_t mwb_pos = mwb->pos;
+	uint32_t mwb_pos = mwb->base.pos;
 
-	mwb->pos += write_sz;
+	mwb->base.pos += write_sz;
 
-	as_incr_uint32(&mwb->n_writers);
+	as_incr_uint32(&mwb->base.n_writers);
 
-	cf_mutex_unlock(&cur_mwb->lock);
+	cf_mutex_unlock(&cur_mwb->base.lock);
 	// May now write this record concurrently with others in this mwb.
 
 	// Flatten data into the block.
@@ -2535,7 +2534,7 @@ buffer_bins(as_storage_rd* rd)
 		}
 	}
 
-	uint64_t write_offset = WBLOCK_ID_TO_OFFSET(mwb->wblock_id) + mwb_pos;
+	uint64_t write_offset = WBLOCK_ID_TO_OFFSET(mwb->base.wblock_id) + mwb_pos;
 
 	r->file_id = mem->file_id;
 	r->rblock_id = OFFSET_TO_RBLOCK_ID(write_offset);
@@ -2546,10 +2545,11 @@ buffer_bins(as_storage_rd* rd)
 	r->n_rblocks = n_rblocks;
 
 	as_add_uint64(&mem->inuse_size, (int64_t)write_sz);
-	as_add_uint32(&mem->wblock_state[mwb->wblock_id].inuse_sz, (int32_t)write_sz);
+	as_add_uint32(&mem->wblock_state[mwb->base.wblock_id].inuse_sz,
+			(int32_t)write_sz);
 
 	// We are finished writing to the buffer.
-	as_decr_uint32_rls(&mwb->n_writers);
+	as_decr_uint32_rls(&mwb->base.n_writers);
 
 	if (ns->storage_benchmarks_enabled) {
 		histogram_insert_raw(ns->device_write_size_hist, write_sz);
@@ -2596,15 +2596,15 @@ run_shadow(void* arg)
 static void
 write_sanity_checks(drv_mem* mem, mem_write_block* mwb)
 {
-	mem_wblock_state* p_wblock_state = &mem->wblock_state[mwb->wblock_id];
+	mem_wblock_state* p_wblock_state = &mem->wblock_state[mwb->base.wblock_id];
 
-	cf_assert(p_wblock_state->mwb == mwb, AS_DRV_MEM,
+	cf_assert(p_wblock_state->wb == (drv_write_buffer*)mwb, AS_DRV_MEM,
 			"device %s: wblock-id %u mwb not consistent while writing",
-			mem->name, mwb->wblock_id);
+			mem->name, mwb->base.wblock_id);
 
 	cf_assert(p_wblock_state->state == WBLOCK_STATE_RESERVED, AS_DRV_MEM,
 			"device %s: wblock-id %u state %u off write-q", mem->name,
-			mwb->wblock_id, p_wblock_state->state);
+			mwb->base.wblock_id, p_wblock_state->state);
 }
 
 // Not static - called by split function.
@@ -2947,13 +2947,13 @@ defrag_move_record(drv_mem* src_mem, uint32_t src_wblock_id,
 
 	// Check if there's enough space in defrag buffer - if not, enqueue it to be
 	// flushed to device, and grab a new buffer.
-	if (write_size > WBLOCK_SZ - mwb->pos) {
+	if (write_size > WBLOCK_SZ - mwb->base.pos) {
 		if (mem->shadow_name != NULL) {
 			// Enqueue the buffer, to be flushed to device.
 			push_wblock_to_shadow_q(mem, mwb);
 		}
 		else {
-			memset(&mwb->base_addr[mwb->pos], 0, WBLOCK_SZ - mwb->pos);
+			memset(&mwb->base_addr[mwb->base.pos], 0, WBLOCK_SZ - mwb->base.pos);
 			mem_mprotect(mwb->base_addr, WBLOCK_SZ, PROT_READ);
 			mwb_release(mem, mwb);
 		}
@@ -2975,18 +2975,19 @@ defrag_move_record(drv_mem* src_mem, uint32_t src_wblock_id,
 		mem->defrag_mwb = mwb;
 	}
 
-	memcpy(&mwb->base_addr[mwb->pos], flat, write_size);
+	memcpy(&mwb->base_addr[mwb->base.pos], flat, write_size);
 
-	uint64_t write_offset = WBLOCK_ID_TO_OFFSET(mwb->wblock_id) + mwb->pos;
+	uint64_t write_offset =
+			WBLOCK_ID_TO_OFFSET(mwb->base.wblock_id) + mwb->base.pos;
 
 	r->file_id = mem->file_id;
 	r->rblock_id = OFFSET_TO_RBLOCK_ID(write_offset);
 	r->n_rblocks = mem_n_rblocks;
 
-	mwb->pos += write_size;
+	mwb->base.pos += write_size;
 
 	as_add_uint64(&mem->inuse_size, (int64_t)write_size);
-	as_add_uint32(&mem->wblock_state[mwb->wblock_id].inuse_sz,
+	as_add_uint32(&mem->wblock_state[mwb->base.wblock_id].inuse_sz,
 			(int32_t)write_size);
 
 	if (mem->shadow_name != NULL &&
@@ -3006,7 +3007,7 @@ static void
 release_vacated_wblock(drv_mem* mem, uint32_t wblock_id,
 		mem_wblock_state* p_wblock_state)
 {
-	cf_assert(p_wblock_state->mwb == NULL, AS_DRV_MEM,
+	cf_assert(p_wblock_state->wb == NULL, AS_DRV_MEM,
 			"device %s: wblock-id %u mwb not null while defragging", mem->name,
 			wblock_id);
 
@@ -3155,7 +3156,7 @@ log_stats(drv_mem* mem, uint64_t* p_prev_n_total_writes,
 	uint64_t n_total_writes = n_defrag_writes;
 
 	for (uint8_t c = 0; c < N_CURRENT_SWBS; c++) {
-		n_total_writes += mem->current_mwbs[c].n_wblock_writes;
+		n_total_writes += mem->current_mwbs[c].base.n_wblock_writes;
 	}
 
 	uint64_t n_defrag_partial_writes = 0;
@@ -3274,7 +3275,7 @@ static void
 flush_current_mwb(drv_mem* mem, uint8_t which, uint64_t* p_prev_n_writes)
 {
 	current_mwb* cur_mwb = &mem->current_mwbs[which];
-	uint64_t n_writes = as_load_uint64(&cur_mwb->n_wblock_writes);
+	uint64_t n_writes = as_load_uint64(&cur_mwb->base.n_wblock_writes);
 
 	// If there's an active write load, we don't need to flush.
 	if (n_writes != *p_prev_n_writes) {
@@ -3282,13 +3283,13 @@ flush_current_mwb(drv_mem* mem, uint8_t which, uint64_t* p_prev_n_writes)
 		return;
 	}
 
-	cf_mutex_lock(&cur_mwb->lock);
+	cf_mutex_lock(&cur_mwb->base.lock);
 
-	n_writes = as_load_uint64(&cur_mwb->n_wblock_writes);
+	n_writes = as_load_uint64(&cur_mwb->base.n_wblock_writes);
 
 	// Must check under the lock, could be racing a current mwb just queued.
 	if (n_writes != *p_prev_n_writes) {
-		cf_mutex_unlock(&cur_mwb->lock);
+		cf_mutex_unlock(&cur_mwb->base.lock);
 
 		*p_prev_n_writes = n_writes;
 		return;
@@ -3297,31 +3298,32 @@ flush_current_mwb(drv_mem* mem, uint8_t which, uint64_t* p_prev_n_writes)
 	// Flush the current mwb if it isn't empty, and has been written to since
 	// last flushed.
 
-	mem_write_block* mwb = cur_mwb->mwb;
+	mem_write_block* mwb = mwb_of_cur(cur_mwb);
 
 	uint64_t write_offset = 0;
 	size_t write_sz = 0;
 	uint8_t* buf = NULL;
 
-	if (mwb != NULL && mwb->pos != mwb->flush_pos) {
+	if (mwb != NULL && mwb->base.pos != mwb->base.flush_pos) {
 		mem_wait_writers_done(mwb);
 
-		write_offset = WBLOCK_ID_TO_OFFSET(mwb->wblock_id) + mwb->flush_pos;
-		write_sz = mwb->pos - mwb->flush_pos;
+		write_offset =
+				WBLOCK_ID_TO_OFFSET(mwb->base.wblock_id) + mwb->base.flush_pos;
+		write_sz = mwb->base.pos - mwb->base.flush_pos;
 
-		buf = encrypt_wblock(mwb, write_offset) + mwb->flush_pos;
+		buf = encrypt_wblock(mwb, write_offset) + mwb->base.flush_pos;
 
-		mwb->flush_pos = mwb->pos;
+		mwb->base.flush_pos = mwb->base.pos;
 
-		as_incr_uint32(&mwb->n_writers);
+		as_incr_uint32(&mwb->base.n_writers);
 	}
 
-	cf_mutex_unlock(&cur_mwb->lock);
+	cf_mutex_unlock(&cur_mwb->base.lock);
 
 	if (write_offset != 0) {
 		// Flush it.
 		shadow_flush_buf(mem, buf, write_offset, write_sz);
-		as_decr_uint32_rls(&mwb->n_writers);
+		as_decr_uint32_rls(&mwb->base.n_writers);
 
 		cur_mwb->n_wblock_partial_writes++;
 	}
@@ -3355,14 +3357,14 @@ flush_defrag_mwb(drv_mem* mem, uint64_t* p_prev_n_defrag_writes)
 
 	mem_write_block* mwb = mem->defrag_mwb;
 
-	if (mwb != NULL && mwb->n_vacated != 0) {
+	if (mwb != NULL && mwb->base.n_vacated != 0) {
 		uint64_t write_offset =
-				WBLOCK_ID_TO_OFFSET(mwb->wblock_id) + mwb->flush_pos;
-		size_t write_sz = mwb->pos - mwb->flush_pos;
+				WBLOCK_ID_TO_OFFSET(mwb->base.wblock_id) + mwb->base.flush_pos;
+		size_t write_sz = mwb->base.pos - mwb->base.flush_pos;
 
-		uint8_t* buf = encrypt_wblock(mwb, write_offset) + mwb->flush_pos;
+		uint8_t* buf = encrypt_wblock(mwb, write_offset) + mwb->base.flush_pos;
 
-		mwb->flush_pos = mwb->pos;
+		mwb->base.flush_pos = mwb->base.pos;
 
 		shadow_flush_buf(mem, buf, write_offset, write_sz);
 
@@ -3413,9 +3415,9 @@ mwb_create(drv_mem* mem)
 	mem_write_block* mwb = cf_calloc(1, sizeof(mem_write_block));
 
 	if (mem->shadow_name != NULL) {
-		mwb->vacated_capacity = VACATED_CAPACITY_STEP;
-		mwb->vacated_wblocks =
-				cf_malloc(sizeof(vacated_wblock) * mwb->vacated_capacity);
+		mwb->base.vacated_capacity = VACATED_CAPACITY_STEP;
+		mwb->base.vacated_wblocks =
+				cf_malloc(sizeof(vacated_wblock) * mwb->base.vacated_capacity);
 	}
 
 	return mwb;
@@ -3424,8 +3426,8 @@ mwb_create(drv_mem* mem)
 static void
 mwb_destroy(mem_write_block* mwb)
 {
-	if (mwb->vacated_wblocks != NULL) {
-		cf_free(mwb->vacated_wblocks);
+	if (mwb->base.vacated_wblocks != NULL) {
+		cf_free(mwb->base.vacated_wblocks);
 	}
 
 	// Note - encrypted_buf will have been freed.
@@ -3436,9 +3438,9 @@ mwb_destroy(mem_write_block* mwb)
 static void
 mwb_reset(mem_write_block* mwb)
 {
-	mwb->flush_pos = 0;
-	mwb->wblock_id = STORAGE_INVALID_WBLOCK;
-	mwb->pos = 0;
+	mwb->base.flush_pos = 0;
+	mwb->base.wblock_id = STORAGE_INVALID_WBLOCK;
+	mwb->base.pos = 0;
 	// Note - encrypted_buf will have been freed and NULL'd.
 }
 
@@ -3446,13 +3448,13 @@ mwb_reset(mem_write_block* mwb)
 void
 mwb_release(drv_mem* mem, mem_write_block* mwb)
 {
-	uint32_t wblock_id = mwb->wblock_id;
+	uint32_t wblock_id = mwb->base.wblock_id;
 	mem_wblock_state* wblock_state = &mem->wblock_state[wblock_id];
 
-	cf_assert(mwb == wblock_state->mwb, AS_DRV_MEM,
+	cf_assert(mwb == mwb_of(wblock_state), AS_DRV_MEM,
 			"releasing wrong mwb! %p (%d) != %p (%d), thread %d", mwb,
-			(int32_t)mwb->wblock_id, wblock_state->mwb,
-			(int32_t)wblock_state->mwb->wblock_id, cf_thread_sys_tid());
+			(int32_t)mwb->base.wblock_id, mwb_of(wblock_state),
+			(int32_t)mwb_of(wblock_state)->base.wblock_id, cf_thread_sys_tid());
 
 	cf_assert(wblock_state->state == WBLOCK_STATE_RESERVED, AS_DRV_MEM,
 			"device %s: wblock-id %u state %u on mwb release", mem->name,
@@ -3460,10 +3462,10 @@ mwb_release(drv_mem* mem, mem_write_block* mwb)
 
 	cf_mutex_lock(&wblock_state->LOCK);
 
-	mwb_reset(wblock_state->mwb);
-	cf_queue_push(mwb->mem->mwb_free_q, &mwb);
+	mwb_reset(mwb_of(wblock_state));
+	cf_queue_push(mwb_dev(mwb)->mwb_free_q, &mwb);
 
-	wblock_state->mwb = NULL;
+	wblock_state->wb = NULL;
 
 	if (wblock_state->inuse_sz == 0) {
 		wblock_state->short_lived = false;
@@ -3502,42 +3504,43 @@ mwb_get(drv_mem* mem, bool use_reserve)
 
 	if (CF_QUEUE_OK != cf_queue_pop(mem->mwb_free_q, &mwb, CF_QUEUE_NOWAIT)) {
 		mwb = mwb_create(mem);
-		mwb->n_writers = 0;
-		mwb->flush_pos = 0;
-		mwb->mem = mem;
-		mwb->wblock_id = STORAGE_INVALID_WBLOCK;
-		mwb->pos = 0;
+		mwb->base.n_writers = 0;
+		mwb->base.flush_pos = 0;
+		mwb->base.dev.mem = mem;
+		mwb->base.wblock_id = STORAGE_INVALID_WBLOCK;
+		mwb->base.pos = 0;
 	}
 
 	// Find a device block to write to.
-	if (cf_queue_pop(mem->free_wblock_q, &mwb->wblock_id, CF_QUEUE_NOWAIT) !=
-					CF_QUEUE_OK &&
-			! pop_pristine_wblock_id(mem, &mwb->wblock_id)) {
+	if (cf_queue_pop(mem->free_wblock_q, &mwb->base.wblock_id,
+				CF_QUEUE_NOWAIT) != CF_QUEUE_OK &&
+			! pop_pristine_wblock_id(mem, &mwb->base.wblock_id)) {
 		cf_queue_push(mem->mwb_free_q, &mwb);
 		return NULL;
 	}
 
-	mwb->base_addr = mem->mem_base_addr + (uint64_t)mwb->wblock_id * WBLOCK_SZ;
+	mwb->base_addr =
+			mem->mem_base_addr + (uint64_t)mwb->base.wblock_id * WBLOCK_SZ;
 
 	mem_mprotect(mwb->base_addr, WBLOCK_SZ, PROT_READ | PROT_WRITE);
 
-	mem_wblock_state* p_wblock_state = &mem->wblock_state[mwb->wblock_id];
+	mem_wblock_state* p_wblock_state = &mem->wblock_state[mwb->base.wblock_id];
 
 	uint32_t inuse_sz = as_load_uint32(&p_wblock_state->inuse_sz);
 
 	cf_assert(inuse_sz == 0, AS_DRV_MEM,
 			"device %s: wblock-id %u inuse-size %u off free-q", mem->name,
-			mwb->wblock_id, inuse_sz);
+			mwb->base.wblock_id, inuse_sz);
 
-	cf_assert(p_wblock_state->mwb == NULL, AS_DRV_MEM,
+	cf_assert(p_wblock_state->wb == NULL, AS_DRV_MEM,
 			"device %s: wblock-id %u mwb not null off free-q", mem->name,
-			mwb->wblock_id);
+			mwb->base.wblock_id);
 
 	cf_assert(p_wblock_state->state == WBLOCK_STATE_FREE, AS_DRV_MEM,
 			"device %s: wblock-id %u state %u off free-q", mem->name,
-			mwb->wblock_id, p_wblock_state->state);
+			mwb->base.wblock_id, p_wblock_state->state);
 
-	p_wblock_state->mwb = mwb;
+	p_wblock_state->wb = (drv_write_buffer*)mwb;
 	p_wblock_state->state = WBLOCK_STATE_RESERVED;
 
 	return mwb;
@@ -3562,23 +3565,23 @@ static bool
 mwb_add_unique_vacated_wblock(mem_write_block* mwb, uint32_t src_file_id,
 		uint32_t src_wblock_id)
 {
-	for (uint32_t i = 0; i < mwb->n_vacated; i++) {
-		vacated_wblock* vw = &mwb->vacated_wblocks[i];
+	for (uint32_t i = 0; i < mwb->base.n_vacated; i++) {
+		vacated_wblock* vw = &mwb->base.vacated_wblocks[i];
 
 		if (vw->wblock_id == src_wblock_id && vw->file_id == src_file_id) {
 			return false; // already present
 		}
 	}
 
-	if (mwb->n_vacated == mwb->vacated_capacity) {
-		mwb->vacated_capacity += VACATED_CAPACITY_STEP;
-		mwb->vacated_wblocks = cf_realloc(mwb->vacated_wblocks,
-				sizeof(vacated_wblock) * mwb->vacated_capacity);
+	if (mwb->base.n_vacated == mwb->base.vacated_capacity) {
+		mwb->base.vacated_capacity += VACATED_CAPACITY_STEP;
+		mwb->base.vacated_wblocks = cf_realloc(mwb->base.vacated_wblocks,
+				sizeof(vacated_wblock) * mwb->base.vacated_capacity);
 	}
 
-	mwb->vacated_wblocks[mwb->n_vacated].file_id = src_file_id;
-	mwb->vacated_wblocks[mwb->n_vacated].wblock_id = src_wblock_id;
-	mwb->n_vacated++;
+	mwb->base.vacated_wblocks[mwb->base.n_vacated].file_id = src_file_id;
+	mwb->base.vacated_wblocks[mwb->base.n_vacated].wblock_id = src_wblock_id;
+	mwb->base.n_vacated++;
 
 	return true; // added to list
 }
@@ -3586,10 +3589,10 @@ mwb_add_unique_vacated_wblock(mem_write_block* mwb, uint32_t src_file_id,
 static void
 mwb_release_all_vacated_wblocks(mem_write_block* mwb)
 {
-	drv_mems* mems = (drv_mems*)mwb->mem->ns->storage_private;
+	drv_mems* mems = (drv_mems*)mwb_dev(mwb)->ns->storage_private;
 
-	for (uint32_t i = 0; i < mwb->n_vacated; i++) {
-		vacated_wblock* vw = &mwb->vacated_wblocks[i];
+	for (uint32_t i = 0; i < mwb->base.n_vacated; i++) {
+		vacated_wblock* vw = &mwb->base.vacated_wblocks[i];
 
 		drv_mem* src_mem = &mems->mems[vw->file_id];
 		mem_wblock_state* wblock_state = &src_mem->wblock_state[vw->wblock_id];
@@ -3597,7 +3600,7 @@ mwb_release_all_vacated_wblocks(mem_write_block* mwb)
 		release_vacated_wblock(src_mem, vw->wblock_id, wblock_state);
 	}
 
-	mwb->n_vacated = 0;
+	mwb->base.n_vacated = 0;
 }
 
 //==========================================================
@@ -3656,21 +3659,22 @@ shadow_fd_put(drv_mem* mem, int fd)
 static void
 shadow_flush_mwb(drv_mem* mem, mem_write_block* mwb)
 {
-	memset(&mwb->base_addr[mwb->pos], 0, WBLOCK_SZ - mwb->pos);
+	memset(&mwb->base_addr[mwb->base.pos], 0, WBLOCK_SZ - mwb->base.pos);
 	mem_wait_writers_done(mwb);
 	mem_mprotect(mwb->base_addr, WBLOCK_SZ, PROT_READ);
 
-	uint64_t write_offset = WBLOCK_ID_TO_OFFSET(mwb->wblock_id) + mwb->flush_pos;
+	uint64_t write_offset =
+			WBLOCK_ID_TO_OFFSET(mwb->base.wblock_id) + mwb->base.flush_pos;
 
 	uint8_t* buf = encrypt_wblock(mwb, write_offset);
 
 	// Clean the end of the buffer before flushing.
-	if (mwb->encrypted_buf != NULL && mwb->pos < WBLOCK_SZ) {
-		memset(&mwb->encrypted_buf[mwb->pos], 0, WBLOCK_SZ - mwb->pos);
+	if (mwb->encrypted_buf != NULL && mwb->base.pos < WBLOCK_SZ) {
+		memset(&mwb->encrypted_buf[mwb->base.pos], 0, WBLOCK_SZ - mwb->base.pos);
 	}
 
-	shadow_flush_buf(mem, buf + mwb->flush_pos, write_offset,
-			WBLOCK_SZ - mwb->flush_pos);
+	shadow_flush_buf(mem, buf + mwb->base.flush_pos, write_offset,
+			WBLOCK_SZ - mwb->base.flush_pos);
 
 	if (mwb->encrypted_buf != NULL) {
 		cf_free(mwb->encrypted_buf);

@@ -276,7 +276,7 @@ void
 ssd_release_vacated_wblock(drv_ssd* ssd, uint32_t wblock_id,
 		ssd_wblock_state* p_wblock_state)
 {
-	cf_assert(p_wblock_state->swb == NULL, AS_DRV_SSD,
+	cf_assert(p_wblock_state->wb == NULL, AS_DRV_SSD,
 			"device %s: wblock-id %u swb not null while defragging", ssd->name,
 			wblock_id);
 
@@ -327,10 +327,10 @@ swb_create(drv_ssd* ssd)
 	swb->buf = cf_valloc(WBLOCK_SZ);
 	swb->encrypted_buf = NULL;
 
-	swb->n_vacated = 0;
-	swb->vacated_capacity = VACATED_CAPACITY_STEP;
-	swb->vacated_wblocks =
-			cf_malloc(sizeof(vacated_wblock) * swb->vacated_capacity);
+	swb->base.n_vacated = 0;
+	swb->base.vacated_capacity = VACATED_CAPACITY_STEP;
+	swb->base.vacated_wblocks =
+			cf_malloc(sizeof(vacated_wblock) * swb->base.vacated_capacity);
 
 	return swb;
 }
@@ -338,7 +338,7 @@ swb_create(drv_ssd* ssd)
 static inline void
 swb_destroy(ssd_write_buf* swb)
 {
-	cf_free(swb->vacated_wblocks);
+	cf_free(swb->base.vacated_wblocks);
 	cf_free(swb->buf);
 	// Note - encrypted_buf will have been freed.
 
@@ -349,21 +349,21 @@ static inline void
 swb_reset(ssd_write_buf* swb)
 {
 	swb->use_post_write_q = false;
-	swb->flush_pos = 0;
-	swb->wblock_id = STORAGE_INVALID_WBLOCK;
-	swb->pos = 0;
+	swb->base.flush_pos = 0;
+	swb->base.wblock_id = STORAGE_INVALID_WBLOCK;
+	swb->base.pos = 0;
 	// Note - encrypted_buf will have been freed and NULL'd.
 }
 
-#define swb_reserve(_swb) as_incr_uint32(&(_swb)->rc)
+#define swb_reserve(_swb) as_incr_uint32(&(_swb)->base.rc)
 
 static inline void
 swb_check_and_reserve(ssd_wblock_state* wblock_state, ssd_write_buf** p_swb)
 {
 	cf_mutex_lock(&wblock_state->LOCK);
 
-	if (wblock_state->swb != NULL) {
-		*p_swb = wblock_state->swb;
+	if (wblock_state->wb != NULL) {
+		*p_swb = swb_of(wblock_state);
 		swb_reserve(*p_swb);
 	}
 
@@ -373,7 +373,7 @@ swb_check_and_reserve(ssd_wblock_state* wblock_state, ssd_write_buf** p_swb)
 static inline void
 swb_release(ssd_write_buf* swb)
 {
-	uint32_t rc = as_aaf_uint32_rls(&swb->rc, -1);
+	uint32_t rc = as_aaf_uint32_rls(&swb->base.rc, -1);
 
 	cf_assert(rc != (uint32_t)-1, AS_DRV_SSD, "swb ref-count underflow");
 
@@ -383,19 +383,20 @@ swb_release(ssd_write_buf* swb)
 		swb_reset(swb);
 
 		// Put the swb back on the free queue for reuse.
-		cf_queue_push(swb->ssd->swb_free_q, &swb);
+		cf_queue_push(swb_dev(swb)->swb_free_q, &swb);
 	}
 }
 
 static inline void
 swb_dereference_and_release(drv_ssd* ssd, ssd_write_buf* swb)
 {
-	uint32_t wblock_id = swb->wblock_id;
+	uint32_t wblock_id = swb->base.wblock_id;
 	ssd_wblock_state* wblock_state = &ssd->wblock_state[wblock_id];
 
-	cf_assert(swb == wblock_state->swb, AS_DRV_SSD,
-			"releasing wrong swb! %p (%u) != %p (%u), thread %d", swb, wblock_id,
-			wblock_state->swb, wblock_state->swb->wblock_id, cf_thread_sys_tid());
+	cf_assert(swb == swb_of(wblock_state), AS_DRV_SSD,
+			"releasing wrong swb! %p (%u) != %p (%u), thread %d", swb,
+			wblock_id, swb_of(wblock_state),
+			swb_of(wblock_state)->base.wblock_id, cf_thread_sys_tid());
 
 	cf_assert(wblock_state->state == WBLOCK_STATE_RESERVED, AS_DRV_SSD,
 			"device %s: wblock-id %u state %u on swb release", ssd->name,
@@ -403,8 +404,8 @@ swb_dereference_and_release(drv_ssd* ssd, ssd_write_buf* swb)
 
 	cf_mutex_lock(&wblock_state->LOCK);
 
-	swb_release(wblock_state->swb);
-	wblock_state->swb = NULL;
+	swb_release(swb_of(wblock_state));
+	wblock_state->wb = NULL;
 
 	if (wblock_state->inuse_sz == 0) {
 		wblock_state->short_lived = false;
@@ -438,46 +439,46 @@ swb_get(drv_ssd* ssd, bool use_reserve)
 
 	if (CF_QUEUE_OK != cf_queue_pop(ssd->swb_free_q, &swb, CF_QUEUE_NOWAIT)) {
 		swb = swb_create(ssd);
-		swb->rc = 0;
-		swb->n_writers = 0;
+		swb->base.rc = 0;
+		swb->base.n_writers = 0;
 		swb->use_post_write_q = false;
-		swb->flush_pos = 0;
-		swb->ssd = ssd;
-		swb->wblock_id = STORAGE_INVALID_WBLOCK;
-		swb->pos = 0;
+		swb->base.flush_pos = 0;
+		swb->base.dev.ssd = ssd;
+		swb->base.wblock_id = STORAGE_INVALID_WBLOCK;
+		swb->base.pos = 0;
 	}
 
 	// Find a device block to write to.
-	if (cf_queue_pop(ssd->free_wblock_q, &swb->wblock_id, CF_QUEUE_NOWAIT) !=
-					CF_QUEUE_OK &&
-			! pop_pristine_wblock_id(ssd, &swb->wblock_id)) {
+	if (cf_queue_pop(ssd->free_wblock_q, &swb->base.wblock_id,
+				CF_QUEUE_NOWAIT) != CF_QUEUE_OK &&
+			! pop_pristine_wblock_id(ssd, &swb->base.wblock_id)) {
 		cf_queue_push(ssd->swb_free_q, &swb);
 		return NULL;
 	}
 
-	cf_assert(swb->rc == 0, AS_DRV_SSD,
+	cf_assert(swb->base.rc == 0, AS_DRV_SSD,
 			"device %s: wblock-id %u swb rc %u off free-q", ssd->name,
-			swb->wblock_id, swb->rc);
+			swb->base.wblock_id, swb->base.rc);
 
-	swb->rc = 1;
+	swb->base.rc = 1;
 
-	ssd_wblock_state* p_wblock_state = &ssd->wblock_state[swb->wblock_id];
+	ssd_wblock_state* p_wblock_state = &ssd->wblock_state[swb->base.wblock_id];
 
 	uint32_t inuse_sz = as_load_uint32(&p_wblock_state->inuse_sz);
 
 	cf_assert(inuse_sz == 0, AS_DRV_SSD,
 			"device %s: wblock-id %u inuse-size %u off free-q", ssd->name,
-			swb->wblock_id, inuse_sz);
+			swb->base.wblock_id, inuse_sz);
 
-	cf_assert(p_wblock_state->swb == NULL, AS_DRV_SSD,
+	cf_assert(p_wblock_state->wb == NULL, AS_DRV_SSD,
 			"device %s: wblock-id %u swb not null off free-q", ssd->name,
-			swb->wblock_id);
+			swb->base.wblock_id);
 
 	cf_assert(p_wblock_state->state == WBLOCK_STATE_FREE, AS_DRV_SSD,
 			"device %s: wblock-id %u state %u off free-q", ssd->name,
-			swb->wblock_id, p_wblock_state->state);
+			swb->base.wblock_id, p_wblock_state->state);
 
-	p_wblock_state->swb = swb;
+	p_wblock_state->wb = (drv_write_buffer*)swb;
 	p_wblock_state->state = WBLOCK_STATE_RESERVED;
 
 	return swb;
@@ -487,23 +488,23 @@ bool
 swb_add_unique_vacated_wblock(ssd_write_buf* swb, uint32_t src_file_id,
 		uint32_t src_wblock_id)
 {
-	for (uint32_t i = 0; i < swb->n_vacated; i++) {
-		vacated_wblock* vw = &swb->vacated_wblocks[i];
+	for (uint32_t i = 0; i < swb->base.n_vacated; i++) {
+		vacated_wblock* vw = &swb->base.vacated_wblocks[i];
 
 		if (vw->wblock_id == src_wblock_id && vw->file_id == src_file_id) {
 			return false; // already present
 		}
 	}
 
-	if (swb->n_vacated == swb->vacated_capacity) {
-		swb->vacated_capacity += VACATED_CAPACITY_STEP;
-		swb->vacated_wblocks = cf_realloc(swb->vacated_wblocks,
-				sizeof(vacated_wblock) * swb->vacated_capacity);
+	if (swb->base.n_vacated == swb->base.vacated_capacity) {
+		swb->base.vacated_capacity += VACATED_CAPACITY_STEP;
+		swb->base.vacated_wblocks = cf_realloc(swb->base.vacated_wblocks,
+				sizeof(vacated_wblock) * swb->base.vacated_capacity);
 	}
 
-	swb->vacated_wblocks[swb->n_vacated].file_id = src_file_id;
-	swb->vacated_wblocks[swb->n_vacated].wblock_id = src_wblock_id;
-	swb->n_vacated++;
+	swb->base.vacated_wblocks[swb->base.n_vacated].file_id = src_file_id;
+	swb->base.vacated_wblocks[swb->base.n_vacated].wblock_id = src_wblock_id;
+	swb->base.n_vacated++;
 
 	return true; // added to list
 }
@@ -511,10 +512,10 @@ swb_add_unique_vacated_wblock(ssd_write_buf* swb, uint32_t src_file_id,
 void
 swb_release_all_vacated_wblocks(ssd_write_buf* swb)
 {
-	drv_ssds* ssds = (drv_ssds*)swb->ssd->ns->storage_private;
+	drv_ssds* ssds = (drv_ssds*)swb_dev(swb)->ns->storage_private;
 
-	for (uint32_t i = 0; i < swb->n_vacated; i++) {
-		vacated_wblock* vw = &swb->vacated_wblocks[i];
+	for (uint32_t i = 0; i < swb->base.n_vacated; i++) {
+		vacated_wblock* vw = &swb->base.vacated_wblocks[i];
 
 		drv_ssd* src_ssd = &ssds->ssds[vw->file_id];
 		ssd_wblock_state* wblock_state = &src_ssd->wblock_state[vw->wblock_id];
@@ -522,7 +523,7 @@ swb_release_all_vacated_wblocks(ssd_write_buf* swb)
 		ssd_release_vacated_wblock(src_ssd, vw->wblock_id, wblock_state);
 	}
 
-	swb->n_vacated = 0;
+	swb->base.n_vacated = 0;
 }
 
 //
@@ -625,7 +626,7 @@ defrag_move_record(drv_ssd* src_ssd, uint32_t src_wblock_id,
 
 	// Check if there's enough space in defrag buffer - if not, enqueue it to be
 	// flushed to device, and grab a new buffer.
-	if (write_size > WBLOCK_SZ - swb->pos) {
+	if (write_size > WBLOCK_SZ - swb->base.pos) {
 		// Enqueue the buffer, to be flushed to device.
 		push_wblock_to_write_q(ssd, swb);
 		ssd->n_defrag_wblock_writes++;
@@ -645,18 +646,19 @@ defrag_move_record(drv_ssd* src_ssd, uint32_t src_wblock_id,
 		ssd->defrag_swb = swb;
 	}
 
-	memcpy(swb->buf + swb->pos, (const uint8_t*)flat, write_size);
+	memcpy(swb->buf + swb->base.pos, (const uint8_t*)flat, write_size);
 
-	uint64_t write_offset = WBLOCK_ID_TO_OFFSET(swb->wblock_id) + swb->pos;
+	uint64_t write_offset =
+			WBLOCK_ID_TO_OFFSET(swb->base.wblock_id) + swb->base.pos;
 
 	r->file_id = ssd->file_id;
 	r->rblock_id = OFFSET_TO_RBLOCK_ID(write_offset);
 	r->n_rblocks = ssd_n_rblocks;
 
-	swb->pos += write_size;
+	swb->base.pos += write_size;
 
 	as_add_uint64(&ssd->inuse_size, (int64_t)write_size);
-	as_add_uint32(&ssd->wblock_state[swb->wblock_id].inuse_sz,
+	as_add_uint32(&ssd->wblock_state[swb->base.wblock_id].inuse_sz,
 			(int32_t)write_size);
 
 	// If we just defragged into a new destination swb, count it.
@@ -958,8 +960,7 @@ run_load_queues(void* pv_data)
 		}
 		else if (inuse_sz < lwm_size &&
 				! ssd->wblock_state[wblock_id].short_lived) {
-			drv_defrag_pen_add(&pens[(inuse_sz * lwm_pct) / lwm_size],
-					wblock_id);
+			drv_defrag_pen_add(&pens[(inuse_sz * lwm_pct) / lwm_size], wblock_id);
 		}
 		else {
 			ssd->wblock_state[wblock_id].state = WBLOCK_STATE_USED;
@@ -1025,7 +1026,7 @@ ssd_wblock_init(drv_ssd* ssd)
 
 		p_wblock_state->inuse_sz = 0;
 		cf_mutex_init(&p_wblock_state->LOCK);
-		p_wblock_state->swb = NULL;
+		p_wblock_state->wb = NULL;
 		p_wblock_state->state = WBLOCK_STATE_FREE;
 		p_wblock_state->short_lived = false;
 		p_wblock_state->n_vac_dests = 0;
@@ -1444,7 +1445,7 @@ as_storage_record_load_raw_ssd(as_storage_rd* rd, bool leave_encrypted)
 static inline void
 ssd_wait_writers_done(ssd_write_buf* swb)
 {
-	while (swb->n_writers != 0) {
+	while (swb->base.n_writers != 0) {
 		as_arch_pause();
 	}
 
@@ -1518,42 +1519,44 @@ ssd_flush_swb(drv_ssd* ssd, ssd_write_buf* swb)
 {
 	ssd_wait_writers_done(swb);
 
-	uint64_t write_offset = WBLOCK_ID_TO_OFFSET(swb->wblock_id) + swb->flush_pos;
+	uint64_t write_offset =
+			WBLOCK_ID_TO_OFFSET(swb->base.wblock_id) + swb->base.flush_pos;
 
 	uint8_t* buf = ssd_encrypt_wblock(swb, write_offset);
 
 	// Clean the end of the buffer before flushing.
-	if (swb->pos < WBLOCK_SZ) {
-		memset(buf + swb->pos, 0, WBLOCK_SZ - swb->pos);
+	if (swb->base.pos < WBLOCK_SZ) {
+		memset(buf + swb->base.pos, 0, WBLOCK_SZ - swb->base.pos);
 	}
 
-	ssd_flush_buf(ssd, buf + swb->flush_pos, write_offset,
-			WBLOCK_SZ - swb->flush_pos);
+	ssd_flush_buf(ssd, buf + swb->base.flush_pos, write_offset,
+			WBLOCK_SZ - swb->base.flush_pos);
 }
 
 void
 ssd_shadow_flush_swb(drv_ssd* ssd, ssd_write_buf* swb)
 {
-	uint64_t write_offset = WBLOCK_ID_TO_OFFSET(swb->wblock_id) + swb->flush_pos;
+	uint64_t write_offset =
+			WBLOCK_ID_TO_OFFSET(swb->base.wblock_id) + swb->base.flush_pos;
 
 	uint8_t* buf = swb->encrypted_buf != NULL ? swb->encrypted_buf : swb->buf;
 
-	ssd_shadow_flush_buf(ssd, buf + swb->flush_pos, write_offset,
-			WBLOCK_SZ - swb->flush_pos);
+	ssd_shadow_flush_buf(ssd, buf + swb->base.flush_pos, write_offset,
+			WBLOCK_SZ - swb->base.flush_pos);
 }
 
 void
 ssd_write_sanity_checks(drv_ssd* ssd, ssd_write_buf* swb)
 {
-	ssd_wblock_state* p_wblock_state = &ssd->wblock_state[swb->wblock_id];
+	ssd_wblock_state* p_wblock_state = &ssd->wblock_state[swb->base.wblock_id];
 
-	cf_assert(p_wblock_state->swb == swb, AS_DRV_SSD,
+	cf_assert(p_wblock_state->wb == (drv_write_buffer*)swb, AS_DRV_SSD,
 			"device %s: wblock-id %u swb not consistent while writing",
-			ssd->name, swb->wblock_id);
+			ssd->name, swb->base.wblock_id);
 
 	cf_assert(p_wblock_state->state == WBLOCK_STATE_RESERVED, AS_DRV_SSD,
 			"device %s: wblock-id %u state %u off write-q", ssd->name,
-			swb->wblock_id, p_wblock_state->state);
+			swb->base.wblock_id, p_wblock_state->state);
 }
 
 void
@@ -1728,17 +1731,17 @@ ssd_buffer_bins(as_storage_rd* rd)
 
 	current_swb* cur_swb = &ssd->current_swbs[rd->which_current_swb];
 
-	cf_mutex_lock(&cur_swb->lock);
+	cf_mutex_lock(&cur_swb->base.lock);
 
-	ssd_write_buf* swb = cur_swb->swb;
+	ssd_write_buf* swb = swb_of_cur(cur_swb);
 
 	if (! swb) {
 		swb = swb_get(ssd, false);
-		cur_swb->swb = swb;
+		cur_swb->base.wb = (drv_write_buffer*)swb;
 
 		if (! swb) {
 			cf_ticker_warning(AS_DRV_SSD, "{%s} out of space", ns->name);
-			cf_mutex_unlock(&cur_swb->lock);
+			cf_mutex_unlock(&cur_swb->base.lock);
 			return -AS_ERR_OUT_OF_SPACE;
 		}
 
@@ -1747,18 +1750,18 @@ ssd_buffer_bins(as_storage_rd* rd)
 
 	// Check if there's enough space in current buffer - if not, enqueue it to
 	// be flushed to device, and grab a new buffer.
-	if (write_sz > WBLOCK_SZ - swb->pos) {
+	if (write_sz > WBLOCK_SZ - swb->base.pos) {
 		// Enqueue the buffer, to be flushed to device.
 		push_wblock_to_write_q(ssd, swb);
-		cur_swb->n_wblock_writes++;
+		cur_swb->base.n_wblock_writes++;
 
 		// Get the new buffer.
 		swb = swb_get(ssd, false);
-		cur_swb->swb = swb;
+		cur_swb->base.wb = (drv_write_buffer*)swb;
 
 		if (! swb) {
 			cf_ticker_warning(AS_DRV_SSD, "{%s} out of space", ns->name);
-			cf_mutex_unlock(&cur_swb->lock);
+			cf_mutex_unlock(&cur_swb->base.lock);
 			return -AS_ERR_OUT_OF_SPACE;
 		}
 
@@ -1775,23 +1778,23 @@ ssd_buffer_bins(as_storage_rd* rd)
 	int rv = 0;
 
 	if (! is_first_mrt(rd) && n_rblocks == r->n_rblocks &&
-			swb->wblock_id == RBLOCK_ID_TO_WBLOCK_ID(r->rblock_id) &&
+			swb->base.wblock_id == RBLOCK_ID_TO_WBLOCK_ID(r->rblock_id) &&
 			ssd->file_id == r->file_id &&
-			(swb_pos = RBLOCK_ID_TO_POS(r->rblock_id)) >= swb->flush_pos) {
+			(swb_pos = RBLOCK_ID_TO_POS(r->rblock_id)) >= swb->base.flush_pos) {
 		// Stored size is unchanged, previous version is in this buffer, and
 		// hasn't been flushed - just overwrite at the previous position.
 		rv = WRITE_IN_PLACE;
 	}
 	else {
 		// There's enough space - save the position where this record will be
-		// written, and advance swb->pos for the next writer.
-		swb_pos = swb->pos;
-		swb->pos += write_sz;
+		// written, and advance swb->base.pos for the next writer.
+		swb_pos = swb->base.pos;
+		swb->base.pos += write_sz;
 	}
 
-	as_incr_uint32(&swb->n_writers);
+	as_incr_uint32(&swb->base.n_writers);
 
-	cf_mutex_unlock(&cur_swb->lock);
+	cf_mutex_unlock(&cur_swb->base.lock);
 	// May now write this record concurrently with others in this swb.
 
 	// Flatten data into the block.
@@ -1818,7 +1821,7 @@ ssd_buffer_bins(as_storage_rd* rd)
 		}
 	}
 
-	uint64_t write_offset = WBLOCK_ID_TO_OFFSET(swb->wblock_id) + swb_pos;
+	uint64_t write_offset = WBLOCK_ID_TO_OFFSET(swb->base.wblock_id) + swb_pos;
 
 	if (rv != WRITE_IN_PLACE) {
 		r->file_id = ssd->file_id;
@@ -1830,12 +1833,12 @@ ssd_buffer_bins(as_storage_rd* rd)
 		r->n_rblocks = n_rblocks;
 
 		as_add_uint64(&ssd->inuse_size, (int64_t)write_sz);
-		as_add_uint32(&ssd->wblock_state[swb->wblock_id].inuse_sz,
+		as_add_uint32(&ssd->wblock_state[swb->base.wblock_id].inuse_sz,
 				(int32_t)write_sz);
 	}
 
 	// We are finished writing to the buffer.
-	as_decr_uint32_rls(&swb->n_writers);
+	as_decr_uint32_rls(&swb->base.n_writers);
 
 	if (ns->storage_benchmarks_enabled) {
 		histogram_insert_raw(ns->device_write_size_hist, write_sz);
@@ -2033,7 +2036,7 @@ ssd_log_stats(drv_ssd* ssd, uint64_t* p_prev_n_total_writes,
 	uint64_t n_total_writes = n_defrag_writes;
 
 	for (uint8_t c = 0; c < N_CURRENT_SWBS; c++) {
-		n_total_writes += ssd->current_swbs[c].n_wblock_writes;
+		n_total_writes += ssd->current_swbs[c].base.n_wblock_writes;
 	}
 
 	uint64_t n_total_partial_writes = n_defrag_partial_writes;
@@ -2132,7 +2135,7 @@ void
 ssd_flush_current_swb(drv_ssd* ssd, uint8_t which, uint64_t* p_prev_n_writes)
 {
 	current_swb* cur_swb = &ssd->current_swbs[which];
-	uint64_t n_writes = as_load_uint64(&cur_swb->n_wblock_writes);
+	uint64_t n_writes = as_load_uint64(&cur_swb->base.n_wblock_writes);
 
 	// If there's an active write load, we don't need to flush.
 	if (n_writes != *p_prev_n_writes) {
@@ -2140,14 +2143,14 @@ ssd_flush_current_swb(drv_ssd* ssd, uint8_t which, uint64_t* p_prev_n_writes)
 		return;
 	}
 
-	cf_mutex_lock(&cur_swb->lock);
+	cf_mutex_lock(&cur_swb->base.lock);
 
-	n_writes = as_load_uint64(&cur_swb->n_wblock_writes);
+	n_writes = as_load_uint64(&cur_swb->base.n_wblock_writes);
 
 	// Must check under the lock, could be racing a current swb just queued.
 	if (n_writes != *p_prev_n_writes) {
 
-		cf_mutex_unlock(&cur_swb->lock);
+		cf_mutex_unlock(&cur_swb->base.lock);
 
 		*p_prev_n_writes = n_writes;
 		return;
@@ -2156,26 +2159,27 @@ ssd_flush_current_swb(drv_ssd* ssd, uint8_t which, uint64_t* p_prev_n_writes)
 	// Flush the current swb if it isn't empty, and has been written to since
 	// last flushed.
 
-	ssd_write_buf* swb = cur_swb->swb;
+	ssd_write_buf* swb = swb_of_cur(cur_swb);
 
 	uint64_t write_offset = 0;
 	size_t write_sz = 0;
 	uint8_t* buf = NULL;
 
-	if (swb != NULL && swb->pos != swb->flush_pos) {
+	if (swb != NULL && swb->base.pos != swb->base.flush_pos) {
 		ssd_wait_writers_done(swb);
 
-		write_offset = WBLOCK_ID_TO_OFFSET(swb->wblock_id) + swb->flush_pos;
-		write_sz = swb->pos - swb->flush_pos;
+		write_offset =
+				WBLOCK_ID_TO_OFFSET(swb->base.wblock_id) + swb->base.flush_pos;
+		write_sz = swb->base.pos - swb->base.flush_pos;
 
-		buf = ssd_encrypt_wblock(swb, write_offset) + swb->flush_pos;
+		buf = ssd_encrypt_wblock(swb, write_offset) + swb->base.flush_pos;
 
-		swb->flush_pos = swb->pos;
+		swb->base.flush_pos = swb->base.pos;
 
-		as_incr_uint32(&swb->n_writers);
+		as_incr_uint32(&swb->base.n_writers);
 	}
 
-	cf_mutex_unlock(&cur_swb->lock);
+	cf_mutex_unlock(&cur_swb->base.lock);
 
 	if (write_offset != 0) {
 		// Flush it.
@@ -2185,7 +2189,7 @@ ssd_flush_current_swb(drv_ssd* ssd, uint8_t which, uint64_t* p_prev_n_writes)
 			ssd_shadow_flush_buf(ssd, buf, write_offset, write_sz);
 		}
 
-		as_decr_uint32_rls(&swb->n_writers);
+		as_decr_uint32_rls(&swb->base.n_writers);
 
 		cur_swb->n_wblock_partial_writes++;
 	}
@@ -2220,14 +2224,15 @@ ssd_flush_defrag_swb(drv_ssd* ssd, uint64_t* p_prev_n_defrag_writes)
 
 	ssd_write_buf* swb = ssd->defrag_swb;
 
-	if (swb != NULL && swb->n_vacated != 0) {
+	if (swb != NULL && swb->base.n_vacated != 0) {
 		uint64_t write_offset =
-				WBLOCK_ID_TO_OFFSET(swb->wblock_id) + swb->flush_pos;
-		size_t write_sz = swb->pos - swb->flush_pos;
+				WBLOCK_ID_TO_OFFSET(swb->base.wblock_id) + swb->base.flush_pos;
+		size_t write_sz = swb->base.pos - swb->base.flush_pos;
 
-		uint8_t* buf = ssd_encrypt_wblock(swb, write_offset) + swb->flush_pos;
+		uint8_t* buf =
+				ssd_encrypt_wblock(swb, write_offset) + swb->base.flush_pos;
 
-		swb->flush_pos = swb->pos;
+		swb->base.flush_pos = swb->base.pos;
 
 		ssd_flush_buf(ssd, buf, write_offset, write_sz);
 
@@ -3849,7 +3854,7 @@ as_storage_init_ssd(as_namespace* ns)
 		ssd->file_id = i;
 
 		for (uint8_t c = 0; c < N_CURRENT_SWBS; c++) {
-			cf_mutex_init(&ssd->current_swbs[c].lock);
+			cf_mutex_init(&ssd->current_swbs[c].base.lock);
 		}
 
 		cf_mutex_init(&ssd->defrag_lock);
@@ -4260,7 +4265,7 @@ as_storage_device_stats_ssd(const struct as_namespace_s* ns, uint32_t device_ix,
 	stats->n_partial_writes = 0;
 
 	for (uint8_t c = 0; c < N_CURRENT_SWBS; c++) {
-		stats->n_writes += ssd->current_swbs[c].n_wblock_writes;
+		stats->n_writes += ssd->current_swbs[c].base.n_wblock_writes;
 		stats->n_partial_writes += ssd->current_swbs[c].n_wblock_partial_writes;
 	}
 
@@ -4329,14 +4334,14 @@ as_storage_shutdown_ssd(as_namespace* ns)
 			current_swb* cur_swb = &ssd->current_swbs[c];
 
 			// Stop the maintenance thread from (also) flushing the swbs.
-			cf_mutex_lock(&cur_swb->lock);
+			cf_mutex_lock(&cur_swb->base.lock);
 
-			ssd_write_buf* swb = cur_swb->swb;
+			ssd_write_buf* swb = swb_of_cur(cur_swb);
 
 			// Flush current swb by pushing it to write-q.
 			if (swb != NULL) {
 				push_wblock_to_write_q(ssd, swb);
-				cur_swb->swb = NULL;
+				cur_swb->base.wb = NULL;
 			}
 		}
 

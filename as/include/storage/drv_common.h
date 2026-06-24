@@ -34,6 +34,7 @@
 #include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_hash_math.h"
 
+#include "cf_mutex.h"
 #include "log.h"
 
 #include "fabric/partition.h"
@@ -176,6 +177,71 @@ typedef struct defrag_pen_s {
 	uint32_t* ids;
 	uint32_t stack_ids[DRV_DEFRAG_PEN_INIT_CAPACITY];
 } defrag_pen;
+
+//------------------------------------------------
+// Unified write-buffer / wblock-state types.
+//
+// Each engine's per-wblock state struct, write-buffer struct, and current-wb
+// struct begins with a corresponding "drv_*" base. Engine code accesses the
+// common fields via "wb->base.field"; engine-specific fields stay on the
+// engine's extension struct.
+//
+
+// Forward declaration so drv_wblock_state can hold a typed pointer.
+struct drv_write_buffer_s;
+
+// Per-engine device structs, forward-declared for the typed back-pointer union
+// on drv_write_buffer below. Each is defined in its engine's header/source
+// (drv_pmem_s is EE-only; in CE it stays incomplete, used only as a pointer).
+struct drv_ssd_s;
+struct drv_mem_s;
+struct drv_pmem_s;
+
+// Common base for ssd_write_buf / mem_write_block / pmem_write_block. Layout
+// is intentionally a strict prefix of every engine's write-buffer struct so
+// shared code can cast safely. Engine-specific fields (e.g., SSD's "buf",
+// MEM/PMEM's "base_addr", PMEM's "dirty") live in the engine extension.
+typedef struct drv_write_buffer_s {
+	uint32_t rc;
+	uint32_t n_writers; // number of concurrent writers
+	uint32_t flush_pos; // pos on last flush
+	uint32_t n_vacated;
+	uint32_t vacated_capacity;
+	vacated_wblock* vacated_wblocks;
+	// Back-pointer to the per-engine device struct that owns this write buffer.
+	// A union of the concrete engine types (not void*) so engine code reads a
+	// typed member instead of casting. All arms are pointers, so the struct
+	// layout is unchanged (one pointer). NOTE: no discriminant -- callers must
+	// still use the arm matching the owning engine (via mwb_dev/swb_dev/pwb_dev).
+	union {
+		struct drv_ssd_s* ssd;
+		struct drv_mem_s* mem;
+		struct drv_pmem_s* pmem;
+	} dev;
+	uint32_t wblock_id;
+	uint32_t pos;
+} drv_write_buffer;
+
+// Common base for ssd_wblock_state / mem_wblock_state / pmem_wblock_state.
+// All three engines have identical fields here, so this is a clean unification
+// (a typedef in each engine's header points the engine name at this base; no
+// extension struct is needed for wblock state in Phase 0).
+typedef struct drv_wblock_state_s {
+	uint32_t inuse_sz; // number of bytes currently used in the wblock
+	cf_mutex LOCK; // transactions, write_worker, and defrag all are interested in wblock_state
+	drv_write_buffer* wb; // pending writes for the wblock, also treated as a cache for reads
+	uint8_t state;
+	bool short_lived; // relevant for enterprise edition only
+	uint32_t n_vac_dests; // number of wblocks into which this wblock defragged
+} drv_wblock_state;
+
+// Common base for current_swb / current_mwb / current_pwb. SSD/MEM extend with
+// encrypted_commits and n_wblock_partial_writes; PMEM has only the base.
+typedef struct drv_current_wb_s {
+	cf_mutex lock; // lock protects writes to wb
+	drv_write_buffer* wb; // wb currently being filled by writes
+	uint64_t n_wblock_writes; // total number of wbs added to the write-q by writes
+} drv_current_wb;
 
 //==========================================================
 // Public API - shared code between storage engines.
