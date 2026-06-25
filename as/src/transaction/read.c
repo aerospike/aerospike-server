@@ -393,7 +393,8 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 		else {
 			as_msg_send_reply(tr->from.proto_fd_h, tr->result_code,
 					tr->generation, tr->void_time, ops, response_bins, n_bins,
-					tr->rsv.ns, mrt_read_fill_version(&v, tr));
+					tr->rsv.ns, mrt_read_fill_version(&v, tr),
+					as_msg_include_error_details(tr->msgp->msg.info4));
 		}
 		BENCHMARK_NEXT_DATA_POINT(tr, read, response);
 		HIST_ACTIVATE_INSERT_DATA_POINT(tr, read_hist);
@@ -410,7 +411,8 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 			as_proxy_send_response(tr->from.proxy_orig->node,
 					tr->from_data.proxy_tid, tr->result_code, tr->generation,
 					tr->void_time, ops, response_bins, n_bins, tr->rsv.ns,
-					mrt_read_fill_version(&v, tr));
+					mrt_read_fill_version(&v, tr),
+					as_msg_include_error_details(tr->msgp->msg.info4));
 		}
 		proxy_origin_destroy(tr->from.proxy_orig);
 		if (as_transaction_is_batch_sub(tr)) {
@@ -446,7 +448,8 @@ read_timeout_cb(rw_request* rw)
 	switch (rw->origin) {
 	case FROM_CLIENT:
 		as_msg_send_reply(rw->from.proto_fd_h, AS_ERR_TIMEOUT, 0, 0, NULL, NULL,
-				0, rw->rsv.ns, NULL);
+				0, rw->rsv.ns, NULL,
+				as_msg_include_error_details(rw->msgp->msg.info4));
 		// Timeouts aren't included in histograms.
 		client_read_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		break;
@@ -511,6 +514,7 @@ read_local(as_transaction* tr)
 
 	// Make sure the message set name (if it's there) is correct.
 	if (! set_name_check(tr, r)) {
+		// NOTE: error details already set by set_name_check().
 		read_local_done(tr, &r_ref, NULL, AS_ERR_PARAMETER);
 		return TRANS_DONE;
 	}
@@ -540,6 +544,7 @@ read_local(as_transaction* tr)
 
 	if ((result = as_read_touch_check(r, tr)) != 0) {
 		if (result < 0) {
+			as_error_details_set_fmt(AS_SUB_NONE, "invalid read-touch options");
 			read_local_done(tr, &r_ref, NULL, AS_ERR_PARAMETER);
 			return TRANS_DONE;
 		}
@@ -553,6 +558,14 @@ read_local(as_transaction* tr)
 
 	// Handle metadata filter if present.
 	if ((result = handle_meta_filter(tr, r, &filter_exp)) != 0) {
+		// Only attach the "filtered out" detail on a genuine FILTERED_OUT
+		// result; a failed eval returns AS_ERR_PARAMETER with its own detail
+		// already set by handle_meta_filter().
+		if (result == AS_ERR_FILTERED_OUT) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"read filtered out by metadata filter");
+		}
+
 		read_local_done(tr, &r_ref, NULL, result);
 		return TRANS_DONE;
 	}
@@ -575,6 +588,12 @@ read_local(as_transaction* tr)
 	if (filter_exp != NULL) {
 		if ((result = read_and_filter_bins(&rd, filter_exp)) != 0) {
 			destroy_filter_exp(tr, filter_exp);
+
+			if (result == AS_ERR_FILTERED_OUT) {
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"read filtered out by bins expression");
+			}
+
 			read_local_done(tr, &r_ref, &rd, result);
 			return TRANS_DONE;
 		}
@@ -586,6 +605,8 @@ read_local(as_transaction* tr)
 	// Note - for data-not-in-memory "exists" ops, key check is expensive!
 	if (as_transaction_has_key(tr) && as_storage_rd_load_key(&rd) &&
 			! check_msg_key(m, &rd)) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"user key in request does not match stored key");
 		read_local_done(tr, &r_ref, &rd, AS_ERR_KEY_MISMATCH);
 		return TRANS_DONE;
 	}
@@ -604,6 +625,7 @@ read_local(as_transaction* tr)
 	if (result < 0) {
 		cf_warning(AS_RW, "{%s} read_local: failed as_storage_rd_load_bins() %pD",
 				ns->name, &tr->keyd);
+		as_error_details_set_fmt(AS_SUB_NONE, "failed to load bins from storage");
 		read_local_done(tr, &r_ref, &rd, -result);
 		return TRANS_DONE;
 	}
@@ -648,6 +670,7 @@ read_local(as_transaction* tr)
 			cf_warning(AS_RW,
 					"{%s} read_local: bin op(s) expected, none present %pD",
 					ns->name, &tr->keyd);
+			as_error_details_set_fmt(AS_SUB_NONE, "read has no ops");
 			read_local_done(tr, &r_ref, &rd, AS_ERR_PARAMETER);
 			return TRANS_DONE;
 		}
@@ -662,6 +685,7 @@ read_local(as_transaction* tr)
 				cf_warning(AS_RW, "{%s} read_local: bad bin name %.*s (%u) %pD",
 						ns->name, op->name_sz, op->name, op->name_sz, &tr->keyd);
 				as_bin_destroy_all(result_bins, n_result_bins);
+				as_error_details_set_fmt(AS_SUB_NONE, "invalid read op bin name");
 				read_local_done(tr, &r_ref, &rd, AS_ERR_BIN_NAME);
 				return TRANS_DONE;
 			}
@@ -669,6 +693,7 @@ read_local(as_transaction* tr)
 			as_bin* result_bin = NULL;
 			int error_code;
 
+			// Not setting error details here because it's already set in process_bin_read_op().
 			read_op_result read_result =
 					process_bin_read_op(&rd, op, respond_all_ops, result_bins,
 							&n_result_bins, &result_bin, &error_code);
@@ -691,12 +716,14 @@ read_local(as_transaction* tr)
 
 	if (tr->origin != FROM_BATCH) {
 		as_record_version v;
+		bool include_error_msg =
+				as_msg_include_error_details(tr->msgp->msg.info4);
 
 		db.used_sz = db.alloc_sz;
 		db.buf = (uint8_t*)as_msg_make_response_msg(tr->result_code,
 				r->generation, r->void_time, p_ops, response_bins, n_bins, ns,
 				(cl_msg*)dyn_bufdb, &db.used_sz, mrt_read_fill_version(&v, tr),
-				0);
+				0, include_error_msg);
 
 		db.is_stack = db.buf == dyn_bufdb;
 		// Note - not bothering to correct alloc_sz if buf was allocated.

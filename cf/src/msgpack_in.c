@@ -321,6 +321,37 @@ msgpack_get_bin_vec(msgpack_in_vec* mv, uint32_t* sz_r)
 	return buf;
 }
 
+const char*
+msgpack_type_str(msgpack_type type)
+{
+	static const char* type_names[] = {
+		[MSGPACK_TYPE_ERROR] = "error",
+		[MSGPACK_TYPE_NIL] = "nil",
+		[MSGPACK_TYPE_FALSE] = "false",
+		[MSGPACK_TYPE_TRUE] = "true",
+		[MSGPACK_TYPE_NEGINT] = "negative-integer",
+		[MSGPACK_TYPE_INT] = "integer",
+		[MSGPACK_TYPE_STRING] = "string",
+		[MSGPACK_TYPE_LIST] = "list",
+		[MSGPACK_TYPE_MAP] = "map",
+		[MSGPACK_TYPE_BYTES] = "bytes",
+		[MSGPACK_TYPE_DOUBLE] = "double",
+		[MSGPACK_TYPE_GEOJSON] = "geojson",
+		[MSGPACK_TYPE_EXT] = "ext",
+		[MSGPACK_TYPE_CMP_WILDCARD] = "wildcard",
+		[MSGPACK_TYPE_CMP_INF] = "infinity"
+	};
+
+	const char* name = NULL;
+
+	// (uint32_t) cast because enum can be signed.
+	if ((uint32_t)type < sizeof(type_names) / sizeof(char*)) {
+		name = type_names[type];
+	}
+
+	return name != NULL ? name : "<unknown>";
+}
+
 bool
 msgpack_display(msgpack_in* mp, msgpack_display_str* str)
 {

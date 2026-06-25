@@ -342,6 +342,8 @@ as_namespace_set_set_w_len(as_namespace* ns, const char* set_name, size_t len,
 
 	if (as_namespace_get_create_set_w_len(ns, set_name, len, &p_set, p_set_id) !=
 			0) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"invalid set name or namespace set limit reached");
 		return AS_ERR_PARAMETER;
 	}
 
@@ -349,6 +351,8 @@ as_namespace_set_set_w_len(as_namespace* ns, const char* set_name, size_t len,
 		cf_ticker_warning(AS_NAMESPACE,
 				"{%s|%s} at stop-writes-count - can't add record", ns->name,
 				p_set->name);
+		as_error_details_set_fmt(AS_SUB_FORBID_SET_COUNT_STOP_WRITES,
+				"set %s is at stop-writes-count; can't assign set", p_set->name);
 		return AS_ERR_FORBIDDEN;
 	}
 
@@ -377,6 +381,8 @@ as_namespace_get_create_set_w_len(as_namespace* ns, const char* set_name,
 			bad_name[AS_SET_NAME_MAX_SIZE - 1] = 0;
 
 			cf_warning(AS_NAMESPACE, "set name %s... too long", bad_name);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"set name too long (max %u bytes)", AS_SET_NAME_MAX_SIZE - 1);
 			return -1;
 		}
 
@@ -386,6 +392,8 @@ as_namespace_get_create_set_w_len(as_namespace* ns, const char* set_name,
 		// Need to handle race, So handle CF_VMAPX_ERR_NAME_EXISTS.
 		if (result == CF_VMAPX_ERR_FULL) {
 			cf_warning(AS_NAMESPACE, "at set names limit, can't add set");
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"namespace at set-name limit, can't add new set");
 			return -1;
 		}
 

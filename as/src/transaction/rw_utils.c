@@ -160,6 +160,10 @@ set_name_check(const as_transaction* tr, const as_record* r)
 		cf_warning(AS_RW, "{%s} set name mismatch %s %.*s (%u) %pD", ns->name,
 				set_name == NULL ? "(null)" : set_name, msg_set_name_len,
 				f->data, msg_set_name_len, &tr->keyd);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"message set name %.*s does not match record set %s",
+				msg_set_name_len, (const char*)f->data,
+				set_name != NULL ? set_name : "(null)");
 		return false;
 	}
 
@@ -177,10 +181,11 @@ set_set_from_msg(as_record* r, as_namespace* ns, as_msg* m)
 	}
 
 	if (! as_mrt_monitor_check_set_name(ns, f->data, name_len)) {
+		as_error_details_set_fmt(AS_SUB_UNSUPP_FEAT_GENERIC,
+				"MRT monitor set name not supported in availability (AP) mode");
 		return AS_ERR_UNSUPPORTED_FEATURE;
 	}
 
-	// Given the name, find/assign the set-ID and write it in the as_index.
 	return as_index_set_set_w_len(r, ns, (const char*)f->data, name_len, true);
 }
 
@@ -203,6 +208,8 @@ set_name_check_on_update(const as_transaction* tr, as_record* r)
 
 		cf_warning(AS_RW, "{%s} set name mismatch %s (null) (0) %pD", ns->name,
 				set_name, &tr->keyd);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"message has no set name but record is in set %s", set_name);
 		return AS_ERR_PARAMETER;
 	}
 
@@ -217,6 +224,10 @@ set_name_check_on_update(const as_transaction* tr, as_record* r)
 		cf_warning(AS_RW, "{%s} set name mismatch %s %.*s (%u) %pD", ns->name,
 				set_name ? set_name : "(null)", msg_set_name_len,
 				(const char*)f->data, msg_set_name_len, &tr->keyd);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"message set name %.*s does not match record set %s",
+				msg_set_name_len, (const char*)f->data,
+				set_name ? set_name : "(null)");
 		return AS_ERR_PARAMETER;
 	}
 
@@ -232,6 +243,8 @@ handle_meta_filter(const as_transaction* tr, const as_record* r, as_exp** exp)
 			as_msg_field* f =
 					as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_PREDEXP);
 			if ((*exp = as_exp_filter_build(f, false)) == NULL) {
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"invalid metadata expression in batch request");
 				return AS_ERR_PARAMETER;
 			}
 		}
@@ -253,6 +266,8 @@ handle_meta_filter(const as_transaction* tr, const as_record* r, as_exp** exp)
 		as_msg_field* f =
 				as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_PREDEXP);
 		if ((*exp = as_exp_filter_build(f, false)) == NULL) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"invalid metadata expression in request");
 			return AS_ERR_PARAMETER;
 		}
 		break;
@@ -301,12 +316,15 @@ read_and_filter_bins(as_storage_rd* rd, as_exp* exp)
 	int result = as_storage_rd_lazy_load_bins(rd, stack_bins);
 
 	if (result < 0) {
+		as_error_details_set_fmt(AS_SUB_NONE, "failed to load bins from storage");
 		return -result;
 	}
 
 	as_exp_ctx ctx = { .ns = ns, .r = rd->r, .rd = rd };
 
 	if (! as_exp_matches_record(exp, &ctx)) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"filtered out by bins expression");
 		return AS_ERR_FILTERED_OUT;
 	}
 
@@ -371,12 +389,16 @@ handle_msg_key(as_transaction* tr, as_storage_rd* rd)
 		if (! as_storage_rd_load_key(rd)) {
 			cf_warning(AS_RW, "{%s} can't get stored key %pD", ns->name,
 					&tr->keyd);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"could not read stored key from storage");
 			return AS_ERR_UNKNOWN;
 		}
 
 		// Check the client-sent key, if any, against the stored key.
 		if (as_transaction_has_key(tr) && ! check_msg_key(m, rd)) {
 			cf_warning(AS_RW, "{%s} key mismatch %pD", ns->name, &tr->keyd);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"user key in request does not match stored key");
 			return AS_ERR_KEY_MISMATCH;
 		}
 	}
@@ -385,6 +407,10 @@ handle_msg_key(as_transaction* tr, as_storage_rd* rd)
 		// data-in-memory, don't allocate the key until we reach the point of no
 		// return. Also don't set AS_INDEX_FLAG_KEY_STORED flag until then.
 		if (! get_msg_key(tr, rd)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"invalid or malformed key in request");
+			// TODO: Why is this unsupported feature?
+			// Should this be AS_ERR_PARAMETER?
 			return AS_ERR_UNSUPPORTED_FEATURE;
 		}
 	}
@@ -435,6 +461,7 @@ process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
 			return READ_OP_RESULT_SUCCESS;
 		}
 
+		// Not setting error details for not found because it is such a common case.
 		return READ_OP_RESULT_NOT_FOUND;
 	}
 	case AS_MSG_OP_BITS_READ: {
@@ -444,6 +471,7 @@ process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
 			as_bin* rb = &result_bins[*p_n_result_bins];
 			as_bin_set_empty(rb);
 
+			// Not setting error details here because it's already set in as_bin_bits_read_from_client().
 			*error_code = as_bin_bits_read_from_client(b, op, rb);
 
 			if (*error_code < 0) {
@@ -468,6 +496,7 @@ process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
 			return READ_OP_RESULT_SUCCESS;
 		}
 
+		// Not setting error details for not found because it is such a common case.
 		return READ_OP_RESULT_NOT_FOUND;
 	}
 	case AS_MSG_OP_HLL_READ: {
@@ -477,6 +506,7 @@ process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
 			as_bin* rb = &result_bins[*p_n_result_bins];
 			as_bin_set_empty(rb);
 
+			// Not setting error details here because it's already set in as_bin_hll_read_from_client().
 			*error_code = as_bin_hll_read_from_client(b, op, rb);
 
 			if (*error_code < 0) {
@@ -501,6 +531,7 @@ process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
 			return READ_OP_RESULT_SUCCESS;
 		}
 
+		// Not setting error details for not found because it is such a common case.
 		return READ_OP_RESULT_NOT_FOUND;
 	}
 	case AS_MSG_OP_CDT_READ: {
@@ -510,6 +541,7 @@ process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
 			as_bin* rb = &result_bins[*p_n_result_bins];
 			as_bin_set_empty(rb);
 
+			// Not setting error details here because it's already set in as_bin_cdt_read_from_client().
 			*error_code = as_bin_cdt_read_from_client(b, op, rb);
 
 			if (*error_code < 0) {
@@ -534,6 +566,7 @@ process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
 			return READ_OP_RESULT_SUCCESS;
 		}
 
+		// Not setting error details for not found because it is such a common case.
 		return READ_OP_RESULT_NOT_FOUND;
 	}
 	case AS_MSG_OP_EXP_READ: {
@@ -564,6 +597,7 @@ process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
 	default:
 		cf_warning(AS_RW, "{%s} process_bin_read_op: unsupported read op %u %pD",
 				ns->name, op->op, &rd->r->keyd);
+		as_error_details_set_fmt(AS_SUB_NONE, "unexpected read op %u", op->op);
 		*error_code = -AS_ERR_PARAMETER;
 		return READ_OP_RESULT_ERROR;
 	}

@@ -66,6 +66,9 @@ validate_delete_durability(as_transaction* tr)
 {
 	if (as_transaction_is_durable_delete(tr)) {
 		cf_warning(AS_RW, "durable delete is an enterprise feature");
+		// AS_ERR_ENTERPRISE_ONLY has no subcode family - no subcode here.
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"durable delete requires enterprise edition");
 		return AS_ERR_ENTERPRISE_ONLY;
 	}
 

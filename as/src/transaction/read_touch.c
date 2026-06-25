@@ -392,6 +392,8 @@ read_touch_master(rw_request* rw, as_transaction* tr)
 	as_namespace* ns = tr->rsv.ns;
 
 	if (ns->clock_skew_stop_writes) {
+		as_error_details_set_fmt(AS_SUB_FORBID_CLOCK_SKEW_STOP_WRITES,
+				"read-touch blocked: clock skew stop-writes active");
 		tr->result_code = AS_ERR_FORBIDDEN;
 		return TRANS_DONE;
 	}

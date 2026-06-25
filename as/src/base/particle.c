@@ -87,6 +87,57 @@ const as_particle_vtable *particle_vtable[] = {
 };
 // clang-format on
 
+static inline uint32_t
+particle_subcode_for_result(int result)
+{
+	// Particle-layer fallback emits don't know enough to mint a
+	// status-specific subcode; the message text carries the per-site
+	// context. See per_status_subcode_design.md for the rationale.
+	(void)result;
+	return AS_SUB_NONE;
+}
+
+static inline const char*
+particle_op_name(uint8_t op_type)
+{
+	switch (op_type) {
+	case AS_MSG_OP_WRITE:
+		return "write";
+	case AS_MSG_OP_APPEND:
+		return "append";
+	case AS_MSG_OP_PREPEND:
+		return "prepend";
+	case AS_MSG_OP_INCR:
+		return "incr";
+	default:
+		return "bin-op";
+	}
+}
+
+static inline void
+particle_set_error_details(const as_msg_op* op, int result)
+{
+	if (as_error_msg_is_set()) {
+		return;
+	}
+
+	// Some functions return negative result codes
+	// convert them to the standard positive codes.
+	if (result < 0) {
+		result = -result;
+	}
+
+	uint32_t subcode = particle_subcode_for_result(result);
+
+	if (op == NULL) {
+		as_error_details_set_fmt(subcode, "bin operation failed");
+		return;
+	}
+
+	as_error_details_set_fmt(subcode, "%s failed on bin %.*s",
+			particle_op_name(op->op), op->name_sz, op->name);
+}
+
 static const char* particle_strings[] = {
 	"null",
 	"integer",
@@ -240,8 +291,9 @@ as_particle_type_from_msgpack(const uint8_t* packed, uint32_t packed_size)
 const char*
 as_particle_type_str(as_particle_type type)
 {
-	cf_assert(type > AS_PARTICLE_TYPE_NULL && type < AS_PARTICLE_TYPE_MAX,
-			AS_PARTICLE, "bad particle type %u", type);
+	if (type >= AS_PARTICLE_TYPE_MAX) {
+		return "<unknown>";
+	}
 
 	return particle_strings[type];
 }
@@ -358,6 +410,7 @@ as_bin_particle_modify_from_client(as_bin* b, cf_ll_buf* particles_llb,
 	as_particle_type op_type = safe_particle_type(op->particle_type);
 
 	if (op_type == AS_PARTICLE_TYPE_BAD) {
+		particle_set_error_details(op, AS_ERR_PARAMETER);
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -370,6 +423,7 @@ as_bin_particle_modify_from_client(as_bin* b, cf_ll_buf* particles_llb,
 				op_value_size);
 
 		if (mem_size < 0) {
+			particle_set_error_details(op, (int)mem_size);
 			return (int)mem_size;
 		}
 
@@ -392,6 +446,10 @@ as_bin_particle_modify_from_client(as_bin* b, cf_ll_buf* particles_llb,
 			b->particle = old_particle; // CLEANUP? - just set NULL
 		}
 
+		if (result < 0) {
+			particle_set_error_details(op, result);
+		}
+
 		return result;
 	}
 
@@ -412,6 +470,7 @@ as_bin_particle_modify_from_client(as_bin* b, cf_ll_buf* particles_llb,
 				particle_vtable[existing_type]->concat_size_from_wire_fn(op_type,
 						op_value, op_value_size, &b->particle);
 		if (new_mem_size < 0) {
+			particle_set_error_details(op, (int)new_mem_size);
 			return (int)new_mem_size;
 		}
 		cf_ll_buf_reserve(particles_llb, (size_t)new_mem_size,
@@ -426,6 +485,7 @@ as_bin_particle_modify_from_client(as_bin* b, cf_ll_buf* particles_llb,
 				particle_vtable[existing_type]->concat_size_from_wire_fn(op_type,
 						op_value, op_value_size, &b->particle);
 		if (new_mem_size < 0) {
+			particle_set_error_details(op, (int)new_mem_size);
 			return (int)new_mem_size;
 		}
 		cf_ll_buf_reserve(particles_llb, (size_t)new_mem_size,
@@ -437,11 +497,13 @@ as_bin_particle_modify_from_client(as_bin* b, cf_ll_buf* particles_llb,
 		break;
 	default:
 		// TODO - just crash?
+		particle_set_error_details(op, AS_ERR_UNKNOWN);
 		return -AS_ERR_UNKNOWN;
 	}
 
 	if (result < 0) {
 		b->particle = old_particle;
+		particle_set_error_details(op, result);
 	}
 
 	return result;
@@ -457,6 +519,7 @@ as_bin_particle_from_client(as_bin* b, cf_ll_buf* particles_llb,
 	as_particle_type type = safe_particle_type(op->particle_type);
 
 	if (type == AS_PARTICLE_TYPE_BAD) {
+		particle_set_error_details(op, AS_ERR_PARAMETER);
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -466,6 +529,7 @@ as_bin_particle_from_client(as_bin* b, cf_ll_buf* particles_llb,
 			particle_vtable[type]->size_from_wire_fn(value, value_size);
 
 	if (mem_size < 0) {
+		particle_set_error_details(op, (int)mem_size);
 		return (int)mem_size;
 	}
 
@@ -485,6 +549,10 @@ as_bin_particle_from_client(as_bin* b, cf_ll_buf* particles_llb,
 	}
 	else {
 		b->particle = old_particle;
+	}
+
+	if (result < 0) {
+		particle_set_error_details(op, result);
 	}
 
 	return result;

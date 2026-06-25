@@ -323,6 +323,9 @@ udf_record_load(udf_record* urecord)
 
 	if (rd->n_bins > UDF_BIN_LIMIT) {
 		cf_warning(AS_UDF, "too many bins (%d) for UDF", rd->n_bins);
+		as_error_details_set_fmt(AS_SUB_BIN_NAME_COUNT_TOO_LARGE,
+				"record has %hu bins, exceeds UDF max %d", rd->n_bins,
+				UDF_BIN_LIMIT);
 		as_storage_record_close(rd);
 		return AS_ERR_BIN_NAME;
 	}

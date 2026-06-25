@@ -35,6 +35,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/resource.h>
@@ -158,6 +159,7 @@ cfg_set_defaults()
 			255; // maximum number of buffers allowed in a single queue
 	c->batch_max_unused_buffers =
 			256; // maximum number of buffers allowed in batch buffer pool
+	c->error_details_max_verbosity = AS_ERROR_DETAILS_VERBOSITY_ALL;
 	c->cgroup_mem_tracking = false;
 	c->feature_key_files[0] = "/etc/aerospike/features.conf";
 	c->info_max_ns = MAX_INFO_MAX_MS * 1000000UL;
@@ -271,6 +273,7 @@ typedef enum {
 	CASE_SERVICE_ENABLE_HEALTH_CHECK,
 	CASE_SERVICE_ENABLE_HIST_INFO,
 	CASE_SERVICE_ENFORCE_BEST_PRACTICES,
+	CASE_SERVICE_ERROR_DETAILS_MAX_VERBOSITY,
 	CASE_SERVICE_FEATURE_KEY_FILE,
 	CASE_SERVICE_GROUP,
 	CASE_SERVICE_INDENT_ALLOCATIONS,
@@ -330,6 +333,12 @@ typedef enum {
 	CASE_SERVICE_AUTO_PIN_CPU,
 	CASE_SERVICE_AUTO_PIN_NUMA,
 	CASE_SERVICE_AUTO_PIN_ADQ,
+
+	// Service error-details-max-verbosity options (value tokens):
+	CASE_SERVICE_ERROR_DETAILS_MAX_VERBOSITY_OFF,
+	CASE_SERVICE_ERROR_DETAILS_MAX_VERBOSITY_CODES,
+	CASE_SERVICE_ERROR_DETAILS_MAX_VERBOSITY_MESSAGES,
+	CASE_SERVICE_ERROR_DETAILS_MAX_VERBOSITY_ALL,
 
 	// Logging options:
 	// Sub-contexts:
@@ -859,6 +868,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "enable-health-check",			CASE_SERVICE_ENABLE_HEALTH_CHECK },
 		{ "enable-hist-info",				CASE_SERVICE_ENABLE_HIST_INFO },
 		{ "enforce-best-practices",			CASE_SERVICE_ENFORCE_BEST_PRACTICES },
+		{ "error-details-max-verbosity",	CASE_SERVICE_ERROR_DETAILS_MAX_VERBOSITY },
 		{ "feature-key-file",				CASE_SERVICE_FEATURE_KEY_FILE },
 		{ "group",							CASE_SERVICE_GROUP },
 		{ "indent-allocations",				CASE_SERVICE_INDENT_ALLOCATIONS },
@@ -920,6 +930,13 @@ const cfg_opt SERVICE_AUTO_PIN_OPTS[] = {
 		{ "cpu",							CASE_SERVICE_AUTO_PIN_CPU },
 		{ "numa",							CASE_SERVICE_AUTO_PIN_NUMA },
 		{ "adq",							CASE_SERVICE_AUTO_PIN_ADQ }
+};
+
+const cfg_opt SERVICE_ERROR_DETAILS_MAX_VERBOSITY_OPTS[] = {
+		{ "off",							CASE_SERVICE_ERROR_DETAILS_MAX_VERBOSITY_OFF },
+		{ "codes",							CASE_SERVICE_ERROR_DETAILS_MAX_VERBOSITY_CODES },
+		{ "messages",						CASE_SERVICE_ERROR_DETAILS_MAX_VERBOSITY_MESSAGES },
+		{ "all",							CASE_SERVICE_ERROR_DETAILS_MAX_VERBOSITY_ALL }
 };
 
 const cfg_opt LOGGING_OPTS[] = {
@@ -1485,6 +1502,7 @@ const cfg_opt XDR_DC_NAMESPACE_WRITE_POLICY_OPTS[] = {
 const int NUM_GLOBAL_OPTS							= sizeof(GLOBAL_OPTS) / sizeof(cfg_opt);
 const int NUM_SERVICE_OPTS							= sizeof(SERVICE_OPTS) / sizeof(cfg_opt);
 const int NUM_SERVICE_AUTO_PIN_OPTS					= sizeof(SERVICE_AUTO_PIN_OPTS) / sizeof(cfg_opt);
+const int NUM_SERVICE_ERROR_DETAILS_MAX_VERBOSITY_OPTS = sizeof(SERVICE_ERROR_DETAILS_MAX_VERBOSITY_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_OPTS							= sizeof(LOGGING_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_CONTEXT_OPTS					= sizeof(LOGGING_CONTEXT_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_SYSLOG_OPTS					= sizeof(LOGGING_SYSLOG_OPTS) / sizeof(cfg_opt);
@@ -2346,6 +2364,32 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_ENFORCE_BEST_PRACTICES:
 				c->enforce_best_practices = cfg_bool(&line);
+				break;
+			case CASE_SERVICE_ERROR_DETAILS_MAX_VERBOSITY:
+				switch (cfg_find_tok(line.val_tok_1,
+						SERVICE_ERROR_DETAILS_MAX_VERBOSITY_OPTS,
+						NUM_SERVICE_ERROR_DETAILS_MAX_VERBOSITY_OPTS)) {
+				case CASE_SERVICE_ERROR_DETAILS_MAX_VERBOSITY_OFF:
+					c->error_details_max_verbosity =
+							AS_ERROR_DETAILS_VERBOSITY_OFF;
+					break;
+				case CASE_SERVICE_ERROR_DETAILS_MAX_VERBOSITY_CODES:
+					c->error_details_max_verbosity =
+							AS_ERROR_DETAILS_VERBOSITY_CODES;
+					break;
+				case CASE_SERVICE_ERROR_DETAILS_MAX_VERBOSITY_MESSAGES:
+					c->error_details_max_verbosity =
+							AS_ERROR_DETAILS_VERBOSITY_MESSAGES;
+					break;
+				case CASE_SERVICE_ERROR_DETAILS_MAX_VERBOSITY_ALL:
+					c->error_details_max_verbosity =
+							AS_ERROR_DETAILS_VERBOSITY_ALL;
+					break;
+				case CASE_NOT_FOUND:
+				default:
+					cfg_unknown_val_tok_1(&line);
+					break;
+				}
 				break;
 			case CASE_SERVICE_FEATURE_KEY_FILE:
 				cfg_enterprise_only(&line);

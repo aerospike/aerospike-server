@@ -118,6 +118,9 @@ detail_unique(const as_transaction* tr, bool is_write)
 void
 as_tsvc_process_transaction(as_transaction* tr)
 {
+	as_error_msg_arm_from_msgp(tr->msgp);
+	// It is safe to set error details after this point.
+
 	if (tr->msgp->proto.type == PROTO_TYPE_INTERNAL_XDR) {
 		as_xdr_read(tr);
 		return;
@@ -146,6 +149,7 @@ as_tsvc_process_transaction(as_transaction* tr)
 
 	if (! nf) {
 		cf_warning(AS_TSVC, "no namespace in protocol request");
+		as_error_details_set_fmt(AS_SUB_NONE, "namespace field is required");
 		as_transaction_error(tr, NULL, AS_ERR_NAMESPACE);
 		goto Cleanup;
 	}
@@ -159,6 +163,8 @@ as_tsvc_process_transaction(as_transaction* tr)
 				"unknown namespace %.*s (%u) in protocol request - check configuration file",
 				ns_sz, nf->data, ns_sz);
 
+		as_error_details_set_fmt(AS_SUB_NONE, "unknown namespace %.*s",
+				(int)ns_sz, nf->data);
 		as_transaction_error(tr, NULL, AS_ERR_NAMESPACE);
 		goto Cleanup;
 	}
@@ -173,6 +179,8 @@ as_tsvc_process_transaction(as_transaction* tr)
 		else {
 			cf_debug(AS_TSVC,
 					"rejecting transaction - initial partition balance unresolved");
+			as_error_details_set_fmt(AS_SUB_UNAVAIL_INITIAL_BALANCE_UNRESOLVED,
+					"initial partition balance unresolved");
 			as_transaction_error(tr, NULL, AS_ERR_UNAVAILABLE);
 			// Note that we forfeited namespace info above so query doesn't get
 			// counted as single-record error.
@@ -218,6 +226,7 @@ as_tsvc_process_transaction(as_transaction* tr)
 	// Did the transaction time out while on the queue?
 	if (cf_getns() > tr->end_time) {
 		cf_debug(AS_TSVC, "transaction timed out in queue");
+		as_error_details_set_fmt(AS_SUB_NONE, "transaction timed out in queue");
 		as_transaction_error(tr, ns, AS_ERR_TIMEOUT);
 		goto Cleanup;
 	}
@@ -229,6 +238,8 @@ as_tsvc_process_transaction(as_transaction* tr)
 
 		if (digest_sz != sizeof(cf_digest)) {
 			cf_warning(AS_TSVC, "digest msg field size %u", digest_sz);
+			as_error_details_set_fmt(AS_SUB_NONE, "invalid digest size %u",
+					digest_sz);
 			as_transaction_error(tr, ns, AS_ERR_PARAMETER);
 			goto Cleanup;
 		}
@@ -270,6 +281,8 @@ as_tsvc_process_transaction(as_transaction* tr)
 	}
 	else {
 		cf_warning(AS_TSVC, "transaction is neither read nor write - unexpected");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"transaction is neither read nor write");
 		as_transaction_error(tr, ns, AS_ERR_PARAMETER);
 		goto Cleanup;
 	}

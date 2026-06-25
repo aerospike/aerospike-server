@@ -69,6 +69,16 @@ struct as_namespace_s;
 
 #define MAX_BATCH_THREADS 256
 
+// Levels for error-details-max-verbosity. Values are part of the wire contract
+// (info4 bits 5-6, see proto.h) and are immutable - off=0, codes=1, messages=2,
+// all=3 - so do not renumber.
+typedef enum {
+	AS_ERROR_DETAILS_VERBOSITY_OFF = 0,
+	AS_ERROR_DETAILS_VERBOSITY_CODES = 1,
+	AS_ERROR_DETAILS_VERBOSITY_MESSAGES = 2,
+	AS_ERROR_DETAILS_VERBOSITY_ALL = 3
+} as_error_details_verbosity;
+
 typedef struct as_config_s {
 
 	// The order here matches that in the configuration parser's enum,
@@ -92,6 +102,7 @@ typedef struct as_config_s {
 	bool health_check_enabled;
 	bool info_hist_enabled;
 	bool enforce_best_practices;
+	uint32_t error_details_max_verbosity;
 	const char* feature_key_files[MAX_FEATURE_KEY_FILES];
 	uint32_t n_feature_key_files; // indirect config
 	gid_t gid;

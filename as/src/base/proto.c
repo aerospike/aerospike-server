@@ -27,12 +27,15 @@
 #include "base/proto.h"
 
 #include <errno.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
+#include "aerospike/as_msgpack.h"
 #include "aerospike/as_val.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_byte_order.h"
@@ -60,6 +63,11 @@
 
 static const char SUCCESS_BIN_NAME[] = "SUCCESS";
 static const char FAILURE_BIN_NAME[] = "FAILURE";
+
+static __thread uint8_t g_error_details[AS_ERROR_DETAILS_MAX];
+__thread uint32_t g_error_details_len;
+__thread bool g_error_details_set;
+__thread uint8_t g_error_verbosity;
 
 //==========================================================
 // Forward declarations.
@@ -110,6 +118,86 @@ as_msg_swap_op(as_msg_op* op)
 
 		*lut = cf_swap_from_be64(*lut);
 	}
+}
+
+//==========================================================
+// Public API - error message response support.
+//
+
+void
+as_error_details_set_fmt(uint32_t subcode, const char* format, ...)
+{
+	if (g_error_details_set || g_error_verbosity == 0) {
+		return;
+	}
+
+	// First-set-wins is tracked separately from the payload length: a
+	// subcode-only call at verbosity 1 with AS_SUB_NONE produces no wire
+	// bytes (see below), but it still claims the slot so that an outer
+	// fallback can't overwrite a deeper site's deliberate "no subcode".
+	g_error_details_set = true;
+
+	bool has_subcode = subcode != AS_SUB_NONE;
+
+	// Only verbosity >= 2 carries a message; verbosity 1 emits the subcode
+	// alone. Both shapes are built by the single packer below - a verbosity-1
+	// call just leaves message_len at 0.
+	char message[AS_ERROR_MESSAGE_MAX];
+	uint32_t message_len = 0;
+
+	if (g_error_verbosity >= 2) {
+		va_list ap;
+		va_start(ap, format);
+		int n = vsnprintf(message, sizeof(message), format, ap);
+		va_end(ap);
+
+		if (n > 0) {
+			message_len = (uint32_t)n;
+
+			if (message_len > sizeof(message) - 1) {
+				message_len = sizeof(message) - 1;
+			}
+		}
+	}
+
+	bool has_message = message_len > 0;
+
+	// Neither a dispatchable subcode nor a message - nothing to convey, so
+	// omit field 45 entirely instead of emitting an empty map.
+	if (! has_subcode && ! has_message) {
+		return;
+	}
+
+	as_packer pk = { .buffer = g_error_details, .capacity = AS_ERROR_DETAILS_MAX };
+
+	as_pack_map_header(&pk, (has_subcode ? 1 : 0) + (has_message ? 1 : 0));
+
+	if (has_subcode) {
+		as_pack_uint64(&pk, AS_ERROR_DETAIL_KEY_SUBCODE);
+		as_pack_uint64(&pk, subcode);
+	}
+
+	if (has_message) {
+		as_pack_uint64(&pk, AS_ERROR_DETAIL_KEY_MESSAGE);
+
+		if (as_pack_str(&pk, (const uint8_t*)message, message_len) != 0) {
+			cf_crash(AS_PROTO,
+					"error detail message didn't fit - "
+					"check AS_ERROR_MSGPACK_OVERHEAD");
+		}
+	}
+
+	g_error_details_len = pk.offset;
+}
+
+const uint8_t*
+as_error_msg_peek(uint32_t* len)
+{
+	if (len != NULL) {
+		*len = g_error_details_len;
+	}
+
+	return g_error_details_len == 0 ? NULL : g_error_details;
 }
 
 //==========================================================
@@ -171,10 +259,12 @@ cl_msg*
 as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 		uint32_t void_time, as_msg_op** ops, as_bin** bins, uint16_t bin_count,
 		as_namespace* ns, cl_msg* msgp_in, size_t* msg_sz_in,
-		as_record_version* v, uint32_t mrt_deadline)
+		as_record_version* v, uint32_t mrt_deadline, bool include_error_msg)
 {
 	uint16_t n_fields = 0;
 	size_t msg_sz = sizeof(cl_msg);
+	error_msg_field err_field =
+			error_msg_field_prep(include_error_msg, result_code != AS_OK);
 
 	if (v != NULL) {
 		n_fields++;
@@ -184,6 +274,11 @@ as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 	if (mrt_deadline != 0) {
 		n_fields++;
 		msg_sz += sizeof(as_msg_field) + sizeof(uint32_t);
+	}
+
+	if (err_field.add) {
+		n_fields++;
+		msg_sz += sizeof(as_msg_field) + err_field.len;
 	}
 
 	msg_sz += sizeof(as_msg_op) * bin_count;
@@ -261,6 +356,8 @@ as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 		buf += sizeof(as_msg_field) + sizeof(uint32_t);
 	}
 
+	error_msg_field_write(&buf, &err_field);
+
 	for (uint16_t i = 0; i < bin_count; i++) {
 		as_msg_op* op = (as_msg_op*)buf;
 
@@ -292,10 +389,13 @@ as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 int32_t
 as_msg_make_response_bufbuilder(cf_buf_builder** bb_r, as_storage_rd* rd,
 		bool no_bin_data, const cf_vector* select_bins, bool send_bval,
-		int64_t bval)
+		int64_t bval, bool include_error_msg)
 {
 	as_namespace* ns = rd->ns;
 	as_record* r = rd->r;
+	// This builder only ever emits a successful record read (result_code is
+	// always AS_OK), so error details never belong on it - is_error is false.
+	error_msg_field err_field = error_msg_field_prep(include_error_msg, false);
 
 	size_t ns_len = strlen(ns->name);
 	const char* set_name = as_index_get_set_name(r, ns);
@@ -307,6 +407,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder** bb_r, as_storage_rd* rd,
 	if (r->key_stored == 1) {
 		if (! as_storage_rd_load_key(rd)) {
 			cf_warning(AS_PROTO, "can't get key - skipping record");
+			as_error_msg_clear();
 			return -1;
 		}
 
@@ -331,6 +432,11 @@ as_msg_make_response_bufbuilder(cf_buf_builder** bb_r, as_storage_rd* rd,
 	if (send_bval) {
 		n_fields++;
 		msg_sz += sizeof(as_msg_field) + sizeof(bval);
+	}
+
+	if (err_field.add) {
+		n_fields++;
+		msg_sz += sizeof(as_msg_field) + err_field.len;
 	}
 
 	uint32_t n_select_bins = 0;
@@ -368,6 +474,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder** bb_r, as_storage_rd* rd,
 
 			// Don't return an empty record.
 			if (n_bins_returned == 0) {
+				as_error_msg_clear();
 				return 0;
 			}
 		}
@@ -466,6 +573,8 @@ as_msg_make_response_bufbuilder(cf_buf_builder** bb_r, as_storage_rd* rd,
 		as_msg_swap_field(mf);
 		buf += sizeof(as_msg_field) + sizeof(bval);
 	}
+
+	error_msg_field_write(&buf, &err_field);
 
 	if (no_bin_data) {
 		return (int32_t)msg_sz;
@@ -577,14 +686,22 @@ as_msg_fin_bufbuilder(cf_buf_builder** bb_r, int result)
 
 cl_msg*
 as_msg_make_no_val_response(uint32_t result_code, uint32_t generation,
-		uint32_t void_time, as_record_version* v, size_t* p_msg_sz)
+		uint32_t void_time, as_record_version* v, size_t* p_msg_sz,
+		bool include_error_msg)
 {
 	uint16_t n_fields = 0;
 	size_t msg_sz = sizeof(cl_msg);
+	error_msg_field err_field =
+			error_msg_field_prep(include_error_msg, result_code != AS_OK);
 
 	if (v != NULL) {
 		n_fields++;
 		msg_sz += sizeof(as_msg_field) + sizeof(as_record_version);
+	}
+
+	if (err_field.add) {
+		n_fields++;
+		msg_sz += sizeof(as_msg_field) + err_field.len;
 	}
 
 	uint8_t* buf = cf_malloc(msg_sz);
@@ -624,6 +741,8 @@ as_msg_make_no_val_response(uint32_t result_code, uint32_t generation,
 		buf += sizeof(as_msg_field) + sizeof(as_record_version);
 	}
 
+	error_msg_field_write(&buf, &err_field);
+
 	*p_msg_sz = msg_sz;
 
 	return msgp;
@@ -632,10 +751,15 @@ as_msg_make_no_val_response(uint32_t result_code, uint32_t generation,
 cl_msg*
 as_msg_make_val_response(bool success, const as_val* val, uint32_t result_code,
 		uint32_t generation, uint32_t void_time, as_record_version* v,
-		size_t* p_msg_sz)
+		size_t* p_msg_sz, bool include_error_msg)
 {
 	const char* bin_name;
 	size_t bin_name_len;
+	// A FAILURE bin (success false) is the error response; a SUCCESS bin must
+	// not carry error details (e.g. a UDF that swallows a sub-error then
+	// returns success).
+	error_msg_field err_field =
+			error_msg_field_prep(include_error_msg, ! success);
 
 	if (success) {
 		bin_name = SUCCESS_BIN_NAME;
@@ -652,6 +776,11 @@ as_msg_make_val_response(bool success, const as_val* val, uint32_t result_code,
 	if (v != NULL) {
 		n_fields++;
 		msg_sz += sizeof(as_msg_field) + sizeof(as_record_version);
+	}
+
+	if (err_field.add) {
+		n_fields++;
+		msg_sz += sizeof(as_msg_field) + err_field.len;
 	}
 
 	msg_sz += sizeof(as_msg_op) + bin_name_len +
@@ -694,6 +823,8 @@ as_msg_make_val_response(bool success, const as_val* val, uint32_t result_code,
 		buf += sizeof(as_msg_field) + sizeof(as_record_version);
 	}
 
+	error_msg_field_write(&buf, &err_field);
+
 	as_msg_op* op = (as_msg_op*)buf;
 
 	op->op = AS_MSG_OP_READ;
@@ -716,10 +847,14 @@ as_msg_make_val_response(bool success, const as_val* val, uint32_t result_code,
 // as_particle_asval_client_value_size() for same val.
 void
 as_msg_make_val_response_bufbuilder(const as_val* val, cf_buf_builder** bb_r,
-		uint32_t val_sz, bool success)
+		uint32_t val_sz, bool success, bool include_error_msg)
 {
 	const char* bin_name;
 	size_t bin_name_len;
+	// A FAILURE bin (success false) is the error response; a SUCCESS bin must
+	// not carry error details.
+	error_msg_field err_field =
+			error_msg_field_prep(include_error_msg, ! success);
 
 	if (success) {
 		bin_name = SUCCESS_BIN_NAME;
@@ -731,6 +866,10 @@ as_msg_make_val_response_bufbuilder(const as_val* val, cf_buf_builder** bb_r,
 	}
 
 	size_t msg_sz = sizeof(as_msg) + sizeof(as_msg_op) + bin_name_len + val_sz;
+
+	if (err_field.add) {
+		msg_sz += sizeof(as_msg_field) + err_field.len;
+	}
 
 	uint8_t* buf;
 
@@ -747,12 +886,16 @@ as_msg_make_val_response_bufbuilder(const as_val* val, cf_buf_builder** bb_r,
 	m->generation = 0;
 	m->record_ttl = 0;
 	m->transaction_ttl = 0;
-	m->n_fields = 0;
+	m->n_fields = err_field.add ? 1 : 0;
 	m->n_ops = 1; // only the one special bin
 
 	as_msg_swap_header(m);
 
-	as_msg_op* op = (as_msg_op*)m->data;
+	uint8_t* dbuf = m->data;
+
+	error_msg_field_write(&dbuf, &err_field);
+
+	as_msg_op* op = (as_msg_op*)dbuf;
 
 	op->op = AS_MSG_OP_READ;
 	op->name_sz = (uint8_t)bin_name_len;
@@ -772,15 +915,15 @@ as_msg_make_val_response_bufbuilder(const as_val* val, cf_buf_builder** bb_r,
 
 // Make an individual transaction response and send it.
 int
-as_msg_send_reply(as_file_handle* fd_h, uint32_t result_code,
-		uint32_t generation, uint32_t void_time, as_msg_op** ops, as_bin** bins,
-		uint16_t bin_count, as_namespace* ns, as_record_version* v)
+as_msg_send_reply(as_file_handle* fd_h, uint32_t result_code, uint32_t generation,
+		uint32_t void_time, as_msg_op** ops, as_bin** bins, uint16_t bin_count,
+		as_namespace* ns, as_record_version* v, bool include_error_msg)
 {
 	uint8_t stack_buf[MSG_STACK_BUFFER_SZ];
 	size_t msg_sz = sizeof(stack_buf);
 	uint8_t* msgp = (uint8_t*)as_msg_make_response_msg(result_code, generation,
 			void_time, ops, bins, bin_count, ns, (cl_msg*)stack_buf, &msg_sz, v,
-			0);
+			0, include_error_msg);
 
 	int rv = send_reply_buf(fd_h, msgp, msg_sz);
 

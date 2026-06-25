@@ -2406,6 +2406,8 @@ buffer_bins(as_storage_rd* rd)
 	if (flat_w_mark_sz > limit_sz) {
 		cf_detail(AS_DRV_MEM, "{%s} write: size %u - rejecting %pD", ns->name,
 				flat_w_mark_sz, &r->keyd);
+		as_error_details_set_fmt(AS_SUB_NONE, "record too big: %u > %u",
+				flat_w_mark_sz, limit_sz);
 		return -AS_ERR_RECORD_TOO_BIG;
 	}
 
@@ -2446,6 +2448,7 @@ buffer_bins(as_storage_rd* rd)
 		if (! mwb) {
 			cf_ticker_warning(AS_DRV_MEM, "{%s} out of space", ns->name);
 			cf_mutex_unlock(&cur_mwb->base.lock);
+			as_error_details_set_fmt(AS_SUB_NONE, "{%s} out of space", ns->name);
 			return -AS_ERR_OUT_OF_SPACE;
 		}
 
@@ -2478,6 +2481,7 @@ buffer_bins(as_storage_rd* rd)
 		if (! mwb) {
 			cf_ticker_warning(AS_DRV_MEM, "{%s} out of space", ns->name);
 			cf_mutex_unlock(&cur_mwb->base.lock);
+			as_error_details_set_fmt(AS_SUB_NONE, "{%s} out of space", ns->name);
 
 			// Outside lock to not block other threads trying to write to new mwb.
 			release_old_mwb(mem, old_mwb);

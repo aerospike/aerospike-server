@@ -356,6 +356,8 @@ as_udf_start(as_transaction* tr)
 
 	// Apply XDR filter.
 	if (! xdr_allows_write(tr)) {
+		as_error_details_set_fmt(AS_SUB_FORBID_XDR_FILTER_BLOCKED,
+				"UDF write blocked by XDR write filter");
 		tr->result_code = AS_ERR_FORBIDDEN;
 		send_udf_response(tr, NULL);
 		return TRANS_DONE;
@@ -629,7 +631,8 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 		else {
 			as_msg_send_reply(tr->from.proto_fd_h, tr->result_code,
 					tr->generation, tr->void_time, NULL, NULL, 0, tr->rsv.ns,
-					mrt_read_fill_version(&v, tr));
+					mrt_read_fill_version(&v, tr),
+					as_msg_include_error_details(tr->msgp->msg.info4));
 		}
 		BENCHMARK_NEXT_DATA_POINT(tr, udf, response);
 		HIST_ACTIVATE_INSERT_DATA_POINT(tr, udf_hist);
@@ -646,7 +649,8 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 			as_proxy_send_response(tr->from.proxy_orig->node,
 					tr->from_data.proxy_tid, tr->result_code, tr->generation,
 					tr->void_time, NULL, NULL, 0, tr->rsv.ns,
-					mrt_read_fill_version(&v, tr));
+					mrt_read_fill_version(&v, tr),
+					as_msg_include_error_details(tr->msgp->msg.info4));
 		}
 		if (as_transaction_is_batch_sub(tr)) {
 			from_proxy_batch_sub_udf_update_stats(tr->rsv.ns, tr->result_code);
@@ -696,7 +700,8 @@ udf_timeout_cb(rw_request* rw)
 	switch (rw->origin) {
 	case FROM_CLIENT:
 		as_msg_send_reply(rw->from.proto_fd_h, AS_ERR_TIMEOUT, 0, 0, NULL, NULL,
-				0, rw->rsv.ns, NULL);
+				0, rw->rsv.ns, NULL,
+				as_msg_include_error_details(rw->msgp->msg.info4));
 		// Timeouts aren't included in histograms.
 		client_udf_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		break;
@@ -742,6 +747,8 @@ udf_master(rw_request* rw, as_transaction* tr)
 	}
 	else if (! udf_def_init_from_msg(call.def, tr)) {
 		cf_warning(AS_UDF, "failed udf_def_init_from_msg");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"UDF definition parameters invalid in request");
 		tr->result_code = AS_ERR_PARAMETER;
 		return TRANS_DONE;
 	}
@@ -770,6 +777,8 @@ udf_master_apply(udf_call* call, rw_request* rw)
 
 	if (has_forbidden_policy(&tr->msgp->msg)) {
 		cf_warning(AS_UDF, "udf applied with forbidden policy");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"generation, create-only, update-only, replace-only, and create-or-replace flags forbidden on UDF requests");
 		tr->result_code = AS_ERR_PARAMETER;
 		return UDF_OPTYPE_NONE;
 	}
@@ -1147,11 +1156,16 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 
 	if (! is_valid_ttl(m->record_ttl)) {
 		cf_warning(AS_UDF, "invalid ttl %u", m->record_ttl);
+		as_error_details_set_fmt(AS_SUB_PARAM_TTL_INVALID,
+				"invalid record TTL %u", m->record_ttl);
 		return AS_ERR_PARAMETER;
 	}
 
 	if (is_ttl_disallowed(m->record_ttl, ns, as_namespace_get_record_set(ns, r))) {
 		cf_ticker_warning(AS_UDF, "disallowed ttl with nsup-period 0");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"non-zero record TTL %u not allowed when namespace nsup-period is 0",
+				m->record_ttl);
 		return AS_ERR_FORBIDDEN;
 	}
 
@@ -1162,6 +1176,8 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 	if (is_delete) {
 		if (urecord->n_old_bins == 0 || ! as_record_is_live(r)) {
 			// Didn't exist or was bin cemetery (tombstone bit not yet updated).
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"UDF delete: record not found or no live bins");
 			return AS_ERR_NOT_FOUND;
 		}
 
@@ -1480,6 +1496,7 @@ process_response(as_transaction* tr, bool success, bool had_updates,
 	as_record_version stack_v;
 	as_record_version* v = had_updates ? mrt_write_fill_version(&stack_v, tr)
 									   : mrt_read_fill_version(&stack_v, tr);
+	bool include_error_msg = as_msg_include_error_details(tr->msgp->msg.info4);
 
 	size_t msg_sz = 0;
 
@@ -1489,7 +1506,7 @@ process_response(as_transaction* tr, bool success, bool had_updates,
 		// better off without it.)
 
 		db->buf = (uint8_t*)as_msg_make_no_val_response(tr->result_code,
-				tr->generation, tr->void_time, v, &msg_sz);
+				tr->generation, tr->void_time, v, &msg_sz, include_error_msg);
 	}
 	else {
 		// Note - this function quietly handles a null val. The response will
@@ -1497,7 +1514,8 @@ process_response(as_transaction* tr, bool success, bool had_updates,
 		// clients/apps handle.
 
 		db->buf = (uint8_t*)as_msg_make_val_response(success, val,
-				tr->result_code, tr->generation, tr->void_time, v, &msg_sz);
+				tr->result_code, tr->generation, tr->void_time, v, &msg_sz,
+				include_error_msg);
 	}
 
 	db->is_stack = false;

@@ -414,7 +414,18 @@ repl_write_handle_ack(cf_node node, msg* m)
 
 	// Success for all replicas.
 	repl_write_send_confirmation(rw);
+
+	// Continuation runs on a fabric thread - re-arm error-detail verbosity from
+	// the client's info4 bits (carried in rw->msgp), mirroring the service
+	// thread.
+	as_error_msg_arm_from_msgp(rw->msgp);
+
 	rw->repl_write_cb(rw);
+
+	// Keep the no-leak property local to this fabric handler: if the cb
+	// deferred (built no reply) the armed verbosity/detail would otherwise
+	// persist on this thread until the next continuation re-arms.
+	as_error_msg_clear();
 
 	rw->repl_write_complete = true;
 

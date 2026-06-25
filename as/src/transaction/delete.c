@@ -208,6 +208,8 @@ as_delete_start(as_transaction* tr)
 {
 	// Apply XDR filter.
 	if (! xdr_allows_write(tr)) {
+		as_error_details_set_fmt(AS_SUB_FORBID_XDR_FILTER_BLOCKED,
+				"delete blocked by XDR write filter");
 		tr->result_code = AS_ERR_FORBIDDEN;
 		send_delete_response(tr);
 		return TRANS_DONE;
@@ -216,12 +218,15 @@ as_delete_start(as_transaction* tr)
 	int result = validate_delete_durability(tr);
 
 	if (result != AS_OK) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"delete durability validation failed");
 		tr->result_code = result;
 		send_delete_response(tr);
 		return TRANS_DONE;
 	}
 
 	if (delete_storage_overloaded(tr)) {
+		as_error_details_set_fmt(AS_SUB_NONE, "delete blocked: storage overload");
 		tr->result_code = AS_ERR_DEVICE_OVERLOAD;
 		send_delete_response(tr);
 		return TRANS_DONE;
@@ -340,6 +345,8 @@ delete_dup_res_cb(rw_request* rw)
 	as_transaction_init_from_rw(&tr, rw);
 
 	if (tr.result_code != AS_OK) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"delete duplicate resolution failed");
 		send_delete_response(&tr);
 		return true;
 	}
@@ -433,14 +440,16 @@ send_delete_response(as_transaction* tr)
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		as_msg_send_reply(tr->from.proto_fd_h, tr->result_code, 0, 0, NULL,
-				NULL, 0, tr->rsv.ns, mrt_write_fill_version(&v, tr));
+				NULL, 0, tr->rsv.ns, mrt_write_fill_version(&v, tr),
+				as_msg_include_error_details(tr->msgp->msg.info4));
 		client_delete_update_stats(tr->rsv.ns, tr->result_code,
 				as_transaction_is_xdr(tr));
 		break;
 	case FROM_PROXY:
 		as_proxy_send_response(tr->from.proxy_orig->node,
 				tr->from_data.proxy_tid, tr->result_code, 0, 0, NULL, NULL, 0,
-				tr->rsv.ns, mrt_write_fill_version(&v, tr));
+				tr->rsv.ns, mrt_write_fill_version(&v, tr),
+				as_msg_include_error_details(tr->msgp->msg.info4));
 		proxy_origin_destroy(tr->from.proxy_orig);
 		if (as_transaction_is_batch_sub(tr)) {
 			from_proxy_batch_sub_delete_update_stats(tr->rsv.ns, tr->result_code);
@@ -480,7 +489,8 @@ delete_timeout_cb(rw_request* rw)
 	switch (rw->origin) {
 	case FROM_CLIENT:
 		as_msg_send_reply(rw->from.proto_fd_h, AS_ERR_TIMEOUT, 0, 0, NULL, NULL,
-				0, rw->rsv.ns, NULL);
+				0, rw->rsv.ns, NULL,
+				as_msg_include_error_details(rw->msgp->msg.info4));
 		client_delete_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT,
 				as_msg_is_xdr(&rw->msgp->msg));
 		break;
@@ -527,6 +537,7 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 	if (! generation_check(r, m, ns)) {
 		as_record_done(r_ref, ns);
 		as_incr_uint64(&ns->n_fail_generation);
+		as_error_details_set_fmt(AS_SUB_NONE, "delete generation mismatch");
 		tr->result_code = AS_ERR_GENERATION;
 		return TRANS_DONE;
 	}
@@ -538,6 +549,15 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 
 	if (result != 0) {
 		as_record_done(r_ref, ns);
+
+		// Only attach the "filtered out" detail on a genuine FILTERED_OUT
+		// result. Other results (e.g. AS_ERR_PARAMETER from a failed eval)
+		// already had their detail set by handle_meta_filter().
+		if (result == AS_ERR_FILTERED_OUT) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"delete filtered out by metadata filter");
+		}
+
 		tr->result_code = result;
 		return TRANS_DONE;
 	}
@@ -572,6 +592,14 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 				destroy_filter_exp(tr, filter_exp);
 				as_storage_record_close(&rd);
 				as_record_done(r_ref, ns);
+
+				if (result == AS_ERR_FILTERED_OUT) {
+					as_error_details_set_fmt(AS_SUB_NONE,
+							"delete filtered out by bins expression");
+				}
+				// Else: non-FILTERED status, detail already set by
+				// read_and_filter_bins().
+
 				tr->result_code = result;
 				return TRANS_DONE;
 			}
@@ -584,6 +612,8 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 		if (check_key && as_storage_rd_load_key(&rd) && ! check_msg_key(m, &rd)) {
 			as_storage_record_close(&rd);
 			as_record_done(r_ref, ns);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"user key in request does not match stored key");
 			tr->result_code = AS_ERR_KEY_MISMATCH;
 			return TRANS_DONE;
 		}
@@ -598,6 +628,8 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 						ns->name, &tr->keyd);
 				as_storage_record_close(&rd);
 				as_record_done(r_ref, ns);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"delete failed to read record from storage");
 				tr->result_code = -result;
 				return TRANS_DONE;
 			}
@@ -607,6 +639,11 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 				if (as_bin_is_live(b) && as_masking_apply(rd.mask_ctx, NULL, b)) {
 					as_storage_record_close(&rd);
 					as_record_done(r_ref, ns);
+					// Masking violations return AS_SEC_ERR_ROLE_VIOLATION, not a
+					// FORBID-family status - emit no subcode to stay coherent.
+					as_error_details_set_fmt(AS_SUB_NONE,
+							"delete blocked by masking policy on bin %s",
+							b->name);
 					tr->result_code = as_masking_log_violation(tr, "delete",
 							"masking: blocked deleting masked bin", b->name,
 							strlen(b->name));

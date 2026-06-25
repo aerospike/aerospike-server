@@ -409,6 +409,7 @@ void cdt_payload_pack_double(cdt_payload* packed, double value);
 // cdt_process_state
 bool cdt_process_state_get_params(cdt_process_state* state, size_t n, ...);
 const char* cdt_process_state_get_op_name(const cdt_process_state* state);
+const char* cdt_result_type_str(result_type_t type);
 
 // cdt_process_state_packed_list
 bool cdt_process_state_packed_list_modify_optype(cdt_process_state* state,

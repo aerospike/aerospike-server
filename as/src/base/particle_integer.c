@@ -125,6 +125,8 @@ integer_concat_size_from_wire(as_particle_type wire_type,
 		const uint8_t* wire_value, uint32_t value_size, as_particle** pp)
 {
 	cf_warning(AS_PARTICLE, "concat size for integer/float/bool");
+	as_error_details_set_fmt(AS_SUB_NONE,
+			"cannot append/prepend to numeric/bool bin");
 	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
@@ -133,6 +135,7 @@ integer_append_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		uint32_t value_size, as_particle** pp)
 {
 	cf_warning(AS_PARTICLE, "append to integer/float/bool");
+	as_error_details_set_fmt(AS_SUB_NONE, "cannot append to numeric/bool bin");
 	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
@@ -141,6 +144,7 @@ integer_prepend_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		uint32_t value_size, as_particle** pp)
 {
 	cf_warning(AS_PARTICLE, "prepend to integer/float/bool");
+	as_error_details_set_fmt(AS_SUB_NONE, "cannot prepend to numeric/bool bin");
 	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
@@ -150,6 +154,9 @@ integer_incr_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 {
 	if (wire_type != AS_PARTICLE_TYPE_INTEGER) {
 		cf_warning(AS_PARTICLE, "increment with non integer type %u", wire_type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cannot increment integer bin with non-integer operand (type %s)",
+				as_particle_type_str(wire_type));
 		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
@@ -178,6 +185,8 @@ integer_incr_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		break;
 	default:
 		cf_warning(AS_PARTICLE, "unexpected value size %u", value_size);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"integer increment: unexpected value size %u", value_size);
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -214,6 +223,8 @@ integer_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		break;
 	default:
 		cf_warning(AS_PARTICLE, "unexpected value size %u", value_size);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"integer bin write: unexpected value size %u", value_size);
 		return -AS_ERR_PARAMETER;
 	}
 

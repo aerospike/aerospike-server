@@ -2188,7 +2188,7 @@ basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 
 	if (job->no_bin_data) {
 		as_msg_make_response_bufbuilder(slice->bb_r, &rd, true, NULL,
-				_job->si != NULL, bval);
+				_job->si != NULL, bval, false);
 	}
 	else {
 		as_bin stack_bins[RECORD_MAX_BINS];
@@ -2220,7 +2220,7 @@ basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 		}
 		else {
 			as_msg_make_response_bufbuilder(slice->bb_r, &rd, false,
-					job->bin_names, _job->si != NULL, bval);
+					job->bin_names, _job->si != NULL, bval, false);
 		}
 	}
 
@@ -2959,7 +2959,7 @@ aggr_query_add_val_response(aggr_query_slice* slice, const as_val* val,
 		return;
 	}
 
-	as_msg_make_val_response_bufbuilder(val, slice->bb_r, size, success);
+	as_msg_make_val_response_bufbuilder(val, slice->bb_r, size, success, false);
 	bb = *slice->bb_r;
 
 	conn_query_job* conn_job = (conn_query_job*)slice->job;

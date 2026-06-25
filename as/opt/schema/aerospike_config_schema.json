@@ -409,6 +409,14 @@
           "dynamic": false,
           "enterpriseOnly": false
         },
+        "error-details-max-verbosity": {
+          "type": "string",
+          "enum": ["off", "codes", "messages", "all"],
+          "default": "all",
+          "description": "Caps the verbosity of error details returned to the client. off=no details, codes=subcode only, messages=subcode+message, all=no restriction",
+          "dynamic": true,
+          "enterpriseOnly": false
+        },
         "feature-key-file": {
           "type": "string",
           "default": "/etc/aerospike/features.conf",

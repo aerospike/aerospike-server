@@ -330,6 +330,13 @@ udf_aerospike_get_current_time(const as_aerospike* as)
 static int
 execute_updates(udf_record* urecord)
 {
+	// A UDF may invoke several record-API calls; if an earlier one armed an
+	// error detail and the script swallowed the failure (e.g. via pcall),
+	// first-set-wins would pin that stale detail - blocking this attempt from
+	// arming its own and leaving the stale one to ride out on a later
+	// response. Clear so each apply attempt reflects its own outcome.
+	as_error_msg_clear();
+
 	as_storage_rd* rd = urecord->rd;
 	as_namespace* ns = rd->ns;
 
@@ -338,6 +345,8 @@ execute_updates(udf_record* urecord)
 	}
 
 	if (ns->clock_skew_stop_writes) {
+		as_error_details_set_fmt(AS_SUB_FORBID_CLOCK_SKEW_STOP_WRITES,
+				"UDF execute blocked: clock skew stop-writes active");
 		execute_failed(urecord, AS_ERR_FORBIDDEN);
 		return -1;
 	}
@@ -352,6 +361,8 @@ execute_updates(udf_record* urecord)
 	if (as_set_size_stop_writes(p_set)) {
 		cf_ticker_warning(AS_UDF, "{%s|%s} at stop-writes-size - can't execute",
 				ns->name, p_set->name);
+		as_error_details_set_fmt(AS_SUB_FORBID_SET_SIZE_STOP_WRITES,
+				"UDF execute blocked: set '%s' at stop-writes-size", p_set->name);
 		execute_failed(urecord, AS_ERR_FORBIDDEN);
 		return -1;
 	}
@@ -451,11 +462,15 @@ execute_set_bin(udf_record* urecord, const char* name, const as_val* val)
 
 	if (as_particle_type_from_asval(val) == AS_PARTICLE_TYPE_NULL) {
 		cf_warning(AS_UDF, "setting bin %s with unusable as_val", name);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"UDF tried to set bin '%s' with unusable value type", name);
 		return AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
 	if (rd->n_bins == UDF_BIN_LIMIT && eb == NULL) {
 		cf_warning(AS_UDF, "exceeded UDF max bins %d", UDF_BIN_LIMIT);
+		as_error_details_set_fmt(AS_SUB_BIN_NAME_COUNT_TOO_LARGE,
+				"UDF exceeded max bins per record (%d)", UDF_BIN_LIMIT);
 		return AS_ERR_BIN_NAME;
 	}
 
@@ -473,6 +488,9 @@ execute_set_bin(udf_record* urecord, const char* name, const as_val* val)
 	if (as_masking_type_mismatch(rd->mask_ctx, b)) {
 		cf_warning(AS_UDF,
 				"udf would create masked bin with type that does not match rule, bin: %s",
+				name);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"UDF would create masked bin '%s' with type that does not match masking rule",
 				name);
 		return AS_ERR_INCOMPATIBLE_TYPE;
 	}

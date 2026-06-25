@@ -159,6 +159,7 @@ geojson_concat_size_from_wire(as_particle_type wire_type,
 		const uint8_t* wire_value, uint32_t value_size, as_particle** pp)
 {
 	cf_warning(AS_PARTICLE, "invalid operation on geojson particle");
+	as_error_details_set_fmt(AS_SUB_NONE, "cannot append/prepend to geojson bin");
 	return -1;
 }
 
@@ -167,6 +168,7 @@ geojson_append_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		uint32_t value_size, as_particle** pp)
 {
 	cf_warning(AS_PARTICLE, "invalid operation on geojson particle");
+	as_error_details_set_fmt(AS_SUB_NONE, "cannot append to geojson bin");
 	return -1;
 }
 
@@ -175,6 +177,7 @@ geojson_prepend_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		uint32_t value_size, as_particle** pp)
 {
 	cf_warning(AS_PARTICLE, "invalid operation on geojson particle");
+	as_error_details_set_fmt(AS_SUB_NONE, "cannot prepend to geojson bin");
 	return -1;
 }
 
@@ -183,6 +186,7 @@ geojson_incr_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		uint32_t value_size, as_particle** pp)
 {
 	cf_warning(AS_PARTICLE, "invalid operation on geojson particle");
+	as_error_details_set_fmt(AS_SUB_NONE, "cannot increment geojson bin");
 	return -1;
 }
 
@@ -206,6 +210,9 @@ geojson_size_from_wire(const uint8_t* wire_value, uint32_t value_size)
 		cf_warning(AS_PARTICLE,
 				"geojson_size_from_wire() invalid geojson wire_sz %u < cellsz %zu + 3",
 				value_size, cellsz);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"invalid geojson: value size %u, minimum is %zu", value_size,
+				sizeof(uint8_t) + sizeof(uint16_t) + cellsz);
 		return -AS_ERR_GEO_INVALID_GEOJSON;
 	}
 
@@ -231,6 +238,7 @@ geojson_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 
 	if (! as_geojson_to_particle(json, jlen, pp)) {
 		cf_warning(AS_PARTICLE, "geojson_from_wire() failed");
+		as_error_details_set_fmt(AS_SUB_NONE, "invalid geojson data");
 		return -AS_ERR_GEO_INVALID_GEOJSON;
 	}
 

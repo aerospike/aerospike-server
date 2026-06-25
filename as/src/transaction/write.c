@@ -29,6 +29,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
@@ -235,6 +236,8 @@ as_write_start(as_transaction* tr)
 
 	// Apply XDR filter.
 	if (! xdr_allows_write(tr)) {
+		as_error_details_set_fmt(AS_SUB_FORBID_XDR_FILTER_BLOCKED,
+				"write blocked by XDR write filter");
 		tr->result_code = AS_ERR_FORBIDDEN;
 		send_write_response(tr, NULL);
 		return TRANS_DONE;
@@ -480,7 +483,8 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 		else {
 			as_msg_send_reply(tr->from.proto_fd_h, tr->result_code,
 					tr->generation, tr->void_time, NULL, NULL, 0, tr->rsv.ns,
-					mrt_write_fill_version(&v, tr));
+					mrt_write_fill_version(&v, tr),
+					as_msg_include_error_details(tr->msgp->msg.info4));
 		}
 		BENCHMARK_NEXT_DATA_POINT(tr, write, response);
 		HIST_ACTIVATE_INSERT_DATA_POINT(tr, write_hist);
@@ -498,7 +502,8 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 			as_proxy_send_response(tr->from.proxy_orig->node,
 					tr->from_data.proxy_tid, tr->result_code, tr->generation,
 					tr->void_time, NULL, NULL, 0, tr->rsv.ns,
-					mrt_write_fill_version(&v, tr));
+					mrt_write_fill_version(&v, tr),
+					as_msg_include_error_details(tr->msgp->msg.info4));
 		}
 		proxy_origin_destroy(tr->from.proxy_orig);
 		if (as_transaction_is_batch_sub(tr)) {
@@ -549,7 +554,8 @@ write_timeout_cb(rw_request* rw)
 	switch (rw->origin) {
 	case FROM_CLIENT:
 		as_msg_send_reply(rw->from.proto_fd_h, AS_ERR_TIMEOUT, 0, 0, NULL, NULL,
-				0, rw->rsv.ns, NULL);
+				0, rw->rsv.ns, NULL,
+				as_msg_include_error_details(rw->msgp->msg.info4));
 		// Timeouts aren't included in histograms.
 		client_write_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT,
 				as_msg_is_xdr(&rw->msgp->msg));
@@ -611,6 +617,8 @@ write_master(rw_request* rw, as_transaction* tr)
 
 	int result = write_master_policies(tr, &must_not_create, &is_replace);
 
+	// NOTE: Not setting error details here because it's
+	// already set in write_master_policies().
 	if (result != 0) {
 		write_master_failed(tr, NULL, NULL, NULL, result);
 		return TRANS_DONE;
@@ -639,12 +647,16 @@ write_master(rw_request* rw, as_transaction* tr)
 
 		r = r_ref.r;
 
+		// NOTE: Not setting error details here because it's
+		// already set in mrt_allow_write().
 		if ((result = mrt_allow_write(tr, r)) != 0) {
 			write_master_failed(tr, &r_ref, tree, NULL, result);
 			return TRANS_DONE;
 		}
 
 		if (rv != 0) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"record not found (update-only or replace-only)");
 			write_master_failed(tr, NULL, tree, NULL, AS_ERR_NOT_FOUND);
 			return TRANS_DONE;
 		}
@@ -665,6 +677,8 @@ write_master(rw_request* rw, as_transaction* tr)
 		}
 
 		if (! as_record_is_live(r)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"record is not live (tombstone or previously-deleted bin)");
 			write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_NOT_FOUND);
 			return TRANS_DONE;
 		}
@@ -673,8 +687,10 @@ write_master(rw_request* rw, as_transaction* tr)
 		int rv = as_record_get_create(tree, &tr->keyd, &r_ref, ns);
 
 		if (rv < 0) {
+			// TODO: Should we log here?
 			cf_detail(AS_RW, "{%s} write_master: fail as_record_get_create() %pD",
 					ns->name, &tr->keyd);
+			as_error_details_set_fmt(AS_SUB_NONE, "record get/create failed");
 			write_master_failed(tr, NULL, tree, NULL, AS_ERR_UNKNOWN);
 			return TRANS_DONE;
 		}
@@ -682,6 +698,8 @@ write_master(rw_request* rw, as_transaction* tr)
 		r = r_ref.r;
 		record_created = rv == 1; // also equivalent to r->generation == 0
 
+		// NOTE: Not setting error details here because it's
+		// already set in mrt_allow_write().
 		if ((result = mrt_allow_write(tr, r)) != 0) {
 			write_master_failed(tr, &r_ref, tree, NULL, result);
 			return TRANS_DONE;
@@ -711,18 +729,23 @@ write_master(rw_request* rw, as_transaction* tr)
 	// Enforce record-level create-only existence policy.
 	if ((m->info2 & AS_MSG_INFO2_CREATE_ONLY) != 0 && ! record_created &&
 			as_record_is_live(r)) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"record exists but create-only flag is set");
 		write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_RECORD_EXISTS);
 		return TRANS_DONE;
 	}
 
 	// Check MRT locking requirement, if any.
 	if (! mrt_write_on_locking_only(tr, r)) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"MRT already locked by another transaction");
 		write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_MRT_ALREADY_LOCKED);
 		return TRANS_DONE;
 	}
 
 	// Check generation requirement, if any.
 	if (! generation_check(r, m, ns)) {
+		as_error_details_set_fmt(AS_SUB_NONE, "write generation mismatch");
 		write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_GENERATION);
 		return TRANS_DONE;
 	}
@@ -737,11 +760,15 @@ write_master(rw_request* rw, as_transaction* tr)
 
 		// Don't write record if it would be truncated.
 		if (! is_mrt && as_truncate_now_is_truncated(ns, as_index_get_set_id(r))) {
+			as_error_details_set_fmt(AS_SUB_FORBID_TRUNCATED,
+					"can't create record: namespace or set is truncated");
 			write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_FORBIDDEN);
 			return TRANS_DONE;
 		}
 	}
 
+	// NOTE: Not setting error details here because it's
+	// already set in set_name_check_on_update().
 	// If record existed, check that as_msg set name matches.
 	if (! record_created && tr->origin != FROM_IOPS &&
 			(result = set_name_check_on_update(tr, r)) != 0) {
@@ -755,6 +782,8 @@ write_master(rw_request* rw, as_transaction* tr)
 	if (as_set_size_stop_writes(p_set)) {
 		cf_ticker_warning(AS_RW, "{%s|%s} at stop-writes-size - can't write",
 				ns->name, p_set->name);
+		as_error_details_set_fmt(AS_SUB_FORBID_SET_SIZE_STOP_WRITES,
+				"set %s is at stop-writes-size limit", p_set->name);
 		write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_FORBIDDEN);
 		return TRANS_DONE;
 	}
@@ -778,6 +807,8 @@ write_master(rw_request* rw, as_transaction* tr)
 
 	as_exp* filter_exp = NULL;
 
+	// NOTE: Not setting error details here because it's
+	// already set in handle_meta_filter().
 	// Handle metadata filter if present.
 	if (! record_created && as_record_is_live(r) &&
 			(result = handle_meta_filter(tr, r, &filter_exp)) != 0) {
@@ -804,6 +835,8 @@ write_master(rw_request* rw, as_transaction* tr)
 	rd.mask_ctx = as_masking_ctx_init(&ms, ns->name, p_set, NULL, tr) ? &ms
 																	  : NULL;
 
+	// NOTE: Not setting error details here because it's
+	// already set in set_mrt_id_from_msg().
 	// Add the MRT id, as appropriate.
 	if ((result = set_mrt_id_from_msg(&rd, tr)) != 0) {
 		write_master_failed(tr, &r_ref, tree, &rd, result);
@@ -815,6 +848,8 @@ write_master(rw_request* rw, as_transaction* tr)
 		return TRANS_DONE;
 	}
 
+	// NOTE: Not setting error details here because it's
+	// already set in as_mrt_monitor_write_check().
 	// Apply record bins filter if present.
 	if (filter_exp != NULL) {
 		if ((result = read_and_filter_bins(&rd, filter_exp)) != 0) {
@@ -831,6 +866,8 @@ write_master(rw_request* rw, as_transaction* tr)
 		iops_origin* origin = tr->from.iops_orig;
 
 		if (origin->check_cb != NULL && ! origin->check_cb(origin->udata, &rd)) {
+			// NOTE: Not setting error details here because it's
+			// a background query that never returns anything to the client.
 			write_master_failed(tr, &r_ref, tree, &rd, AS_ERR_NOT_FOUND);
 			return TRANS_DONE;
 		}
@@ -842,6 +879,8 @@ write_master(rw_request* rw, as_transaction* tr)
 		rd.set_name_len = strlen(set_name);
 	}
 
+	// NOTE: Not setting error details here because it's
+	// already set in handle_msg_key().
 	// Deal with key storage as needed.
 	if ((result = handle_msg_key(tr, &rd)) != 0) {
 		write_master_failed(tr, &r_ref, tree, &rd, result);
@@ -856,6 +895,8 @@ write_master(rw_request* rw, as_transaction* tr)
 
 	if (! is_valid_ttl(m->record_ttl)) {
 		cf_warning(AS_RW, "write_master: invalid ttl %u", m->record_ttl);
+		as_error_details_set_fmt(AS_SUB_PARAM_TTL_INVALID,
+				"invalid record TTL %u", m->record_ttl);
 		write_master_failed(tr, &r_ref, tree, &rd, AS_ERR_PARAMETER);
 		return TRANS_DONE;
 	}
@@ -864,10 +905,14 @@ write_master(rw_request* rw, as_transaction* tr)
 			! as_mrt_monitor_is_monitor_record(ns, r)) {
 		cf_ticker_warning(AS_RW,
 				"write_master: disallowed ttl with nsup-period 0");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"non-zero TTL not allowed when namespace nsup-period is 0");
 		write_master_failed(tr, &r_ref, tree, &rd, AS_ERR_FORBIDDEN);
 		return TRANS_DONE;
 	}
 
+	// NOTE: Not setting error details here because it's
+	// already set in set_replica_destinations().
 	// Set up the nodes to which we'll write replicas.
 	if (! set_replica_destinations(tr, rw)) {
 		write_master_failed(tr, &r_ref, tree, &rd, AS_ERR_UNAVAILABLE);
@@ -895,6 +940,8 @@ write_master(rw_request* rw, as_transaction* tr)
 
 	result = write_master_apply(tr, &r_ref, &rd, is_replace, rw, &is_delete);
 
+	// NOTE: Not setting error details here because it's
+	// already set in write_master_apply().
 	if (result != 0) {
 		write_master_failed(tr, &r_ref, tree, &rd, result);
 		return TRANS_DONE;
@@ -983,12 +1030,16 @@ write_master_preprocessing(as_transaction* tr)
 
 	if (ns->clock_skew_stop_writes) {
 		// TODO - new error code?
+		as_error_details_set_fmt(AS_SUB_FORBID_CLOCK_SKEW_STOP_WRITES,
+				"writes blocked due to clock skew");
 		write_master_failed(tr, NULL, NULL, NULL, AS_ERR_FORBIDDEN);
 		return false;
 	}
 
 	// ns->stop_writes is set by nsup if configured threshold is breached.
 	if (ns->stop_writes) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"writes blocked: namespace stop-writes threshold reached");
 		write_master_failed(tr, NULL, NULL, NULL, AS_ERR_OUT_OF_SPACE);
 		return false;
 	}
@@ -1003,6 +1054,8 @@ write_master_preprocessing(as_transaction* tr)
 			cf_warning(AS_RW,
 					"write_master: null/empty set name not allowed for namespace %s",
 					ns->name);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"null or empty set name not allowed for this namespace");
 			write_master_failed(tr, NULL, NULL, NULL, AS_ERR_PARAMETER);
 			return false;
 		}
@@ -1023,12 +1076,15 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 		cf_warning(AS_RW,
 				"{%s} write_master: bin op(s) expected, none present %pD",
 				ns->name, &tr->keyd);
+		as_error_details_set_fmt(AS_SUB_NONE, "write has no bin ops");
 		return AS_ERR_PARAMETER;
 	}
 
 	if (m->n_ops > MAX_N_OPS) {
 		cf_warning(AS_RW, "{%s} write_master: can't exceed %u bin ops %pD",
 				ns->name, MAX_N_OPS, &tr->keyd);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"request has %u bin ops, max is %u", m->n_ops, MAX_N_OPS);
 		return AS_ERR_PARAMETER;
 	}
 
@@ -1045,6 +1101,14 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 		cf_warning(AS_RW,
 				"{%s} write_master: can't replace record %pD if conflict resolving",
 				ns->name, &tr->keyd);
+		// Returns AS_ERR_PARAMETER, which is not in the FORBID subcode family,
+		// so emit no subcode to keep subcode/status coherent. (If the status is
+		// ever corrected to AS_ERR_FORBIDDEN per the TODO below, the
+		// AS_SUB_FORBID_REPLACE_CONFLICT_RESOLVING subcode would then fit.)
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"can't replace record if conflict resolving");
+		// TODO: Should this return code really be AS_ERR_PARAMETER?
+		// Seems like AS_ERR_FORBIDDEN is more appropriate.
 		return AS_ERR_PARAMETER;
 	}
 
@@ -1062,6 +1126,8 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 				cf_warning(AS_RW,
 						"{%s} write_master: touch op can't have record-level replace flag %pD",
 						ns->name, &tr->keyd);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"touch op can't have record-level replace flag");
 				return AS_ERR_PARAMETER;
 			}
 
@@ -1072,6 +1138,8 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 		if (! as_bin_name_check(op->name, op->name_sz)) {
 			cf_warning(AS_RW, "{%s} write_master: bad bin name %.*s (%u) %pD",
 					ns->name, op->name_sz, op->name, op->name_sz, &tr->keyd);
+			as_error_details_set_fmt(AS_SUB_NONE, "bad bin name %.*s (%u bytes)",
+					op->name_sz, op->name, op->name_sz);
 			return AS_ERR_BIN_NAME;
 		}
 
@@ -1080,6 +1148,8 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 				cf_warning(AS_RW,
 						"{%s} write_master: bin delete can't have record-level replace flag %pD",
 						ns->name, &tr->keyd);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"bin delete can't have record-level replace flag");
 				return AS_ERR_PARAMETER;
 			}
 		}
@@ -1088,6 +1158,8 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 				cf_warning(AS_RW,
 						"{%s} write_master: modify op can't have record-level replace flag %pD",
 						ns->name, &tr->keyd);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"modify op can't have record-level replace flag");
 				return AS_ERR_PARAMETER;
 			}
 		}
@@ -1096,6 +1168,8 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 				cf_warning(AS_RW,
 						"{%s} write_master: delete-all op can't have record-level replace flag %pD",
 						ns->name, &tr->keyd);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"delete-all op can't have record-level replace flag");
 				return AS_ERR_PARAMETER;
 			}
 
@@ -1107,6 +1181,8 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 				cf_warning(AS_RW,
 						"{%s} write_master: read-all op can't have respond-all-ops flag %pD",
 						ns->name, &tr->keyd);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"read-all op can't have respond-all-ops flag");
 				return AS_ERR_PARAMETER;
 			}
 
@@ -1114,6 +1190,8 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 				cf_warning(AS_RW,
 						"{%s} write_master: can't have more than one read-all op %pD",
 						ns->name, &tr->keyd);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"can't have more than one read-all op");
 				return AS_ERR_PARAMETER;
 			}
 
@@ -1129,6 +1207,8 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 				cf_warning(AS_RW,
 						"{%s} write_master: bits modify op can't have record-level replace flag %pD",
 						ns->name, &tr->keyd);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"bits modify op can't have record-level replace flag");
 				return AS_ERR_PARAMETER;
 			}
 		}
@@ -1141,6 +1221,8 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 				cf_warning(AS_RW,
 						"{%s} write_master: hll modify op can't have record-level replace flag %pD",
 						ns->name, &tr->keyd);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"hll modify op can't have record-level replace flag");
 				return AS_ERR_PARAMETER;
 			}
 
@@ -1155,6 +1237,8 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 				cf_warning(AS_RW,
 						"{%s} write_master: cdt modify op can't have record-level replace flag %pD",
 						ns->name, &tr->keyd);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt modify op can't have record-level replace flag");
 				return AS_ERR_PARAMETER;
 			}
 
@@ -1174,6 +1258,8 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 		cf_warning(AS_RW,
 				"{%s} write_master: has read op but read flag not set %pD",
 				ns->name, &tr->keyd);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"command has read op but read flag not set");
 		return AS_ERR_PARAMETER;
 	}
 
@@ -1181,6 +1267,8 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 		cf_warning(AS_RW,
 				"{%s} write_master: read-all op can't mix with ops that generate response bins %pD",
 				ns->name, &tr->keyd);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"read-all op can't mix with ops that generate response bins");
 		return AS_ERR_PARAMETER;
 	}
 
@@ -1188,6 +1276,8 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 		cf_warning(AS_RW,
 				"{%s} write_master: get-all flag set with no read-all op %pD",
 				ns->name, &tr->keyd);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"get-all flag set with no read-all op");
 		return AS_ERR_PARAMETER;
 	}
 
@@ -1227,6 +1317,7 @@ write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		cf_warning(AS_RW,
 				"{%s} write_master: failed as_storage_rd_load_bins() %pD",
 				ns->name, &tr->keyd);
+		as_error_details_set_fmt(AS_SUB_NONE, "failed to load bins from storage");
 		return -result;
 	}
 
@@ -1234,6 +1325,13 @@ write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		for (uint16_t i = 0; i < rd->n_bins; i++) {
 			as_bin* b = &rd->bins[i];
 			if (as_bin_is_live(b) && as_masking_apply(rd->mask_ctx, NULL, b)) {
+				// Masking violations return AS_SEC_ERR_ROLE_VIOLATION, which is
+				// not in the FORBID subcode family - emit no subcode (the status
+				// identifies the condition) to keep subcode/status coherent.
+				// Same for the other masking sites below and in delete.c.
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"replace failed on bin %.*s: masking: blocked replacing masked bin",
+						(int)strnlen(b->name, AS_BIN_NAME_MAX_SZ), b->name);
 				return as_masking_log_violation(tr, "replace",
 						"masking: blocked replacing masked bin", b->name,
 						strlen(b->name));
@@ -1280,6 +1378,7 @@ write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 
 	cf_ll_buf_define(particles_llb, STACK_PARTICLES_SIZE);
 
+	// NOTE: Not setting error details here because it's already set in write_master_bin_ops().
 	if ((result = write_master_bin_ops(tr, rd, &particles_llb,
 				 &rw->response_db)) != 0) {
 		cf_ll_buf_free(&particles_llb);
@@ -1298,12 +1397,16 @@ write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		if (! as_transaction_is_xdr(tr) &&
 				(n_old_bins == 0 || ! as_record_is_live(r))) {
 			// Didn't exist or was bin cemetery (tombstone bit not yet updated).
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"delete failed on non-existent record");
 			cf_ll_buf_free(&particles_llb);
 			unwind_index_metadata(&old_r, r);
 			return AS_ERR_NOT_FOUND;
 		}
 
 		if ((result = validate_delete_durability(tr)) != AS_OK) {
+			// NOTE: Not setting error details here because it's
+			// already set in validate_delete_durability().
 			cf_ll_buf_free(&particles_llb);
 			unwind_index_metadata(&old_r, r);
 			return result;
@@ -1313,6 +1416,8 @@ write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 	transition_delete_metadata(tr, r, *is_delete, *is_delete && rd->n_bins != 0);
 
 	if ((result = as_mrt_monitor_check_writes_limit(rd)) != 0) {
+		// NOTE: Not setting error details here because it's
+		// already set in as_mrt_monitor_check_writes_limit().
 		cf_ll_buf_free(&particles_llb);
 		unwind_index_metadata(&old_r, r);
 		return result;
@@ -1322,6 +1427,8 @@ write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 	// Write the record to storage.
 	//
 
+	// NOTE: Not setting error details here because it's
+	// already set in as_storage_record_write().
 	if ((result = as_storage_record_write(rd)) < 0) {
 		cf_detail(AS_RW,
 				"{%s} write_master: failed as_storage_record_write() %pD",
@@ -1391,12 +1498,16 @@ write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
 	int result = write_master_bin_ops_loop(tr, rd, ops, response_bins,
 			&n_response_bins, result_bins, &n_result_bins, particles_llb);
 
+	// NOTE: Not setting error details here because it's already set in write_master_bin_ops_loop().
 	if (result != 0) {
 		as_bin_destroy_all(result_bins, n_result_bins);
 		return result;
 	}
 
 	if (rd->n_bins > RECORD_MAX_BINS) {
+		as_error_details_set_fmt(AS_SUB_PARAM_BIN_COUNT_TOO_LARGE,
+				"record has too many bins (%u > %u)", rd->n_bins,
+				RECORD_MAX_BINS);
 		as_bin_destroy_all(result_bins, n_result_bins);
 		return AS_ERR_PARAMETER;
 	}
@@ -1425,11 +1536,12 @@ write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
 		void_time = 0;
 	}
 
+	bool include_error_msg = as_msg_include_error_details(tr->msgp->msg.info4);
 	size_t msg_sz = 0;
 	uint8_t* msgp = (uint8_t*)as_msg_make_response_msg(AS_OK, generation,
 			void_time, has_read_all_op ? NULL : ops, bins,
 			(uint16_t)n_response_bins, ns, NULL, &msg_sz, NULL,
-			as_mrt_monitor_compute_deadline(tr));
+			as_mrt_monitor_compute_deadline(tr), include_error_msg);
 	// Note - no record version - only for writes that don't touch.
 	// Note - deadline because monitor record create response will have op.
 
@@ -1457,6 +1569,8 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 	uint64_t msg_lut = as_transaction_xdr_lut(tr);
 
 	if (forbid_resolve(tr, rd, msg_lut)) {
+		as_error_details_set_fmt(AS_SUB_FORBID_REPLACE_CONFLICT_RESOLVING,
+				"can't apply ops during conflict resolution");
 		return AS_ERR_FORBIDDEN;
 	}
 
@@ -1486,6 +1600,9 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			if (op->particle_type == AS_PARTICLE_TYPE_NULL) {
 				if (as_masking_apply(rd->mask_ctx, NULL,
 							as_bin_get_w_len(rd, op->name, op->name_sz))) {
+					as_error_details_set_fmt(AS_SUB_NONE,
+							"delete failed on bin %.*s: masking: blocked deleting masked bin",
+							op->name_sz, op->name);
 					return as_masking_log_violation(tr, "delete",
 							"masking: blocked deleting masked bin", op->name,
 							op->name_sz);
@@ -1499,6 +1616,9 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				as_bin* b = as_bin_get_or_create_w_len(rd, op->name, op->name_sz);
 
 				if (as_masking_apply(rd->mask_ctx, NULL, b)) {
+					as_error_details_set_fmt(AS_SUB_NONE,
+							"write failed on bin %.*s: masking: blocked writing masked bin",
+							op->name_sz, op->name);
 					return as_masking_log_violation(tr, "write",
 							"masking: blocked writing masked bin", op->name,
 							op->name_sz);
@@ -1508,6 +1628,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 
 				if ((result = as_bin_particle_from_client(b, particles_llb, op)) <
 						0) {
+					// Not setting error details here because it's already set in as_bin_particle_from_client().
 					cf_warning(AS_RW,
 							"{%s} write_master: failed as_bin_particle_from_client() %pD",
 							ns->name, &tr->keyd);
@@ -1518,6 +1639,9 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 					cf_warning(AS_RW,
 							"bin write would create masked bin with type that does not match rule, bin: %s",
 							op->name);
+					as_error_details_set_fmt(AS_SUB_NONE,
+							"write failed on bin %.*s: masked-bin type mismatch after write",
+							op->name_sz, op->name);
 					return AS_ERR_INCOMPATIBLE_TYPE;
 				}
 			}
@@ -1532,6 +1656,9 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			as_bin* b = as_bin_get_or_create_w_len(rd, op->name, op->name_sz);
 
 			if (as_masking_apply(rd->mask_ctx, NULL, b)) {
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"modify failed on bin %.*s: masking: blocked modifying masked bin",
+						op->name_sz, op->name);
 				return as_masking_log_violation(tr, "modify",
 						"masking: blocked modifying masked bin", op->name,
 						op->name_sz);
@@ -1539,6 +1666,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 
 			if ((result = as_bin_particle_modify_from_client(b, particles_llb,
 						 op)) < 0) {
+				// Not setting error details here because it's already set in as_bin_particle_from_client().
 				cf_warning(AS_RW,
 						"{%s} write_master: failed as_bin_particle_modify_from_client() %pD",
 						ns->name, &tr->keyd);
@@ -1549,6 +1677,9 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				cf_warning(AS_RW,
 						"bin modify would create masked bin with type that does not match rule, bin: %s",
 						op->name);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"modify failed on bin %.*s: masked-bin type mismatch after modify",
+						op->name_sz, op->name);
 				return AS_ERR_INCOMPATIBLE_TYPE;
 			}
 
@@ -1564,6 +1695,10 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 
 					if (as_bin_is_live(b) &&
 							as_masking_apply(rd->mask_ctx, NULL, b)) {
+						as_error_details_set_fmt(AS_SUB_NONE,
+								"delete_all failed on bin %.*s: masking: blocked deleting masked bin",
+								(int)strnlen(b->name, AS_BIN_NAME_MAX_SZ),
+								b->name);
 						return as_masking_log_violation(tr, "delete",
 								"masking: blocked delete_all on masked bin",
 								b->name, strlen(b->name));
@@ -1599,6 +1734,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 
 			if ((result = as_bin_bits_modify_from_client(b, particles_llb, op)) <
 					0) {
+				// Not setting error details here because it's already set in as_bin_bits_modify_from_client().
 				cf_detail(AS_RW,
 						"{%s} write_master: failed as_bin_bits_modify_from_client() %pD",
 						ns->name, &tr->keyd);
@@ -1624,6 +1760,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 
 			if ((result = as_bin_hll_modify_from_client(b, particles_llb, op,
 						 &result_bin)) < 0) {
+				// Not setting error details here because it's already set in as_bin_hll_modify_from_client().
 				cf_detail(AS_RW,
 						"{%s} write_master: failed as_bin_hll_modify_from_client() %pD",
 						ns->name, &tr->keyd);
@@ -1717,6 +1854,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 
 			int error_code;
 
+			// Not setting error details here because it's already set in process_bin_read_op().
 			read_op_result read_result =
 					process_bin_read_op(rd, op, respond_all_ops, result_bins,
 							p_n_result_bins, &result_bin, &error_code);
@@ -1746,6 +1884,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 		else {
 			cf_warning(AS_RW, "{%s} write_master: unknown bin op %u %pD",
 					ns->name, op->op, &tr->keyd);
+			as_error_details_set_fmt(AS_SUB_NONE, "unknown bin op %u", op->op);
 			return AS_ERR_PARAMETER;
 		}
 	}

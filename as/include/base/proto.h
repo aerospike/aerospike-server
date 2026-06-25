@@ -54,6 +54,14 @@ struct as_storage_rd_s;
 //
 
 //------------------------------------------------
+// Globals used for the error details system.
+//
+
+extern __thread uint32_t g_error_details_len;
+extern __thread bool g_error_details_set;
+extern __thread uint8_t g_error_verbosity;
+
+//------------------------------------------------
 // Result codes used in client protocol. Must
 // match those in as_status.h in the client. Must
 // be <= 255, to fit in one byte.
@@ -274,8 +282,9 @@ typedef struct cl_msg_s {
 #define AS_MSG_INFO4_MRT_ROLL_BACK          (1 << 2)
 #define AS_MSG_INFO4_MRT_MONITOR_DRIVEN     (1 << 3) // not for clients - internal only
 #define AS_MSG_INFO4_MRT_ON_LOCKING_ONLY    (1 << 4)
-	// Bit 5 is unused.
-	// Bit 6 is unused.
+	// Bits 5-6: error detail verbosity (0=off, 1=subcode, 2=subcode+message, 3=all).
+#define AS_MSG_INFO4_ERROR_VERBOSITY_MASK   0x60
+#define AS_MSG_INFO4_ERROR_VERBOSITY_SHIFT  5
 	// Bit 7 is unused.
 
 //------------------------------------------------
@@ -324,6 +333,191 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_TYPE_BATCH             41
 #define AS_MSG_FIELD_TYPE_BATCH_WITH_SET    42
 #define AS_MSG_FIELD_TYPE_PREDEXP           43
+#define AS_MSG_FIELD_TYPE_ERROR_DETAILS     45 // msgpack map payload
+
+// Max size of error detail (error message field) payload.
+#define AS_ERROR_DETAILS_MAX                1024
+// Msgpack envelope overhead: map_header(1) + msg_key(1) + str16_header(3)
+// + subcode_key(1) + subcode_val_max(9) = 15 bytes.
+#define AS_ERROR_MSGPACK_OVERHEAD           15
+#define AS_ERROR_MESSAGE_MAX                (AS_ERROR_DETAILS_MAX - AS_ERROR_MSGPACK_OVERHEAD)
+
+// Error detail map keys (keep these as single-byte integers).
+#define AS_ERROR_DETAIL_KEY_SUBCODE         1
+#define AS_ERROR_DETAIL_KEY_MESSAGE         2
+
+// Subcodes - per-status enums. Each top-level status family that
+// subdivides into app-dispatchable conditions has its own enum;
+// statuses where the status alone fully identifies the condition use
+// AS_SUB_NONE directly. AS_SUB_NONE = 0 is reserved universally across
+// every enum.
+//
+// Naming: AS_SUB_<STATUS-FAMILY-ABBREV>_<DETAIL>. The status-family
+// prefix is authoritative - every emit pairs the constant's enum with
+// the matching parent AS_ERR_* status.
+//
+// Subcodes are app-dispatch hooks: a member is justified only when an
+// application could plausibly write a distinct handler beyond what
+// the parent status already implies. When the status alone is
+// sufficient (AS_ERR_BIN_EXISTS, AS_ERR_GENERATION, AS_ERR_RECORD_TOO_BIG,
+// AS_ERR_INCOMPATIBLE_TYPE, etc.), emit sites use AS_SUB_NONE and put
+// the disambiguating context in the message text.
+//
+// Subcode integer values within an enum are immutable once published.
+// Add new members at the end (taking the next dense integer); do not
+// renumber or repurpose existing members. Retired members are listed
+// in the trailing "Retired subcodes" block below.
+
+#define AS_SUB_NONE                              0
+
+// SUBCODE_STATUS_MAP - authoritative prefix-to-parent-status pairing.
+// Every AS_SUB_<PREFIX>_* constant pairs with exactly the status named
+// here, and an emit site must use a subcode whose prefix matches the
+// response status. Maintained by convention (there is no automated lint
+// pass); update this block whenever a new per-status enum is declared.
+//
+//   PARAM         -> AS_ERR_PARAMETER
+//   UNAVAIL       -> AS_ERR_UNAVAILABLE
+//   UNSUPP_FEAT   -> AS_ERR_UNSUPPORTED_FEATURE
+//   BIN_NOT_FOUND -> AS_ERR_BIN_NOT_FOUND
+//   BIN_NAME      -> AS_ERR_BIN_NAME
+//   FORBID        -> AS_ERR_FORBIDDEN
+//   OPNOT         -> AS_ERR_OP_NOT_APPLICABLE
+//   MRT_BLOCKED   -> AS_ERR_MRT_BLOCKED
+
+// Subcodes paired with AS_ERR_PARAMETER.
+typedef enum {
+	// Per-record TTL exceeds the namespace's max-ttl.
+	// App use: clamp the TTL to the namespace max and retry.
+	AS_SUB_PARAM_TTL_INVALID = 1,
+	// Bit op offset lands past the blob (or above the proto cap).
+	// App use: refresh the bin size, recompute the offset, retry.
+	AS_SUB_PARAM_BITS_OFFSET_OUT_OF_RANGE = 2,
+	// Bit op size is out of range (e.g. zero, or too large).
+	// App use: clamp the size dimension (vs. offset) and retry.
+	AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE = 3,
+	// Blob resize would exceed RECORD_MAX_BLOB_SIZE.
+	// App use: backpressure or partition the dynamically-sized blob.
+	AS_SUB_PARAM_BITS_RESIZE_EXCEEDED = 4,
+	// Write would exceed the per-record bin-count limit.
+	// App use: prune least-valuable bins and retry.
+	// Form-A parallel of AS_SUB_BIN_NAME_COUNT_TOO_LARGE (write path).
+	AS_SUB_PARAM_BIN_COUNT_TOO_LARGE = 5,
+} as_sub_param_t;
+
+// Subcodes paired with AS_ERR_UNAVAILABLE.
+typedef enum {
+	// Cluster is still resolving initial partition balance at startup.
+	// App use: wait a fixed backoff (~1s) and retry; failing over is
+	// pointless since every node is unresolved at once.
+	AS_SUB_UNAVAIL_INITIAL_BALANCE_UNRESOLVED = 1,
+	// A needed replica is unavailable (likely a partition split).
+	// App use: an SC reader may downgrade to read-mode=any if safe, or
+	// back off longer than for transient unavailability.
+	AS_SUB_UNAVAIL_REPLICA_UNAVAILABLE = 2,
+} as_sub_unavail_t;
+
+// Subcodes paired with AS_ERR_UNSUPPORTED_FEATURE.
+typedef enum {
+	// MRT attempted against a non-SC (AP) namespace.
+	// App use: route the MRT to an SC namespace, or use a non-MRT path.
+	AS_SUB_UNSUPP_FEAT_MRT_REQUIRES_STRONG_CONSISTENCY = 1,
+	// Requested feature is unsupported in this context (generic).
+	// App use: same dispatch as MRT_REQUIRES_STRONG_CONSISTENCY; kept
+	// distinct to preserve the sole live emit (MRT-monitor AP check).
+	AS_SUB_UNSUPP_FEAT_GENERIC = 2,
+} as_sub_unsupp_feat_t;
+
+// Subcodes paired with AS_ERR_BIN_NOT_FOUND.
+typedef enum {
+	// HLL op needs an existing bin and can't auto-create one.
+	// App use: dispatch a one-time init op with default index_bits,
+	// then retry the count/fold.
+	AS_SUB_BIN_NOT_FOUND_HLL_CANNOT_CREATE_WITH_OP = 1,
+} as_sub_bin_not_found_t;
+
+// Subcodes paired with AS_ERR_BIN_NAME. Form-A parallel of
+// AS_SUB_PARAM_BIN_COUNT_TOO_LARGE - same physical condition, same app
+// remedy, dispatchable from either path.
+typedef enum {
+	// Write would exceed the per-record bin-count limit (UDF path).
+	// App use: prune least-valuable bins and retry.
+	// Form-A parallel of AS_SUB_PARAM_BIN_COUNT_TOO_LARGE.
+	AS_SUB_BIN_NAME_COUNT_TOO_LARGE = 1,
+} as_sub_bin_name_t;
+
+// Subcodes paired with AS_ERR_FORBIDDEN.
+typedef enum {
+	// Write bounced by an XDR ship filter at the destination.
+	// App use: suppress retry; optionally record the digest for audit.
+	AS_SUB_FORBID_XDR_FILTER_BLOCKED = 1,
+	// Set-level record-count stop-writes limit reached.
+	// App use: route new records to another set, or archive old ones.
+	AS_SUB_FORBID_SET_COUNT_STOP_WRITES = 2,
+	// Set-level size stop-writes limit reached.
+	// App use: backpressure or route to a different set (not ns-wide).
+	AS_SUB_FORBID_SET_SIZE_STOP_WRITES = 3,
+	// Writes stopped due to cluster clock skew.
+	// App use: page on-call to investigate NTP / time-source drift.
+	AS_SUB_FORBID_CLOCK_SKEW_STOP_WRITES = 4,
+	// REPLACE / CREATE_OR_REPLACE forbidden while resolving conflicts.
+	// App use: back off and retry once the cluster stabilizes.
+	AS_SUB_FORBID_REPLACE_CONFLICT_RESOLVING = 5,
+	// Write forbidden because the set/namespace is mid-truncate.
+	// App use: retry shortly after the truncate completes (transient).
+	AS_SUB_FORBID_TRUNCATED = 6,
+	// NOTE: 7 and 9 are retired. Masking violations were briefly mapped here
+	// but return AS_SEC_ERR_ROLE_VIOLATION, not AS_ERR_FORBIDDEN, so they don't
+	// belong in this family. If granular masking subcodes are wanted, add a
+	// dedicated ROLE_VIOLATION family rather than repurposing these slots.
+	// Non-durable delete forbidden (would violate durability).
+	// App use: upgrade the delete to durable, or skip the shortcut.
+	AS_SUB_FORBID_DURABILITY_VIOLATION = 8,
+} as_sub_forbid_t;
+
+// Subcodes paired with AS_ERR_OP_NOT_APPLICABLE.
+typedef enum {
+	// List index is outside the current element range.
+	// App use: refresh the cached list size, clamp the index, retry.
+	AS_SUB_OPNOT_CDT_INDEX_OUT_OF_BOUNDS = 1,
+	// Requested rank is past the current population.
+	// App use: clamp top-N rank to the element count and retry.
+	AS_SUB_OPNOT_CDT_RANK_OUT_OF_BOUNDS = 2,
+	// Insert would exceed an ordered+bounded list's cap.
+	// App use: roll to a fresh bin/key partition, or apply backpressure.
+	AS_SUB_OPNOT_CDT_BOUNDED_LIST_OVERFLOW = 3,
+	// HLL op needs index_bits but the sketch has none set.
+	// App use: dispatch a one-time init with default index_bits, retry.
+	AS_SUB_OPNOT_HLL_INDEX_BITS_UNSET = 4,
+	// Union needs to reduce index_bits but folding isn't allowed.
+	// App use: retry with ALLOW_FOLD, or fold sources to the smaller
+	// precision first.
+	AS_SUB_OPNOT_HLL_CANNOT_REDUCE_INDEX_BITS = 5,
+	// As above, for the minhash dimension.
+	// App use: retry with ALLOW_FOLD, or align sources first.
+	AS_SUB_OPNOT_HLL_CANNOT_REDUCE_MINHASH_BITS = 6,
+	// Fold blocked because the sketch carries minhash bits.
+	// App use: switch to a strip-minhash-then-fold path.
+	AS_SUB_OPNOT_HLL_CANNOT_FOLD_MINHASH = 7,
+	// Fold target index_bits >= current (fold can only reduce).
+	// App use: clamp target to current-1 and retry, or skip the fold.
+	AS_SUB_OPNOT_HLL_FOLD_INDEX_BITS_TOO_LARGE = 8,
+	// Intersect inputs have mismatched minhash parameters.
+	// App use: harmonize sketches (fold/strip minhash) before retry.
+	AS_SUB_OPNOT_HLL_INTERSECT_MINHASH_MISMATCH = 9,
+} as_sub_opnot_t;
+
+// Subcodes paired with AS_ERR_MRT_BLOCKED.
+typedef enum {
+	// Record is provisionally locked by another MRT.
+	// App use: a non-MRT writer backs off with jittered retry until the
+	// MRT commits or expires.
+	AS_SUB_MRT_BLOCKED_RECORD_LOCKED = 1,
+	// Op belongs to a different MRT than the one holding the lock.
+	// App use: abort the whole MRT - retrying this op alone can never
+	// succeed within the current MRT.
+	AS_SUB_MRT_BLOCKED_ID_MISMATCH = 2,
+} as_sub_mrt_blocked_t;
 
 // Bits in as_transaction.msg_fields indicate which fields are present.
 #define AS_MSG_FIELD_BIT_NAMESPACE          (1 << 0)
@@ -720,29 +914,119 @@ cl_msg* as_msg_create_internal(const char* ns_name, uint8_t info1,
 cl_msg* as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 		uint32_t void_time, as_msg_op** ops, struct as_bin_s** bins,
 		uint16_t bin_count, struct as_namespace_s* ns, cl_msg* msgp_in,
-		size_t* msg_sz_in, struct as_record_version_s* v, uint32_t mrt_deadline);
+		size_t* msg_sz_in, struct as_record_version_s* v, uint32_t mrt_deadline,
+		bool include_error_msg);
 int32_t as_msg_make_response_bufbuilder(cf_buf_builder** bb_r,
 		struct as_storage_rd_s* rd, bool no_bin_data,
-		const cf_vector* select_bins, bool send_bval, int64_t bval);
+		const cf_vector* select_bins, bool send_bval, int64_t bval,
+		bool include_error_msg);
 void as_msg_pid_done_bufbuilder(cf_buf_builder** bb_r, uint32_t pid, int result);
 void as_msg_fin_bufbuilder(cf_buf_builder** bb_r, int result);
 cl_msg* as_msg_make_no_val_response(uint32_t result_code, uint32_t generation,
-		uint32_t void_time, struct as_record_version_s* v, size_t* p_msg_sz);
+		uint32_t void_time, struct as_record_version_s* v, size_t* p_msg_sz,
+		bool include_error_msg);
 cl_msg* as_msg_make_val_response(bool success, const as_val* val,
 		uint32_t result_code, uint32_t generation, uint32_t void_time,
-		struct as_record_version_s* v, size_t* p_msg_sz);
-void as_msg_make_val_response_bufbuilder(const as_val* val,
-		cf_buf_builder** bb_r, uint32_t val_sz, bool);
+		struct as_record_version_s* v, size_t* p_msg_sz, bool include_error_msg);
+void as_msg_make_val_response_bufbuilder(const as_val* val, cf_buf_builder** bb_r,
+		uint32_t val_sz, bool success, bool include_error_msg);
 
 int as_msg_send_reply(struct as_file_handle_s* fd_h, uint32_t result_code,
 		uint32_t generation, uint32_t void_time, as_msg_op** ops,
 		struct as_bin_s** bins, uint16_t bin_count, struct as_namespace_s* ns,
-		struct as_record_version_s* v);
+		struct as_record_version_s* v, bool include_error_msg);
 int as_msg_send_ops_reply(struct as_file_handle_s* fd_h, const cf_dyn_buf* db,
 		bool compress, as_proto_comp_stat* comp_stat);
 bool as_msg_send_fin(cf_socket* sock, uint32_t result_code);
 size_t as_msg_send_fin_timeout(cf_socket* sock, uint32_t result_code,
 		int32_t timeout);
+
+// Error message response support.
+// Sets error details to a msgpack map payload (raw bytes).
+void as_error_details_set_fmt(uint32_t subcode, const char* format, ...)
+		__attribute__((format(printf, 2, 3)));
+
+const uint8_t* as_error_msg_peek(uint32_t* len);
+
+static inline void
+as_error_msg_clear(void)
+{
+	g_error_details_len = 0;
+	g_error_details_set = false;
+}
+
+// Error-details wire field - shared by the single-record response builders
+// (proto.c) and the per-row batch reply builders (batch.c). Both must fold the
+// armed thread-local detail into a sized buffer before writing it, so the
+// size/write idiom lives here rather than file-local to proto.c.
+typedef struct error_msg_field_s {
+	const uint8_t* msg;
+	uint32_t len;
+	bool add;
+} error_msg_field;
+
+// Decide whether the armed error detail (if any) belongs on this response and
+// hand back the bytes to emit. Error details ride only on error responses that
+// the client opted into: on a success response (is_error false), or when the
+// client didn't opt in, any armed detail is discarded here so it can't leak
+// onto this reply or a later one on the same thread. Pair with
+// error_msg_field_write(), which writes the field and clears.
+static inline error_msg_field
+error_msg_field_prep(bool include_error_msg, bool is_error)
+{
+	error_msg_field f = { 0 };
+	uint32_t len = 0;
+	const uint8_t* msg = as_error_msg_peek(&len);
+
+	if (len == 0) {
+		return f;
+	}
+
+	if (include_error_msg && is_error) {
+		f.msg = msg;
+		f.len = len;
+		f.add = true;
+
+		return f;
+	}
+
+	// Armed but not wanted on this response - discard so it can't ride out.
+	as_error_msg_clear();
+
+	return f;
+}
+
+// Write the error-details field at the cursor (advancing it past the field) and
+// clear the armed detail. No-op when error_msg_field_prep() decided not to add.
+static inline void
+error_msg_field_write(uint8_t** at, const error_msg_field* f)
+{
+	if (! f->add) {
+		return;
+	}
+
+	as_msg_field* mf = (as_msg_field*)*at;
+
+	mf->field_sz = 1 + f->len;
+	mf->type = AS_MSG_FIELD_TYPE_ERROR_DETAILS;
+	memcpy(mf->data, f->msg, f->len);
+	as_msg_swap_field(mf);
+	*at += sizeof(as_msg_field) + f->len;
+
+	as_error_msg_clear();
+}
+
+static inline bool
+as_error_msg_is_set(void)
+{
+	return g_error_details_set;
+}
+
+static inline void
+as_error_msg_set_verbosity(uint8_t level)
+{
+	g_error_verbosity = level;
+}
 
 static inline bool
 as_proto_is_valid_type(const as_proto* proto)

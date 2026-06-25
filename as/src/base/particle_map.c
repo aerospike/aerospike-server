@@ -615,6 +615,7 @@ map_concat_size_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		uint32_t value_size, as_particle** pp)
 {
 	cf_warning(AS_PARTICLE, "concat size for map");
+	as_error_details_set_fmt(AS_SUB_NONE, "cannot append/prepend to map bin");
 	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
@@ -623,6 +624,7 @@ map_append_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		uint32_t value_size, as_particle** pp)
 {
 	cf_warning(AS_PARTICLE, "append to map");
+	as_error_details_set_fmt(AS_SUB_NONE, "cannot append to map bin");
 	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
@@ -631,6 +633,7 @@ map_prepend_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		uint32_t value_size, as_particle** pp)
 {
 	cf_warning(AS_PARTICLE, "prepend to map");
+	as_error_details_set_fmt(AS_SUB_NONE, "cannot prepend to map bin");
 	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
@@ -639,6 +642,7 @@ map_incr_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		uint32_t value_size, as_particle** pp)
 {
 	cf_warning(AS_PARTICLE, "increment of map");
+	as_error_details_set_fmt(AS_SUB_NONE, "cannot increment map bin");
 	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
@@ -651,6 +655,9 @@ map_size_from_wire(const uint8_t* wire_value, uint32_t value_size)
 	if (sz == 0 || type != MSGPACK_TYPE_MAP) {
 		cf_warning(AS_PARTICLE,
 				"map_size_from_wire() invalid map input sz %u type %d", sz, type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"invalid map data (sz %u, msgpack type %s)", sz,
+				msgpack_type_str(type));
 		return -AS_ERR_UNKNOWN;
 	}
 
@@ -667,6 +674,7 @@ map_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 
 	if (sz == 0) {
 		cf_warning(AS_PARTICLE, "map_from_wire() invalid packed map");
+		as_error_details_set_fmt(AS_SUB_NONE, "invalid packed map");
 		return -AS_ERR_UNKNOWN;
 	}
 
@@ -1961,6 +1969,8 @@ map_set_flags(cdt_op_mem* com, uint8_t set_flags)
 
 	if (! packed_map_init_from_com(&map, com, false)) {
 		cf_warning(AS_PARTICLE, "map_set_flags() invalid packed map");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_set_flags: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -1968,6 +1978,8 @@ map_set_flags(cdt_op_mem* com, uint8_t set_flags)
 
 	if (! cdt_check_flags(set_flags, MSGPACK_TYPE_MAP)) {
 		cf_warning(AS_PARTICLE, "map_set_flags() invalid flags 0x%x", set_flags);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_set_flags: invalid map flags 0x%x", set_flags);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -1978,6 +1990,8 @@ map_set_flags(cdt_op_mem* com, uint8_t set_flags)
 	define_map_packer(mpk, ele_count, set_flags, map.content_sz);
 
 	if (! map_packer_setup_bin(&mpk, com)) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_set_flags: failed to set up result bin");
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -1986,6 +2000,8 @@ map_set_flags(cdt_op_mem* com, uint8_t set_flags)
 
 		if (! packed_map_check_and_fill_offidx(&map)) {
 			cf_warning(AS_PARTICLE, "map_set_flags() invalid packed map");
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_set_flags: failed to reorder map");
 			return -AS_ERR_PARAMETER;
 		}
 
@@ -1999,6 +2015,8 @@ map_set_flags(cdt_op_mem* com, uint8_t set_flags)
 
 			if (! packed_map_check_and_fill_offidx(&map)) {
 				cf_warning(AS_PARTICLE, "map_set_flags() invalid packed map");
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"map_set_flags: failed to copy map index");
 				return -AS_ERR_PARAMETER;
 			}
 
@@ -2039,6 +2057,9 @@ map_increment(cdt_op_mem* com, cdt_payload* key, const cdt_payload* delta_value,
 		cf_warning(AS_PARTICLE,
 				"map_increment() invalid packed map, ele_count=%u",
 				map.ele_count);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_increment: invalid packed map, element count=%u",
+				map.ele_count);
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -2047,6 +2068,9 @@ map_increment(cdt_op_mem* com, cdt_payload* key, const cdt_payload* delta_value,
 	if (! packed_map_check_and_fill_offidx(&map)) {
 		cf_warning(AS_PARTICLE,
 				"map_increment() invalid packed map, ele_count=%u",
+				map.ele_count);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_increment: failed to build map index, element count=%u",
 				map.ele_count);
 		return -AS_ERR_PARAMETER;
 	}
@@ -2058,9 +2082,12 @@ map_increment(cdt_op_mem* com, cdt_payload* key, const cdt_payload* delta_value,
 
 	if (! packed_map_find_key(&map, &find_key, key)) {
 		cf_detail(AS_PARTICLE, "map_increment() key not found");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_increment: key not found in map");
 		return -AS_ERR_PARAMETER;
 	}
 
+	// NOTE: error details already set by cdt_calc_delta_init.
 	if (! cdt_calc_delta_init(&calc_delta, delta_value, is_decrement)) {
 		return -AS_ERR_PARAMETER;
 	}
@@ -2070,11 +2097,13 @@ map_increment(cdt_op_mem* com, cdt_payload* key, const cdt_payload* delta_value,
 
 		mp_map_value.offset = find_key.value_offset;
 
+		// NOTE: error details already set by cdt_calc_delta_add.
 		if (! cdt_calc_delta_add(&calc_delta, &mp_map_value)) {
 			return -AS_ERR_PARAMETER;
 		}
 	}
 	else {
+		// NOTE: error details already set by cdt_calc_delta_add.
 		if (! cdt_calc_delta_add(&calc_delta, NULL)) {
 			return -AS_ERR_PARAMETER;
 		}
@@ -2092,6 +2121,7 @@ map_increment(cdt_op_mem* com, cdt_payload* key, const cdt_payload* delta_value,
 
 	// TODO - possible improvement: offidx isn't saved for data-NOT-in-memory so
 	// it will be recalculated again in map_add.
+	// NOTE: error details already set by map_add.
 	return map_add(com, key, &value, &control, false);
 }
 
@@ -2105,6 +2135,8 @@ map_add(cdt_op_mem* com, const cdt_payload* ukey, const cdt_payload* uval,
 
 	if (k_sz == 0 || v_sz == 0 || ! map_is_key(ukey->ptr, ukey->sz)) {
 		cf_warning(AS_PARTICLE, "map_add() invalid params");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_add: invalid key or value parameter");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -2114,6 +2146,7 @@ map_add(cdt_op_mem* com, const cdt_payload* ukey, const cdt_payload* uval,
 
 	if (k_sz == 0) {
 		cf_warning(AS_PARTICLE, "map_add() invalid params");
+		as_error_details_set_fmt(AS_SUB_NONE, "map_add: invalid key parameter");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -2121,6 +2154,7 @@ map_add(cdt_op_mem* com, const cdt_payload* ukey, const cdt_payload* uval,
 
 	if (v_sz == 0) {
 		cf_warning(AS_PARTICLE, "map_add() invalid params");
+		as_error_details_set_fmt(AS_SUB_NONE, "map_add: invalid value parameter");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -2131,6 +2165,7 @@ map_add(cdt_op_mem* com, const cdt_payload* ukey, const cdt_payload* uval,
 	if (! packed_map_init_from_com(&map, com, true)) {
 		cf_warning(AS_PARTICLE, "map_add() invalid packed map, ele_count=%u",
 				map.ele_count);
+		as_error_details_set_fmt(AS_SUB_NONE, "map_add: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -2139,6 +2174,7 @@ map_add(cdt_op_mem* com, const cdt_payload* ukey, const cdt_payload* uval,
 	if (! packed_map_check_and_fill_offidx(&map)) {
 		cf_warning(AS_PARTICLE, "map_add() invalid packed map, ele_count=%u",
 				map.ele_count);
+		as_error_details_set_fmt(AS_SUB_NONE, "map_add: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -2152,6 +2188,7 @@ map_add(cdt_op_mem* com, const cdt_payload* ukey, const cdt_payload* uval,
 					 &key)) {
 		cf_warning(AS_PARTICLE, "map_add() invalid packed map, ele_count=%u",
 				map.ele_count);
+		as_error_details_set_fmt(AS_SUB_NONE, "map_add: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -2166,6 +2203,8 @@ map_add(cdt_op_mem* com, const cdt_payload* ukey, const cdt_payload* uval,
 				return AS_OK;
 			}
 
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_add: key already exists (unique flag set)");
 			return -AS_ERR_ELEMENT_EXISTS;
 		}
 	}
@@ -2180,6 +2219,8 @@ map_add(cdt_op_mem* com, const cdt_payload* ukey, const cdt_payload* uval,
 				return AS_OK;
 			}
 
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_add: key not found for replace");
 			return -AS_ERR_ELEMENT_NOT_FOUND;
 		}
 
@@ -2196,6 +2237,8 @@ map_add(cdt_op_mem* com, const cdt_payload* ukey, const cdt_payload* uval,
 	define_map_packer(mpk, op.new_ele_count, map.flags, content_sz);
 
 	if (! map_packer_setup_bin(&mpk, com)) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_add: failed to set up result bin");
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -2237,6 +2280,8 @@ map_add_items_ordered(const packed_map* map, cdt_op_mem* com,
 	if (map->ele_count == 0) {
 		if (! control->allow_create) {
 			if (! control->no_fail) {
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"map_add_items_ordered: key not found for replace (empty map)");
 				return -AS_ERR_ELEMENT_NOT_FOUND;
 			}
 
@@ -2252,6 +2297,8 @@ map_add_items_ordered(const packed_map* map, cdt_op_mem* com,
 		define_map_packer(mpk, new_ele_count, map->flags, new_content_sz);
 
 		if (! map_packer_setup_bin(&mpk, com)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_add_items_ordered: failed to set up result bin");
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 
@@ -2320,6 +2367,8 @@ map_add_items_ordered(const packed_map* map, cdt_op_mem* com,
 					return AS_OK;
 				}
 
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"map_add_items_ordered: key already exists (unique flag set)");
 				return -AS_ERR_ELEMENT_EXISTS;
 			}
 
@@ -2345,6 +2394,8 @@ map_add_items_ordered(const packed_map* map, cdt_op_mem* com,
 					return AS_OK;
 				}
 
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"map_add_items_ordered: key not found for replace");
 				return -AS_ERR_ELEMENT_NOT_FOUND;
 			}
 		}
@@ -2362,6 +2413,8 @@ map_add_items_ordered(const packed_map* map, cdt_op_mem* com,
 	uint32_t start_off = 0;
 
 	if (! map_packer_setup_bin(&mpk, com)) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_add_items_ordered: failed to set up result bin");
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -2499,6 +2552,9 @@ map_add_items(cdt_op_mem* com, const cdt_payload* items,
 	if (rewrite_sz == 0 || type != MSGPACK_TYPE_MAP) {
 		cf_warning(AS_PARTICLE, "map_add_items() invalid parameter, type %d",
 				type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_add_items: invalid parameter (msgpack type %s)",
+				msgpack_type_str(type));
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -2508,6 +2564,7 @@ map_add_items(cdt_op_mem* com, const cdt_payload* items,
 
 	if (rewrite_sz == 0) {
 		cf_warning(AS_PARTICLE, "map_add_items() invalid parameter");
+		as_error_details_set_fmt(AS_SUB_NONE, "map_add_items: invalid parameter");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -2534,6 +2591,7 @@ map_add_items(cdt_op_mem* com, const cdt_payload* items,
 
 	if (! offset_index_fill(&val_off, true, false)) {
 		cf_warning(AS_PARTICLE, "map_add_items() invalid parameter");
+		as_error_details_set_fmt(AS_SUB_NONE, "map_add_items: invalid map items");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -2546,6 +2604,8 @@ map_add_items(cdt_op_mem* com, const cdt_payload* items,
 		cf_warning(AS_PARTICLE,
 				"map_add_items() invalid packed map, ele_count=%u",
 				map.ele_count);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_add_items: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -2555,6 +2615,8 @@ map_add_items(cdt_op_mem* com, const cdt_payload* items,
 		result_data_set_int(&com->result, map.ele_count);
 
 		if (! cdt_context_map_handle_possible_noop(&com->ctx)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_add_items: empty items payload is a no-op");
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 
@@ -2565,9 +2627,12 @@ map_add_items(cdt_op_mem* com, const cdt_payload* items,
 
 	if (! packed_map_check_and_fill_offidx(&map)) {
 		cf_warning(AS_PARTICLE, "map_add_items() invalid packed map");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_add_items: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
+	// NOTE: error details already set by map_add_items_ordered.
 	return map_add_items_ordered(&map, com, &val_off, &val_ord, control);
 }
 
@@ -2581,9 +2646,12 @@ map_remove_by_key_interval(cdt_op_mem* com, const cdt_payload* key_start,
 		cf_warning(AS_PARTICLE,
 				"packed_map_remove_by_key_interval() invalid packed map, ele_count=%u",
 				map.ele_count);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_remove_by_key_interval: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
+	// NOTE: error details already set by packed_map_get_remove_by_key_interval.
 	return packed_map_get_remove_by_key_interval(&map, com, key_start, key_end);
 }
 
@@ -2596,9 +2664,12 @@ map_remove_by_index_range(cdt_op_mem* com, int64_t index, uint64_t count)
 		cf_warning(AS_PARTICLE,
 				"packed_map_remove_by_index_range() invalid packed map index, ele_count=%u",
 				map.ele_count);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_remove_by_index_range: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
+	// NOTE: error details already set by packed_map_get_remove_by_index_range.
 	return packed_map_get_remove_by_index_range(&map, com, index, count);
 }
 
@@ -2614,9 +2685,12 @@ map_remove_by_value_interval(cdt_op_mem* com, const cdt_payload* value_start,
 		cf_warning(AS_PARTICLE,
 				"packed_map_remove_by_value_interval() invalid packed map, ele_count=%u",
 				map.ele_count);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_remove_by_value_interval: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
+	// NOTE: error details already set by packed_map_get_remove_by_value_interval.
 	return packed_map_get_remove_by_value_interval(&map, com, value_start,
 			value_end);
 }
@@ -2630,9 +2704,12 @@ map_remove_by_rank_range(cdt_op_mem* com, int64_t rank, uint64_t count)
 		cf_warning(AS_PARTICLE,
 				"packed_map_remove_by_index_range() invalid packed map index, ele_count=%u",
 				map.ele_count);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_remove_by_rank_range: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
+	// NOTE: error details already set by packed_map_get_remove_by_rank_range.
 	return packed_map_get_remove_by_rank_range(&map, com, rank, count);
 }
 
@@ -2646,9 +2723,12 @@ map_remove_by_rel_index_range(cdt_op_mem* com, const cdt_payload* key,
 		cf_warning(AS_PARTICLE,
 				"map_remove_by_rel_index_range() invalid packed map index, ele_count=%u",
 				map.ele_count);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_remove_by_rel_index_range: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
+	// NOTE: error details already set by packed_map_get_remove_by_rel_index_range.
 	return packed_map_get_remove_by_rel_index_range(&map, com, key, index, count);
 }
 
@@ -2662,9 +2742,12 @@ map_remove_by_rel_rank_range(cdt_op_mem* com, const cdt_payload* value,
 		cf_warning(AS_PARTICLE,
 				"map_remove_by_rel_rank_range() invalid packed map index, ele_count=%u",
 				map.ele_count);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_remove_by_rel_rank_range: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
+	// NOTE: error details already set by packed_map_get_remove_by_rel_rank_range.
 	return packed_map_get_remove_by_rel_rank_range(&map, com, value, rank, count);
 }
 
@@ -2677,9 +2760,12 @@ map_remove_all_by_key_list(cdt_op_mem* com, const cdt_payload* key_list)
 		cf_warning(AS_PARTICLE,
 				"map_remove_all_by_key_list() invalid packed map, ele_count=%u",
 				map.ele_count);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_remove_all_by_key_list: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
+	// NOTE: error details already set by packed_map_get_remove_all_by_key_list.
 	return packed_map_get_remove_all_by_key_list(&map, com, key_list);
 }
 
@@ -2692,9 +2778,12 @@ map_remove_all_by_value_list(cdt_op_mem* com, const cdt_payload* value_list)
 		cf_warning(AS_PARTICLE,
 				"map_get_remove_all_value_items() invalid packed map, ele_count=%u",
 				map.ele_count);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_remove_all_by_value_list: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
+	// NOTE: error details already set by packed_map_get_remove_all_by_value_list.
 	return packed_map_get_remove_all_by_value_list(&map, com, value_list);
 }
 
@@ -2707,12 +2796,15 @@ map_clear(cdt_op_mem* com)
 		cf_warning(AS_PARTICLE,
 				"packed_map_clear() invalid packed map, ele_count=%u",
 				map.ele_count);
+		as_error_details_set_fmt(AS_SUB_NONE, "map_clear: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
 	define_map_packer(mpk, 0, map.flags, 0);
 
 	if (! map_packer_setup_bin(&mpk, com)) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_clear: failed to set up result bin");
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -3474,6 +3566,9 @@ packed_map_get_remove_by_key_interval(const packed_map* map, cdt_op_mem* com,
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_by_key_interval() result_type %d not supported",
 				result->type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_by_key_interval: result type %s not supported",
+				cdt_result_type_str(result->type));
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -3484,6 +3579,8 @@ packed_map_get_remove_by_key_interval(const packed_map* map, cdt_op_mem* com,
 	if (! packed_map_check_and_fill_offidx(map)) {
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_by_key_interval() invalid packed map");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_by_key_interval: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -3499,12 +3596,16 @@ packed_map_get_remove_by_key_interval(const packed_map* map, cdt_op_mem* com,
 				cf_warning(AS_PARTICLE,
 						"packed_map_get_remove_by_key_interval() invalid result_type %d",
 						result->type);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"map_get_remove_by_key_interval: invalid result type %s",
+						cdt_result_type_str(result->type));
 				return -AS_ERR_OP_NOT_APPLICABLE;
 			}
 
 			return AS_OK;
 		}
 
+		// NOTE: error details already set by packed_map_get_remove_by_index_range.
 		return packed_map_get_remove_by_index_range(map, com, index, count);
 	}
 
@@ -3513,6 +3614,8 @@ packed_map_get_remove_by_key_interval(const packed_map* map, cdt_op_mem* com,
 	if (inverted && ! result->is_multi) {
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_by_key_interval() INVERTED flag not supported for single result ops");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_by_key_interval: INVERTED not supported for single result ops");
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -3527,6 +3630,9 @@ packed_map_get_remove_by_key_interval(const packed_map* map, cdt_op_mem* com,
 				cf_warning(AS_PARTICLE,
 						"packed_map_get_remove_by_key_interval() invalid result_type %d",
 						result->type);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"map_get_remove_by_key_interval: invalid result type %s",
+						cdt_result_type_str(result->type));
 				return -AS_ERR_OP_NOT_APPLICABLE;
 			}
 
@@ -3540,6 +3646,8 @@ packed_map_get_remove_by_key_interval(const packed_map* map, cdt_op_mem* com,
 			define_map_packer(mpk, op.new_ele_count, map->flags, new_sz);
 
 			if (! map_packer_setup_bin(&mpk, com)) {
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"map_get_remove_by_key_interval: failed to set up result bin");
 				return -AS_ERR_OP_NOT_APPLICABLE;
 			}
 
@@ -3557,6 +3665,7 @@ packed_map_get_remove_by_key_interval(const packed_map* map, cdt_op_mem* com,
 		}
 #endif
 
+		// NOTE: error details already set by packed_map_build_result_by_key.
 		return packed_map_build_result_by_key(map, key_start, find_key.idx, 1,
 				result);
 	}
@@ -3578,6 +3687,8 @@ packed_map_get_remove_by_key_interval(const packed_map* map, cdt_op_mem* com,
 
 	if (cdt_op_is_modify(com)) {
 		if (! packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_by_key_interval: failed to remove elements");
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 	}
@@ -3585,6 +3696,8 @@ packed_map_get_remove_by_key_interval(const packed_map* map, cdt_op_mem* com,
 	if (result_data_is_return_elements(result)) {
 		if (! packed_map_build_ele_result_by_mask(map, rm_mask, rm_count, rm_sz,
 					result)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_by_key_interval: failed to build element result");
 			return -AS_ERR_UNKNOWN;
 		}
 	}
@@ -3595,6 +3708,7 @@ packed_map_get_remove_by_key_interval(const packed_map* map, cdt_op_mem* com,
 		ret = result_data_set_range(result, index, count, map->ele_count);
 	}
 
+	// NOTE: error details already set by result_data_set_range/result_data_set_index_rank_count.
 	if (ret != AS_OK) {
 		return ret;
 	}
@@ -3629,6 +3743,8 @@ packed_map_trim_ordered(const packed_map* map, cdt_op_mem* com, uint32_t index,
 
 	if (! packed_map_check_and_fill_offidx(map)) {
 		cf_warning(AS_PARTICLE, "packed_map_trim_ordered() invalid packed map");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_trim_ordered: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -3640,6 +3756,8 @@ packed_map_trim_ordered(const packed_map* map, cdt_op_mem* com, uint32_t index,
 		define_map_packer(mpk, count, map->flags, content_sz);
 
 		if (! map_packer_setup_bin(&mpk, com)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_trim_ordered: failed to set up result bin");
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 
@@ -3680,6 +3798,8 @@ packed_map_trim_ordered(const packed_map* map, cdt_op_mem* com, uint32_t index,
 		result->flags = AS_CDT_OP_FLAG_INVERTED;
 
 		if (! packed_map_build_ele_result_by_idx_range(map, index, count, result)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_trim_ordered: failed to build element result");
 			return -AS_ERR_UNKNOWN;
 		}
 
@@ -3688,6 +3808,9 @@ packed_map_trim_ordered(const packed_map* map, cdt_op_mem* com, uint32_t index,
 		cf_warning(AS_PARTICLE,
 				"packed_map_trim_ordered() result_type %d not supported",
 				result->type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_trim_ordered: result type %s not supported",
+				cdt_result_type_str(result->type));
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -3708,6 +3831,9 @@ packed_map_get_remove_by_index_range(const packed_map* map, cdt_op_mem* com,
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_by_index_range() index %ld out of bounds for ele_count %u",
 				index, map->ele_count);
+		as_error_details_set_fmt(AS_SUB_OPNOT_CDT_INDEX_OUT_OF_BOUNDS,
+				"map_get_remove_by_index_range: index %ld out of bounds for element count %u",
+				index, map->ele_count);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -3715,6 +3841,9 @@ packed_map_get_remove_by_index_range(const packed_map* map, cdt_op_mem* com,
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_by_index_range() result_type %d not supported",
 				result->type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_by_index_range: result type %s not supported",
+				cdt_result_type_str(result->type));
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -3722,6 +3851,8 @@ packed_map_get_remove_by_index_range(const packed_map* map, cdt_op_mem* com,
 		if (! result->is_multi) {
 			cf_warning(AS_PARTICLE,
 					"packed_map_get_remove_by_index_range() INVERTED flag not supported for single result ops");
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_by_index_range: INVERTED not supported for single result ops");
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 
@@ -3743,6 +3874,7 @@ packed_map_get_remove_by_index_range(const packed_map* map, cdt_op_mem* com,
 			uindex = 0;
 		}
 		else if (map_is_k_ordered(map)) {
+			// NOTE: error details already set by packed_map_trim_ordered.
 			return packed_map_trim_ordered(map, com, uindex, count32);
 		}
 		else {
@@ -3755,6 +3887,9 @@ packed_map_get_remove_by_index_range(const packed_map* map, cdt_op_mem* com,
 			cf_warning(AS_PARTICLE,
 					"packed_map_get_remove_by_index_range() invalid result type %d",
 					result->type);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_by_index_range: invalid result type %s",
+					cdt_result_type_str(result->type));
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 
@@ -3764,12 +3899,15 @@ packed_map_get_remove_by_index_range(const packed_map* map, cdt_op_mem* com,
 	setup_map_must_have_offidx(u, map);
 
 	if (count32 == map->ele_count) {
+		// NOTE: error details already set by packed_map_get_remove_all.
 		return packed_map_get_remove_all(map, com);
 	}
 
 	if (! packed_map_check_and_fill_offidx(map)) {
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_by_index_range() invalid packed map");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_by_index_range: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -3778,6 +3916,8 @@ packed_map_get_remove_by_index_range(const packed_map* map, cdt_op_mem* com,
 	if (map_is_k_ordered(map)) {
 		if (cdt_op_is_modify(com)) {
 			if (! packed_map_remove_idx_range(map, com, uindex, count32)) {
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"map_get_remove_by_index_range: failed to remove elements");
 				return -AS_ERR_OP_NOT_APPLICABLE;
 			}
 		}
@@ -3785,6 +3925,8 @@ packed_map_get_remove_by_index_range(const packed_map* map, cdt_op_mem* com,
 		if (result_data_is_return_elements(result)) {
 			if (! packed_map_build_ele_result_by_idx_range(map, uindex, count32,
 						result)) {
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"map_get_remove_by_index_range: failed to build element result");
 				return -AS_ERR_UNKNOWN;
 			}
 		}
@@ -3803,6 +3945,8 @@ packed_map_get_remove_by_index_range(const packed_map* map, cdt_op_mem* com,
 		if (! heap_success) {
 			cf_warning(AS_PARTICLE,
 					"packed_map_get_remove_by_index_range() invalid packed map");
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_by_index_range: invalid packed map");
 			return -AS_ERR_PARAMETER;
 		}
 
@@ -3816,6 +3960,8 @@ packed_map_get_remove_by_index_range(const packed_map* map, cdt_op_mem* com,
 
 		if (cdt_op_is_modify(com)) {
 			if (! packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz)) {
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"map_get_remove_by_index_range: failed to remove elements");
 				return -AS_ERR_OP_NOT_APPLICABLE;
 			}
 		}
@@ -3859,6 +4005,8 @@ packed_map_get_remove_by_index_range(const packed_map* map, cdt_op_mem* com,
 			if (! success) {
 				cf_warning(AS_PARTICLE,
 						"packed_map_get_remove_by_index_range() invalid packed map");
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"map_get_remove_by_index_range: failed to build element result");
 				return -AS_ERR_PARAMETER;
 			}
 
@@ -3870,6 +4018,7 @@ packed_map_get_remove_by_index_range(const packed_map* map, cdt_op_mem* com,
 		}
 	}
 
+	// NOTE: error details already set by result_data_set_range/result_data_set_index_rank_count.
 	if (ret != AS_OK) {
 		return ret;
 	}
@@ -3898,6 +4047,9 @@ packed_map_get_remove_by_value_interval(const packed_map* map, cdt_op_mem* com,
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_by_value_interval() result_type %d not supported",
 				result->type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_by_value_interval: result type %s not supported",
+				cdt_result_type_str(result->type));
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -3906,11 +4058,15 @@ packed_map_get_remove_by_value_interval(const packed_map* map, cdt_op_mem* com,
 	if (inverted && ! result->is_multi) {
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_by_value_interval() INVERTED flag not supported for single result ops");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_by_value_interval: INVERTED not supported for single result ops");
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
 	if (map->ele_count == 0) {
 		if (! result_data_set_value_not_found(result, -1)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_by_value_interval: value not found");
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 
@@ -3922,6 +4078,8 @@ packed_map_get_remove_by_value_interval(const packed_map* map, cdt_op_mem* com,
 	if (! packed_map_check_and_fill_offidx(map)) {
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_by_value_interval() invalid packed map");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_by_value_interval: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -3951,6 +4109,8 @@ packed_map_get_remove_by_value_interval(const packed_map* map, cdt_op_mem* com,
 
 		if (cdt_op_is_modify(com)) {
 			if (! packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz)) {
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"map_get_remove_by_value_interval: failed to remove elements");
 				return -AS_ERR_OP_NOT_APPLICABLE;
 			}
 		}
@@ -3961,6 +4121,8 @@ packed_map_get_remove_by_value_interval(const packed_map* map, cdt_op_mem* com,
 							rm_count, rm_sz, result)) {
 					cf_warning(AS_PARTICLE,
 							"packed_map_get_remove_by_value_interval() invalid packed map");
+					as_error_details_set_fmt(AS_SUB_NONE,
+							"map_get_remove_by_value_interval: invalid packed map");
 					return -AS_ERR_PARAMETER;
 				}
 			}
@@ -3968,6 +4130,8 @@ packed_map_get_remove_by_value_interval(const packed_map* map, cdt_op_mem* com,
 							 rank, count, rm_sz, result)) {
 				cf_warning(AS_PARTICLE,
 						"packed_map_get_remove_by_value_interval() invalid packed map");
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"map_get_remove_by_value_interval: invalid packed map");
 				return -AS_ERR_PARAMETER;
 			}
 		}
@@ -3998,9 +4162,12 @@ packed_map_get_remove_by_value_interval(const packed_map* map, cdt_op_mem* com,
 			if (inverted) {
 				result->flags &= ~AS_CDT_OP_FLAG_INVERTED;
 
+				// NOTE: error details already set by packed_map_get_remove_all.
 				return packed_map_get_remove_all(map, com);
 			}
 			else if (! result_data_set_value_not_found(result, rank)) {
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"map_get_remove_by_value_interval: value not found");
 				return -AS_ERR_OP_NOT_APPLICABLE;
 			}
 		}
@@ -4027,6 +4194,8 @@ packed_map_get_remove_by_value_interval(const packed_map* map, cdt_op_mem* com,
 			if (cdt_op_is_modify(com)) {
 				if (! packed_map_remove_by_mask(map, com, rm_mask, rm_count,
 							&rm_sz)) {
+					as_error_details_set_fmt(AS_SUB_NONE,
+							"map_get_remove_by_value_interval: failed to remove elements");
 					return -AS_ERR_OP_NOT_APPLICABLE;
 				}
 			}
@@ -4034,6 +4203,8 @@ packed_map_get_remove_by_value_interval(const packed_map* map, cdt_op_mem* com,
 			if (result_data_is_return_elements(result)) {
 				if (! packed_map_build_ele_result_by_mask(map, rm_mask,
 							rm_count, rm_sz, result)) {
+					as_error_details_set_fmt(AS_SUB_NONE,
+							"map_get_remove_by_value_interval: failed to build element result");
 					return -AS_ERR_UNKNOWN;
 				}
 			}
@@ -4047,6 +4218,7 @@ packed_map_get_remove_by_value_interval(const packed_map* map, cdt_op_mem* com,
 		}
 	}
 
+	// NOTE: error details already set by result_data_set_range/result_data_set_index_rank_count.
 	if (ret != AS_OK) {
 		return ret;
 	}
@@ -4076,6 +4248,9 @@ packed_map_get_remove_by_rank_range(const packed_map* map, cdt_op_mem* com,
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_by_rank_range() rank %ld out of bounds for ele_count %u",
 				rank, map->ele_count);
+		as_error_details_set_fmt(AS_SUB_OPNOT_CDT_RANK_OUT_OF_BOUNDS,
+				"map_get_remove_by_rank_range: rank %ld out of bounds for element count %u",
+				rank, map->ele_count);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -4083,6 +4258,9 @@ packed_map_get_remove_by_rank_range(const packed_map* map, cdt_op_mem* com,
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_by_rank_range() result_type %d not supported",
 				result->type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_by_rank_range: result type %s not supported",
+				cdt_result_type_str(result->type));
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -4090,6 +4268,8 @@ packed_map_get_remove_by_rank_range(const packed_map* map, cdt_op_mem* com,
 		if (! result->is_multi) {
 			cf_warning(AS_PARTICLE,
 					"packed_map_get_remove_by_rank_range() INVERTED flag not supported for single result ops");
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_by_rank_range: INVERTED not supported for single result ops");
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 
@@ -4117,6 +4297,9 @@ packed_map_get_remove_by_rank_range(const packed_map* map, cdt_op_mem* com,
 
 	if (count32 == 0) {
 		if (! result_data_set_value_not_found(result, urank)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_by_rank_range: no elements found at rank %u",
+					urank);
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 
@@ -4128,6 +4311,8 @@ packed_map_get_remove_by_rank_range(const packed_map* map, cdt_op_mem* com,
 	if (! packed_map_check_and_fill_offidx(map)) {
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_by_rank_range() invalid packed map");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_by_rank_range: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -4150,6 +4335,8 @@ packed_map_get_remove_by_rank_range(const packed_map* map, cdt_op_mem* com,
 		if (! heap_success) {
 			cf_warning(AS_PARTICLE,
 					"packed_map_get_remove_by_rank_range() invalid packed map");
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_by_rank_range: invalid packed map");
 			return -AS_ERR_PARAMETER;
 		}
 
@@ -4171,6 +4358,8 @@ packed_map_get_remove_by_rank_range(const packed_map* map, cdt_op_mem* com,
 							heap.filled, count32, 0, result)) {
 					cf_warning(AS_PARTICLE,
 							"packed_map_get_remove_by_rank_range() invalid packed map");
+					as_error_details_set_fmt(AS_SUB_NONE,
+							"map_get_remove_by_rank_range: invalid packed map");
 					return -AS_ERR_PARAMETER;
 				}
 			}
@@ -4182,6 +4371,8 @@ packed_map_get_remove_by_rank_range(const packed_map* map, cdt_op_mem* com,
 
 	if (cdt_op_is_modify(com)) {
 		if (! packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_by_rank_range: failed to remove elements");
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 	}
@@ -4215,6 +4406,8 @@ packed_map_get_remove_by_rank_range(const packed_map* map, cdt_op_mem* com,
 						rm_sz, result)) {
 				cf_warning(AS_PARTICLE,
 						"packed_map_get_remove_by_rank_range() invalid packed map");
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"map_get_remove_by_rank_range: invalid packed map");
 				return -AS_ERR_PARAMETER;
 			}
 		}
@@ -4223,6 +4416,8 @@ packed_map_get_remove_by_rank_range(const packed_map* map, cdt_op_mem* com,
 						rm_count, rm_sz, result)) {
 			cf_warning(AS_PARTICLE,
 					"packed_map_get_remove_by_rank_range() invalid packed map");
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_by_rank_range: invalid packed map");
 			return -AS_ERR_PARAMETER;
 		}
 		break;
@@ -4236,9 +4431,13 @@ packed_map_get_remove_by_rank_range(const packed_map* map, cdt_op_mem* com,
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_by_rank_range() result_type %d not supported",
 				result->type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_by_rank_range: result type %s not supported",
+				cdt_result_type_str(result->type));
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
+	// NOTE: error details already set by result_data_set_range/result_data_set_index_rank_count.
 	if (ret != AS_OK) {
 		return ret;
 	}
@@ -4262,6 +4461,7 @@ packed_map_get_remove_all_by_key_list(const packed_map* map, cdt_op_mem* com,
 	msgpack_in items_mp;
 	uint32_t items_count;
 
+	// NOTE: error details already set by list_param_parse.
 	if (! list_param_parse(key_list, &items_mp, &items_count)) {
 		return -AS_ERR_PARAMETER;
 	}
@@ -4279,6 +4479,9 @@ packed_map_get_remove_all_by_key_list(const packed_map* map, cdt_op_mem* com,
 			cf_warning(AS_PARTICLE,
 					"packed_map_get_remove_all_by_key_list() invalid result type %d",
 					result->type);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_all_by_key_list: invalid result type %s",
+					cdt_result_type_str(result->type));
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		default:
 			break;
@@ -4292,6 +4495,7 @@ packed_map_get_remove_all_by_key_list(const packed_map* map, cdt_op_mem* com,
 
 		result->flags &= ~AS_CDT_OP_FLAG_INVERTED;
 
+		// NOTE: error details already set by packed_map_get_remove_all.
 		return packed_map_get_remove_all(map, com);
 	}
 
@@ -4300,14 +4504,18 @@ packed_map_get_remove_all_by_key_list(const packed_map* map, cdt_op_mem* com,
 	if (! packed_map_check_and_fill_offidx(map)) {
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_all_by_key_list() invalid packed map");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_all_by_key_list: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
 	if (map_is_k_ordered(map)) {
+		// NOTE: error details already set by packed_map_get_remove_all_by_key_list_ordered.
 		return packed_map_get_remove_all_by_key_list_ordered(map, com,
 				&items_mp, items_count);
 	}
 
+	// NOTE: error details already set by packed_map_get_remove_all_by_key_list_unordered.
 	return packed_map_get_remove_all_by_key_list_unordered(map, com, &items_mp,
 			items_count);
 }
@@ -4335,6 +4543,9 @@ packed_map_get_remove_all_by_key_list_ordered(const packed_map* map,
 		if (msgpack_sz(items_mp) == 0) {
 			cf_warning(AS_PARTICLE,
 					"packed_map_get_remove_all_by_key_list_ordered() invalid parameter");
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_all_by_key_list: invalid key element at index %u",
+					i);
 			return -AS_ERR_PARAMETER;
 		}
 
@@ -4398,6 +4609,8 @@ packed_map_get_remove_all_by_key_list_ordered(const packed_map* map,
 
 	if (cdt_op_is_modify(com)) {
 		if (! packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_all_by_key_list: failed to remove elements");
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 	}
@@ -4430,6 +4643,8 @@ packed_map_get_remove_all_by_key_list_ordered(const packed_map* map,
 					result)) {
 			cf_warning(AS_PARTICLE,
 					"packed_map_get_remove_all_by_key_list_ordered() invalid packed map");
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_all_by_key_list: invalid packed map");
 			return -AS_ERR_PARAMETER;
 		}
 		break;
@@ -4439,6 +4654,9 @@ packed_map_get_remove_all_by_key_list_ordered(const packed_map* map,
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_all_by_key_list_ordered() invalid return type %d",
 				result->type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_all_by_key_list: result type %s not supported",
+				cdt_result_type_str(result->type));
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -4471,6 +4689,8 @@ packed_map_get_remove_all_by_key_list_unordered(const packed_map* map,
 	if (! offset_index_find_items((offset_index*)&map->offidx,
 				CDT_FIND_ITEMS_IDXS_FOR_MAP_KEY, items_mp, &key_list_ordidx,
 				inverted, rm_mask, &rm_count, ic, exit_early)) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_all_by_key_list: failed to find items in map");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -4478,6 +4698,8 @@ packed_map_get_remove_all_by_key_list_unordered(const packed_map* map,
 
 	if (cdt_op_is_modify(com)) {
 		if (! packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_all_by_key_list: failed to remove elements");
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 	}
@@ -4503,6 +4725,8 @@ packed_map_get_remove_all_by_key_list_unordered(const packed_map* map,
 	case RESULT_TYPE_ORDERED_MAP: {
 		if (! packed_map_build_ele_result_by_mask(map, rm_mask, rm_count, rm_sz,
 					result)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_all_by_key_list: failed to build element result");
 			return -AS_ERR_UNKNOWN;
 		}
 		break;
@@ -4511,6 +4735,9 @@ packed_map_get_remove_all_by_key_list_unordered(const packed_map* map,
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_all_by_key_list_unordered() invalid return type %d",
 				result->type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_all_by_key_list: result type %s not supported",
+				cdt_result_type_str(result->type));
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -4538,6 +4765,7 @@ packed_map_get_remove_all_by_value_list(const packed_map* map, cdt_op_mem* com,
 	msgpack_in items_mp;
 	uint32_t items_count;
 
+	// NOTE: error details already set by list_param_parse.
 	if (! list_param_parse(value_list, &items_mp, &items_count)) {
 		return -AS_ERR_PARAMETER;
 	}
@@ -4553,6 +4781,9 @@ packed_map_get_remove_all_by_value_list(const packed_map* map, cdt_op_mem* com,
 			cf_warning(AS_PARTICLE,
 					"packed_map_get_remove_all_by_value_list() invalid result type %d",
 					result->type);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_all_by_value_list: result type %s not supported",
+					cdt_result_type_str(result->type));
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		default:
 			break;
@@ -4565,6 +4796,7 @@ packed_map_get_remove_all_by_value_list(const packed_map* map, cdt_op_mem* com,
 
 		result->flags &= ~AS_CDT_OP_FLAG_INVERTED;
 
+		// NOTE: error details already set by packed_map_get_remove_all.
 		return packed_map_get_remove_all(map, com);
 	}
 
@@ -4573,10 +4805,13 @@ packed_map_get_remove_all_by_value_list(const packed_map* map, cdt_op_mem* com,
 	if (! packed_map_check_and_fill_offidx(map)) {
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_all_by_value_list() invalid packed map");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_all_by_value_list: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
 	if (order_index_is_valid(&map->ordidx)) {
+		// NOTE: error details already set by packed_map_get_remove_all_by_value_list_ordered.
 		return packed_map_get_remove_all_by_value_list_ordered(map, com,
 				&items_mp, items_count);
 	}
@@ -4592,6 +4827,8 @@ packed_map_get_remove_all_by_value_list(const packed_map* map, cdt_op_mem* com,
 	if (! offset_index_find_items(u->offidx, CDT_FIND_ITEMS_IDXS_FOR_MAP_VALUE,
 				&items_mp, &value_list_ordidx, inverted, rm_mask, &rm_count, rc,
 				exit_early)) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_all_by_value_list: failed to find items in map");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -4599,6 +4836,8 @@ packed_map_get_remove_all_by_value_list(const packed_map* map, cdt_op_mem* com,
 
 	if (cdt_op_is_modify(com)) {
 		if (! packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_all_by_value_list: failed to remove elements");
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 	}
@@ -4629,6 +4868,8 @@ packed_map_get_remove_all_by_value_list(const packed_map* map, cdt_op_mem* com,
 	case RESULT_TYPE_ORDERED_MAP: {
 		if (! packed_map_build_ele_result_by_mask(map, rm_mask, rm_count, rm_sz,
 					result)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_all_by_value_list: failed to build element result");
 			return -AS_ERR_UNKNOWN;
 		}
 		break;
@@ -4637,6 +4878,9 @@ packed_map_get_remove_all_by_value_list(const packed_map* map, cdt_op_mem* com,
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_all_by_value_list() invalid return type %d",
 				result->type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_all_by_value_list: result type %s not supported",
+				cdt_result_type_str(result->type));
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -4675,6 +4919,9 @@ packed_map_get_remove_all_by_value_list_ordered(const packed_map* map,
 		if (msgpack_sz(items_mp) == 0) {
 			cf_warning(AS_PARTICLE,
 					"packed_map_remove_all_value_items_ordered() invalid parameter");
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_all_by_value_list: invalid value element at index %u",
+					i);
 			return -AS_ERR_PARAMETER;
 		}
 
@@ -4706,6 +4953,8 @@ packed_map_get_remove_all_by_value_list_ordered(const packed_map* map,
 
 	if (cdt_op_is_modify(com)) {
 		if (! packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_all_by_value_list: failed to remove elements");
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 	}
@@ -4747,6 +4996,8 @@ packed_map_get_remove_all_by_value_list_ordered(const packed_map* map,
 					result)) {
 			cf_warning(AS_PARTICLE,
 					"packed_map_remove_all_value_items_ordered() invalid packed map");
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_all_by_value_list: invalid packed map");
 			return -AS_ERR_PARAMETER;
 		}
 		break;
@@ -4755,6 +5006,9 @@ packed_map_get_remove_all_by_value_list_ordered(const packed_map* map,
 		cf_warning(AS_PARTICLE,
 				"packed_map_remove_all_value_items_ordered() invalid return type %d",
 				result->type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_all_by_value_list: result type %s not supported",
+				cdt_result_type_str(result->type));
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -4779,6 +5033,8 @@ packed_map_get_remove_by_rel_index_range(const packed_map* map, cdt_op_mem* com,
 	if (! packed_map_check_and_fill_offidx(map)) {
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_by_rel_index_range() invalid packed map");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_by_rel_index_range: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -4797,6 +5053,7 @@ packed_map_get_remove_by_rel_index_range(const packed_map* map, cdt_op_mem* com,
 
 	calc_rel_index_count(index, count, rel_index, &index, &count);
 
+	// NOTE: error details already set by packed_map_get_remove_by_index_range.
 	return packed_map_get_remove_by_index_range(map, com, index, count);
 }
 
@@ -4812,6 +5069,8 @@ packed_map_get_remove_by_rel_rank_range(const packed_map* map, cdt_op_mem* com,
 	if (! packed_map_check_and_fill_offidx(map)) {
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_by_rel_rank_range() invalid packed map");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_by_rel_rank_range: invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -4831,6 +5090,7 @@ packed_map_get_remove_by_rel_rank_range(const packed_map* map, cdt_op_mem* com,
 
 	calc_rel_index_count(rank, count, rel_rank, &rank, &count);
 
+	// NOTE: error details already set by packed_map_get_remove_by_rank_range.
 	return packed_map_get_remove_by_rank_range(map, com, rank, count);
 }
 
@@ -4844,6 +5104,8 @@ packed_map_get_remove_all(const packed_map* map, cdt_op_mem* com)
 
 	if (cdt_op_is_modify(com)) {
 		if (! cdt_context_set_empty_map(&com->ctx, map->flags)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_all: failed to set empty map");
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 	}
@@ -4886,6 +5148,8 @@ packed_map_get_remove_all(const packed_map* map, cdt_op_mem* com)
 	case RESULT_TYPE_ORDERED_MAP: {
 		if (! packed_map_build_ele_result_by_idx_range(map, 0, map->ele_count,
 					result)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_get_remove_all: failed to build element result");
 			return -AS_ERR_UNKNOWN;
 		}
 		break;
@@ -4900,6 +5164,9 @@ packed_map_get_remove_all(const packed_map* map, cdt_op_mem* com)
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_all() invalid return type %d",
 				result->type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_get_remove_all: result type %s not supported",
+				cdt_result_type_str(result->type));
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -5752,6 +6019,8 @@ packed_map_build_result_by_key(const packed_map* map, const cdt_payload* key,
 	case RESULT_TYPE_UNORDERED_MAP:
 	case RESULT_TYPE_ORDERED_MAP:
 		if (! packed_map_build_ele_result_by_idx_range(map, idx, count, result)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_build_result_by_key: failed to build element result");
 			return -AS_ERR_UNKNOWN;
 		}
 
@@ -5762,6 +6031,9 @@ packed_map_build_result_by_key(const packed_map* map, const cdt_payload* key,
 		cf_warning(AS_PARTICLE,
 				"packed_map_build_result_by_key() invalid result_type %d",
 				result->type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map_build_result_by_key: result type %s not supported",
+				cdt_result_type_str(result->type));
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -6476,6 +6748,9 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state* state,
 		cf_warning(AS_PARTICLE,
 				"cdt_process_state_packed_map_modify_optype() invalid type %d",
 				as_bin_get_particle_type(ctx->b));
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map modify requires map bin, got bin type %s",
+				as_particle_type_str(as_bin_get_particle_type(ctx->b)));
 		com->ret_code = -AS_ERR_INCOMPATIBLE_TYPE;
 		return false;
 	}
@@ -6593,6 +6868,8 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state* state,
 	}
 	case AS_CDT_OP_MAP_REPLACE_ITEMS: {
 		if (ctx->create_triggered || ! cdt_context_inuse(ctx)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"map_replace_items: map does not exist, cannot replace");
 			com->ret_code = -AS_ERR_ELEMENT_NOT_FOUND;
 			return false;
 		}
@@ -6871,20 +7148,26 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state* state,
 		cf_warning(AS_PARTICLE,
 				"cdt_process_state_packed_map_modify_optype() invalid cdt op: %d",
 				optype);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map modify op type %d is not recognized", optype);
 		com->ret_code = -AS_ERR_PARAMETER;
 		return false;
 	}
 
 	if (ret != AS_OK) {
+		const char* op_name = cdt_process_state_get_op_name(state);
+
 		if (ret == -AS_ERR_ELEMENT_NOT_FOUND || ret == -AS_ERR_ELEMENT_EXISTS) {
-			cf_detail(AS_PARTICLE, "%s: failed",
-					cdt_process_state_get_op_name(state));
+			cf_detail(AS_PARTICLE, "%s: failed", op_name);
 		}
 		else {
-			cf_warning(AS_PARTICLE, "%s: failed",
-					cdt_process_state_get_op_name(state));
+			cf_warning(AS_PARTICLE, "%s: failed", op_name);
 		}
 
+		// The error details will probably already be set by the function
+		// that failed. This is a fallback if something was missed.
+		as_error_details_set_fmt(AS_SUB_NONE, "%s failed with status %d",
+				op_name, -ret);
 		com->ret_code = ret;
 		return false;
 	}
@@ -6907,6 +7190,9 @@ cdt_process_state_packed_map_read_optype(cdt_process_state* state, cdt_op_mem* c
 	as_cdt_optype optype = state->type;
 
 	if (ctx->data_sz == 0 && ! is_map_type(as_bin_get_particle_type(ctx->b))) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map read requires map bin, got bin type %s",
+				as_particle_type_str(as_bin_get_particle_type(ctx->b)));
 		com->ret_code = -AS_ERR_INCOMPATIBLE_TYPE;
 		return false;
 	}
@@ -6915,6 +7201,9 @@ cdt_process_state_packed_map_read_optype(cdt_process_state* state, cdt_op_mem* c
 
 	if (! packed_map_init_from_com(&map, com, false)) {
 		cf_warning(AS_PARTICLE, "%s: invalid map",
+				cdt_process_state_get_op_name(state));
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"%s: bin does not contain a valid map",
 				cdt_process_state_get_op_name(state));
 		com->ret_code = -AS_ERR_PARAMETER;
 		return false;
@@ -7115,13 +7404,18 @@ cdt_process_state_packed_map_read_optype(cdt_process_state* state, cdt_op_mem* c
 		cf_warning(AS_PARTICLE,
 				"cdt_process_state_packed_map_read_optype() invalid cdt op: %d",
 				optype);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"map read op type %d is not recognized", optype);
 		com->ret_code = -AS_ERR_PARAMETER;
 		return false;
 	}
 
 	if (ret != AS_OK) {
-		cf_warning(AS_PARTICLE, "%s: failed",
-				cdt_process_state_get_op_name(state));
+		const char* op_name = cdt_process_state_get_op_name(state);
+
+		cf_warning(AS_PARTICLE, "%s: failed", op_name);
+		as_error_details_set_fmt(AS_SUB_NONE, "%s failed with status %d",
+				op_name, -ret);
 		com->ret_code = ret;
 		return false;
 	}

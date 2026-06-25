@@ -45,16 +45,21 @@ as_mrt_verify_read_start(as_transaction* tr)
 	cf_warning(AS_RW, "MRTs are enterprise only");
 
 	tr->result_code = AS_ERR_ENTERPRISE_ONLY;
+	// AS_ERR_ENTERPRISE_ONLY has no subcode family - no subcode here.
+	as_error_details_set_fmt(AS_SUB_NONE,
+			"multi-record transactions require enterprise edition");
 
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		as_msg_send_reply(tr->from.proto_fd_h, tr->result_code, tr->generation,
-				tr->void_time, NULL, NULL, 0, tr->rsv.ns, NULL);
+				tr->void_time, NULL, NULL, 0, tr->rsv.ns, NULL,
+				as_msg_include_error_details(tr->msgp->msg.info4));
 		break;
 	case FROM_PROXY:
 		as_proxy_send_response(tr->from.proxy_orig->node,
 				tr->from_data.proxy_tid, tr->result_code, tr->generation,
-				tr->void_time, NULL, NULL, 0, tr->rsv.ns, NULL);
+				tr->void_time, NULL, NULL, 0, tr->rsv.ns, NULL,
+				as_msg_include_error_details(tr->msgp->msg.info4));
 		proxy_origin_destroy(tr->from.proxy_orig);
 		tr->from.proxy_orig = NULL; // pattern, not needed
 		break;

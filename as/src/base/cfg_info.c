@@ -81,6 +81,7 @@ static void cfg_get_namespace(const as_namespace* ns, cf_dyn_buf* db);
 
 // cfg_get_* helpers.
 static const char* auto_pin_string(void);
+static const char* error_details_max_verbosity_string(void);
 static void append_addrs(cf_dyn_buf* db, const char* name,
 		const cf_addr_list* list);
 
@@ -239,6 +240,8 @@ cfg_get_service(cf_dyn_buf* db)
 	info_append_bool(db, "enable-hist-info", g_config.info_hist_enabled);
 	info_append_bool(db, "enforce-best-practices",
 			g_config.enforce_best_practices);
+	info_append_string(db, "error-details-max-verbosity",
+			error_details_max_verbosity_string());
 
 	for (uint32_t i = 0; i < g_config.n_feature_key_files; i++) {
 		info_append_indexed_string(db, "feature-key-file", i, NULL,
@@ -826,6 +829,25 @@ auto_pin_string(void)
 	}
 }
 
+static const char*
+error_details_max_verbosity_string(void)
+{
+	switch (g_config.error_details_max_verbosity) {
+	case AS_ERROR_DETAILS_VERBOSITY_OFF:
+		return "off";
+	case AS_ERROR_DETAILS_VERBOSITY_CODES:
+		return "codes";
+	case AS_ERROR_DETAILS_VERBOSITY_MESSAGES:
+		return "messages";
+	case AS_ERROR_DETAILS_VERBOSITY_ALL:
+		return "all";
+	default:
+		cf_warning(AS_INFO, "unexpected error-details-max-verbosity value %u",
+				g_config.error_details_max_verbosity);
+		return "invalid";
+	}
+}
+
 static void
 append_addrs(cf_dyn_buf* db, const char* name, const cf_addr_list* list)
 {
@@ -1050,6 +1072,31 @@ cfg_set_service(const char* cmd)
 		else {
 			return false;
 		}
+	}
+	else if (as_info_parameter_get(cmd, "error-details-max-verbosity", v,
+					 &v_len) == 0) {
+		uint32_t new_val;
+
+		if (strcmp(v, "off") == 0) {
+			new_val = AS_ERROR_DETAILS_VERBOSITY_OFF;
+		}
+		else if (strcmp(v, "codes") == 0) {
+			new_val = AS_ERROR_DETAILS_VERBOSITY_CODES;
+		}
+		else if (strcmp(v, "messages") == 0) {
+			new_val = AS_ERROR_DETAILS_VERBOSITY_MESSAGES;
+		}
+		else if (strcmp(v, "all") == 0) {
+			new_val = AS_ERROR_DETAILS_VERBOSITY_ALL;
+		}
+		else {
+			return false;
+		}
+
+		cf_info(AS_INFO,
+				"Changing value of error-details-max-verbosity from %s to %s",
+				error_details_max_verbosity_string(), v);
+		g_config.error_details_max_verbosity = new_val;
 	}
 	else if (as_info_parameter_get(cmd, "info-max-ms", v, &v_len) == 0) {
 		if (cf_str_atoi(v, &val) != 0) {

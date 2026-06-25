@@ -412,7 +412,17 @@ dup_res_handle_ack(cf_node node, msg* m)
 
 	as_add_uint64(&rw->rsv.ns->n_dup_res_ask, rw->n_dest_nodes);
 
+	// Continuation runs on a fabric thread - re-arm error-detail verbosity from
+	// the client's info4 bits (carried in rw->msgp) so the reply built in the
+	// callback can carry error details, mirroring the service thread.
+	as_error_msg_arm_from_msgp(rw->msgp);
+
 	bool delete_from_hash = rw->dup_res_cb(rw);
+
+	// Keep the no-leak property local to this fabric handler: if the cb
+	// deferred (built no reply) the armed verbosity/detail would otherwise
+	// persist on this thread until the next continuation re-arms.
+	as_error_msg_clear();
 
 	rw->dup_res_complete = true;
 

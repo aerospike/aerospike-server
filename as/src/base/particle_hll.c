@@ -534,6 +534,9 @@ hll_state_init(hll_state* state, const uint8_t* bin_name, uint8_t bin_name_sz,
 
 	if (! msgpack_get_list_ele_count_vec(state->mv, &ele_count) ||
 			ele_count == 0) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"hll: failed to parse op on bin %.*s (got %u args, insufficient or malformed)",
+				(int)bin_name_sz, bin_name, ele_count);
 		cf_warning(AS_PARTICLE,
 				"hll_state_init_trans - error %u bin %.*s insufficient args (%u) or unable to parse args",
 				AS_ERR_PARAMETER, (int)bin_name_sz, bin_name, ele_count);
@@ -545,6 +548,9 @@ hll_state_init(hll_state* state, const uint8_t* bin_name, uint8_t bin_name_sz,
 	uint64_t type64;
 
 	if (! msgpack_get_uint64_vec(state->mv, &type64)) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"hll: failed to parse op on bin %.*s", (int)bin_name_sz,
+				bin_name);
 		cf_warning(AS_PARTICLE,
 				"hll_state_init - error %u bin %.*s unable to parse op",
 				AS_ERR_PARAMETER, (int)bin_name_sz, bin_name);
@@ -556,6 +562,9 @@ hll_state_init(hll_state* state, const uint8_t* bin_name, uint8_t bin_name_sz,
 	if (is_read) {
 		if (! (state->op_type >= AS_HLL_READ_OP_START &&
 					state->op_type < AS_HLL_READ_OP_END)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"hll: op %u is not a read op on bin %.*s", state->op_type,
+					(int)bin_name_sz, bin_name);
 			cf_warning(AS_PARTICLE,
 					"hll_state_init - error %u bin %.*s op %u expected read op",
 					AS_ERR_PARAMETER, (int)bin_name_sz, bin_name, state->op_type);
@@ -567,6 +576,9 @@ hll_state_init(hll_state* state, const uint8_t* bin_name, uint8_t bin_name_sz,
 	else {
 		if (! (state->op_type >= AS_HLL_MODIFY_OP_START &&
 					state->op_type < AS_HLL_MODIFY_OP_END)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"hll: op %u is not a modify op on bin %.*s", state->op_type,
+					(int)bin_name_sz, bin_name);
 			cf_warning(AS_PARTICLE,
 					"hll_state_init - error %u bin %.*s op %u expected modify op",
 					AS_ERR_PARAMETER, (int)bin_name_sz, bin_name, state->op_type);
@@ -594,6 +606,7 @@ hll_modify(hll_state* state, as_bin* b, cf_ll_buf* particles_llb, as_bin* rb)
 	hll_op op = { .n_index_bits = 0xFF, .n_minhash_bits = 0xFF };
 
 	if (! hll_parse_op(state, &op)) {
+		// NOTE: Don't set error details here because it's already set in hll_parse_op().
 		hll_op_destroy(&op);
 		return -AS_ERR_PARAMETER;
 	}
@@ -607,6 +620,9 @@ hll_modify(hll_state* state, as_bin* b, cf_ll_buf* particles_llb, as_bin* rb)
 				return AS_OK;
 			}
 
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"%s: would update existing bin %.*s but create-only flag is set",
+					state->def->name, (int)state->bin_name_sz, state->bin_name);
 			cf_detail(AS_PARTICLE,
 					"as_bin_hll_modify - error %u operation %s (%u) on bin %.*s would update",
 					AS_ERR_BIN_EXISTS, state->def->name, state->op_type,
@@ -625,6 +641,9 @@ hll_modify(hll_state* state, as_bin* b, cf_ll_buf* particles_llb, as_bin* rb)
 				return AS_OK;
 			}
 
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"%s: would create new bin %.*s but update-only flag is set",
+					state->def->name, (int)state->bin_name_sz, state->bin_name);
 			cf_detail(AS_PARTICLE,
 					"as_bin_hll_modify - error %u operation %s (%u) on bin %.*s would create",
 					AS_ERR_BIN_NOT_FOUND, state->def->name, state->op_type,
@@ -641,6 +660,7 @@ hll_modify(hll_state* state, as_bin* b, cf_ll_buf* particles_llb, as_bin* rb)
 	int32_t prepare_result = state->def->prepare(&op, old_p);
 
 	if (prepare_result != AS_OK) {
+		// NOTE: Don't set error details here because it's already set in the prepare function.
 		hll_op_destroy(&op);
 		return prepare_result;
 	}
@@ -680,6 +700,7 @@ hll_read(hll_state* state, const as_bin* b, as_bin* rb)
 	hll_op op = { 0 };
 
 	if (! hll_parse_op(state, &op)) {
+		// NOTE: Don't set error details here because it's already set in hll_parse_op().
 		hll_op_destroy(&op);
 		return -AS_ERR_PARAMETER;
 	}
@@ -687,6 +708,7 @@ hll_read(hll_state* state, const as_bin* b, as_bin* rb)
 	int32_t prepare_result = state->def->prepare(&op, b->particle);
 
 	if (prepare_result != AS_OK) {
+		// NOTE: Don't set error details here because it's already set in the prepare function.
 		hll_op_destroy(&op);
 		return prepare_result;
 	}
@@ -712,6 +734,9 @@ hll_verify_bin(const as_bin* b)
 		cf_warning(AS_PARTICLE,
 				"hll_verify_bin - error %u bin is not hll (%u) found %u",
 				AS_ERR_INCOMPATIBLE_TYPE, AS_PARTICLE_TYPE_HLL, type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"hll: bin is not hll type (found %s)",
+				as_particle_type_str(type));
 		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
@@ -722,6 +747,9 @@ hll_verify_bin(const as_bin* b)
 				"hll_verify_bin - error %u found invalid hll flags %x n_index_bits %u n_minhash_bits %u sz %u",
 				AS_ERR_UNKNOWN, hll->flags, hll->n_index_bits,
 				hll->n_minhash_bits, bmem->sz);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"hll: bin contains invalid hll (flags %x, index_bits %u, minhash_bits %u, size %u)",
+				hll->flags, hll->n_index_bits, hll->n_minhash_bits, bmem->sz);
 		return -AS_ERR_UNKNOWN;
 	}
 
@@ -734,6 +762,9 @@ hll_parse_op(hll_state* state, hll_op* op)
 	hll_op_def* def = state->def;
 
 	if (state->n_args < def->min_args || state->n_args > def->max_args) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"%s: unexpected number of args %u on bin %.*s", state->def->name,
+				state->n_args, (int)state->bin_name_sz, state->bin_name);
 		cf_warning(AS_PARTICLE,
 				"hll_parse_op - error %u op %s (%u) unexpected number of args %u for op %s",
 				AS_ERR_PARAMETER, state->def->name, state->op_type,
@@ -759,6 +790,9 @@ hll_parse_n_index_bits(hll_state* state, hll_op* op)
 		cf_warning(AS_PARTICLE,
 				"hll_parse_n_index_bits - error %u op %s (%u) unable to parse n_index_bits",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"%s: unable to parse index_bits on bin %.*s", state->def->name,
+				(int)state->bin_name_sz, state->bin_name);
 		return false;
 	}
 
@@ -766,6 +800,10 @@ hll_parse_n_index_bits(hll_state* state, hll_op* op)
 		cf_warning(AS_PARTICLE,
 				"hll_parse_n_index_bits - error %u op %s (%u) n_index_bits (%ld) is out of range",
 				AS_ERR_PARAMETER, state->def->name, state->op_type, n_index_bits);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"%s: index_bits %ld out of range [%u, %u] on bin %.*s",
+				state->def->name, n_index_bits, MIN_INDEX_BITS, MAX_INDEX_BITS,
+				(int)state->bin_name_sz, state->bin_name);
 		return false;
 	}
 
@@ -784,6 +822,9 @@ hll_parse_n_minhash_bits(hll_state* state, hll_op* op)
 				"hll_parse_n_minhash_bits - error %u op %s (%u) unable to parse n_minhash_bits for op %s",
 				AS_ERR_PARAMETER, state->def->name, state->op_type,
 				state->def->name);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"%s: unable to parse minhash_bits on bin %.*s",
+				state->def->name, (int)state->bin_name_sz, state->bin_name);
 		return false;
 	}
 
@@ -798,6 +839,10 @@ hll_parse_n_minhash_bits(hll_state* state, hll_op* op)
 				"hll_parse_n_minhash_bits - error %u op %s (%u) n_minhash_bits (%ld) is out of range",
 				AS_ERR_PARAMETER, state->def->name, state->op_type,
 				n_minhash_bits);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"%s: minhash_bits %ld out of range (0 or [%u, %u]) on bin %.*s",
+				state->def->name, n_minhash_bits, MIN_MINHASH_BITS,
+				MAX_MINHASH_BITS, (int)state->bin_name_sz, state->bin_name);
 		return false;
 	}
 
@@ -808,6 +853,11 @@ hll_parse_n_minhash_bits(hll_state* state, hll_op* op)
 				"hll_parse_n_minhash_bits - error %u op %s (%u) n_index_bits (%u) and n_minhash_bits (%ld) must be less than or equal to %u",
 				AS_ERR_PARAMETER, state->def->name, state->op_type,
 				op->n_index_bits, n_minhash_bits, MAX_INDEX_AND_MINHASH_BITS);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"%s: index_bits (%u) + minhash_bits (%ld) exceeds maximum (%u) on bin %.*s",
+				state->def->name, op->n_index_bits, n_minhash_bits,
+				MAX_INDEX_AND_MINHASH_BITS, (int)state->bin_name_sz,
+				state->bin_name);
 		return false;
 	}
 
@@ -824,6 +874,9 @@ hll_parse_flags(hll_state* state, hll_op* op)
 				"hll_parse_flags - error %u op %s (%u) unable to parse flags for op %s",
 				AS_ERR_PARAMETER, state->def->name, state->op_type,
 				state->def->name);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"%s: unable to parse flags on bin %.*s", state->def->name,
+				(int)state->bin_name_sz, state->bin_name);
 		return false;
 	}
 
@@ -832,6 +885,9 @@ hll_parse_flags(hll_state* state, hll_op* op)
 				"hll_parse_flags - error %u op %s (%u) invalid flags (0x%lx) for op %s",
 				AS_ERR_PARAMETER, state->def->name, state->op_type, op->flags,
 				state->def->name);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"%s: invalid flags (0x%lx) on bin %.*s", state->def->name,
+				op->flags, (int)state->bin_name_sz, state->bin_name);
 		return false;
 	}
 
@@ -841,6 +897,10 @@ hll_parse_flags(hll_state* state, hll_op* op)
 				"hll_parse_flags - error %u op %s (%u) invalid flags combination (0x%lx) for op %s",
 				AS_ERR_PARAMETER, state->def->name, state->op_type, op->flags,
 				state->def->name);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"%s: CREATE_ONLY and UPDATE_ONLY both set (0x%lx) on bin %.*s",
+				state->def->name, op->flags, (int)state->bin_name_sz,
+				state->bin_name);
 		return false;
 	}
 
@@ -855,6 +915,9 @@ hll_parse_elements(hll_state* state, hll_op* op)
 		cf_warning(AS_PARTICLE,
 				"hll_parse_elements - error %u op %s (%u) not enough elements or unable to parse elements",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"%s: unable to parse elements on bin %.*s", state->def->name,
+				(int)state->bin_name_sz, state->bin_name);
 		return false;
 	}
 
@@ -871,6 +934,10 @@ hll_parse_elements(hll_state* state, hll_op* op)
 			cf_warning(AS_PARTICLE,
 					"hll_parse_elements - error %u op %s (%u) element (%u) is either a list or map which are unsupported (%u)",
 					AS_ERR_PARAMETER, state->def->name, state->op_type, i, t);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"%s: element %u is unsupported type (%s) on bin %.*s",
+					state->def->name, i, msgpack_type_str(t),
+					(int)state->bin_name_sz, state->bin_name);
 			return false;
 		default:
 			e->buf = msgpack_get_ele_vec(state->mv, &e->sz);
@@ -879,6 +946,10 @@ hll_parse_elements(hll_state* state, hll_op* op)
 				cf_warning(AS_PARTICLE,
 						"hll_parse_elements - error %u op %s (%u) unable to parse element (%u)",
 						AS_ERR_PARAMETER, state->def->name, state->op_type, i);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"%s: unable to parse element %u on bin %.*s",
+						state->def->name, i, (int)state->bin_name_sz,
+						state->bin_name);
 				return false;
 			}
 
@@ -889,6 +960,10 @@ hll_parse_elements(hll_state* state, hll_op* op)
 				cf_warning(AS_PARTICLE,
 						"hll_parse_elements - error %u op %s (%u) unable to normalize element (%u)",
 						AS_ERR_PARAMETER, state->def->name, state->op_type, i);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"%s: unable to normalize element %u on bin %.*s",
+						state->def->name, i, (int)state->bin_name_sz,
+						state->bin_name);
 				return false;
 			}
 		}
@@ -908,6 +983,9 @@ hll_parse_hlls(hll_state* state, hll_op* op)
 			cf_warning(AS_PARTICLE,
 					"hll_parse_hlls - error %u op %s (%u) not enough elements or unable to parse elements",
 					AS_ERR_PARAMETER, state->def->name, state->op_type);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"%s: unable to parse hll list on bin %.*s",
+					state->def->name, (int)state->bin_name_sz, state->bin_name);
 			return false;
 		}
 	}
@@ -928,6 +1006,10 @@ hll_parse_hlls(hll_state* state, hll_op* op)
 					"hll_parse_hlls - error %u op %s (%u) hll (%u) has a bad pointer %p or size (%u) minimum size (%zu)",
 					AS_ERR_PARAMETER, state->def->name, state->op_type, i,
 					e->buf, e->sz, sizeof(hll_t));
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"%s: hll argument %u has bad size on bin %.*s",
+					state->def->name, i, (int)state->bin_name_sz,
+					state->bin_name);
 			return false;
 		}
 
@@ -941,6 +1023,10 @@ hll_parse_hlls(hll_state* state, hll_op* op)
 					"hll_parse_hlls - error %u op %s (%u) hll (%u) contains unknown flags (%x)",
 					AS_ERR_PARAMETER, state->def->name, state->op_type, i,
 					hll->flags);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"%s: hll argument %u has unknown flags (0x%x) on bin %.*s",
+					state->def->name, i, hll->flags, (int)state->bin_name_sz,
+					state->bin_name);
 			return false;
 		}
 
@@ -949,6 +1035,10 @@ hll_parse_hlls(hll_state* state, hll_op* op)
 					"hll_parse_hlls - error %u op %s (%u) n_index_bits (%u) out of range",
 					AS_ERR_PARAMETER, state->def->name, state->op_type,
 					hll->n_index_bits);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"%s: hll argument %u has index_bits %u out of range [%u, %u] on bin %.*s",
+					state->def->name, i, hll->n_index_bits, MIN_INDEX_BITS,
+					MAX_INDEX_BITS, (int)state->bin_name_sz, state->bin_name);
 			return false;
 		}
 
@@ -957,6 +1047,10 @@ hll_parse_hlls(hll_state* state, hll_op* op)
 					"hll_parse_hlls - error %u op %s (%u) n_minhash_bits (%u) out of range",
 					AS_ERR_PARAMETER, state->def->name, state->op_type,
 					hll->n_minhash_bits);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"%s: hll argument %u has minhash_bits %u out of range (0 or [%u, %u]) on bin %.*s",
+					state->def->name, i, hll->n_minhash_bits, MIN_MINHASH_BITS,
+					MAX_MINHASH_BITS, (int)state->bin_name_sz, state->bin_name);
 			return false;
 		}
 
@@ -968,6 +1062,10 @@ hll_parse_hlls(hll_state* state, hll_op* op)
 					"hll_parse_hlls - error %u op %s (%u) hll (%u) has a bad size (%u) expected (%u)",
 					AS_ERR_PARAMETER, state->def->name, state->op_type, i,
 					e->sz, expected_sz);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"%s: hll argument %u has bad size (%u, expected %u) on bin %.*s",
+					state->def->name, i, e->sz, expected_sz,
+					(int)state->bin_name_sz, state->bin_name);
 			return false;
 		}
 	}
@@ -999,6 +1097,10 @@ hll_parse_hlls_intersect(hll_state* state, hll_op* op)
 					"hll_parse_hlls_intersect - error %u op %s (%u) can't do intersect or similarity with (%u) > 2 HLLs when n_minhash_bits are mismatched",
 					AS_ERR_PARAMETER, state->def->name, state->op_type,
 					op->n_elements);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"%s: %u HLLs have mismatched minhash_bits on bin %.*s",
+					state->def->name, op->n_elements, (int)state->bin_name_sz,
+					state->bin_name);
 			return false;
 		}
 	}
@@ -1008,6 +1110,10 @@ hll_parse_hlls_intersect(hll_state* state, hll_op* op)
 				"hll_parse_hlls_intersect - error %u op %s (%u) can't do intersect or similarity with (%u) > 2 HLLs when n_minhash_bits = 0",
 				AS_ERR_PARAMETER, state->def->name, state->op_type,
 				op->n_elements);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"%s: cannot intersect %u HLLs when minhash_bits is 0 on bin %.*s",
+				state->def->name, op->n_elements, (int)state->bin_name_sz,
+				state->bin_name);
 		return false;
 	}
 
@@ -1018,6 +1124,7 @@ hll_parse_hlls_intersect(hll_state* state, hll_op* op)
 // Local helpers - prepare modify ops.
 //
 
+// TODO - maybe pass hll_state* to include bin name in error details?
 static int32_t
 hll_modify_prepare_init_op(hll_op* op, const as_particle* old_p)
 {
@@ -1026,6 +1133,8 @@ hll_modify_prepare_init_op(hll_op* op, const as_particle* old_p)
 			cf_warning(AS_PARTICLE,
 					"hll_modify_prepare_init_op - error %u cannot create when n_index_bits is unset",
 					AS_ERR_OP_NOT_APPLICABLE);
+			as_error_details_set_fmt(AS_SUB_OPNOT_HLL_INDEX_BITS_UNSET,
+					"hll_init: cannot create when index_bits is unset");
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 
@@ -1050,12 +1159,16 @@ hll_modify_prepare_init_op(hll_op* op, const as_particle* old_p)
 		cf_warning(AS_PARTICLE,
 				"hll_modify_prepare_init_op - error %u init on results in an invalid bit configuration (%u,%u)",
 				AS_ERR_OP_NOT_APPLICABLE, op->n_index_bits, op->n_minhash_bits);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"hll_init: invalid bit configuration (%u,%u)", op->n_index_bits,
+				op->n_minhash_bits);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
 	return AS_OK;
 }
 
+// TODO - maybe pass hll_state* to include bin name in error details?
 static int32_t
 hll_modify_prepare_add_op(hll_op* op, const as_particle* old_p)
 {
@@ -1064,6 +1177,8 @@ hll_modify_prepare_add_op(hll_op* op, const as_particle* old_p)
 			cf_warning(AS_PARTICLE,
 					"hll_modify_prepare_add_op - error %u cannot create when n_index_bits is unset",
 					AS_ERR_OP_NOT_APPLICABLE);
+			as_error_details_set_fmt(AS_SUB_OPNOT_HLL_INDEX_BITS_UNSET,
+					"hll_add: cannot create when index_bits is unset");
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 
@@ -1114,11 +1229,15 @@ hll_modify_prepare_union_op(hll_op* op, const as_particle* old_p)
 
 	hll_t* old_hll = (hll_t*)((hll_mem*)old_p)->data;
 
+	// TODO - maybe pass hll_state* to include bin name in error details?
 	if ((op->flags & AS_HLL_FLAG_ALLOW_FOLD) == 0) {
 		if (old_hll->n_index_bits > min_n_index_bits) {
 			cf_warning(AS_PARTICLE,
 					"hll_modify_prepare_union_op - error %u cannot reduce n_index_bits",
 					AS_ERR_OP_NOT_APPLICABLE);
+			as_error_details_set_fmt(AS_SUB_OPNOT_HLL_CANNOT_REDUCE_INDEX_BITS,
+					"hll_set_union: cannot reduce index_bits from %u to %u without ALLOW_FOLD",
+					old_hll->n_index_bits, min_n_index_bits);
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 
@@ -1127,6 +1246,9 @@ hll_modify_prepare_union_op(hll_op* op, const as_particle* old_p)
 			cf_warning(AS_PARTICLE,
 					"hll_modify_prepare_union_op - error %u cannot reduce n_minhash_bits to zero",
 					AS_ERR_OP_NOT_APPLICABLE);
+			as_error_details_set_fmt(AS_SUB_OPNOT_HLL_CANNOT_REDUCE_MINHASH_BITS,
+					"hll_set_union: cannot reduce minhash_bits from %u to zero",
+					old_hll->n_minhash_bits);
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 
@@ -1145,6 +1267,7 @@ hll_modify_prepare_union_op(hll_op* op, const as_particle* old_p)
 	return AS_OK;
 }
 
+// TODO - maybe pass hll_state* to include bin name in error details?
 static int32_t
 hll_modify_prepare_count_op(hll_op* op, const as_particle* old_p)
 {
@@ -1152,6 +1275,8 @@ hll_modify_prepare_count_op(hll_op* op, const as_particle* old_p)
 		cf_warning(AS_PARTICLE,
 				"hll_modify_prepare_count_op - error %u cannot create bin with count op",
 				AS_ERR_BIN_NOT_FOUND);
+		as_error_details_set_fmt(AS_SUB_BIN_NOT_FOUND_HLL_CANNOT_CREATE_WITH_OP,
+				"hll_refresh_count: cannot create bin with count op");
 		return -AS_ERR_BIN_NOT_FOUND;
 	}
 
@@ -1163,6 +1288,7 @@ hll_modify_prepare_count_op(hll_op* op, const as_particle* old_p)
 	return AS_OK;
 }
 
+// TODO - maybe pass hll_state* to include bin name in error details?
 static int32_t
 hll_modify_prepare_fold_op(hll_op* op, const as_particle* old_p)
 {
@@ -1170,6 +1296,8 @@ hll_modify_prepare_fold_op(hll_op* op, const as_particle* old_p)
 		cf_warning(AS_PARTICLE,
 				"hll_modify_prepare_fold_op - error %u cannot create bin with fold op",
 				AS_ERR_BIN_NOT_FOUND);
+		as_error_details_set_fmt(AS_SUB_BIN_NOT_FOUND_HLL_CANNOT_CREATE_WITH_OP,
+				"hll_fold: cannot create bin with fold op");
 		return -AS_ERR_BIN_NOT_FOUND;
 	}
 
@@ -1179,6 +1307,8 @@ hll_modify_prepare_fold_op(hll_op* op, const as_particle* old_p)
 		cf_warning(AS_PARTICLE,
 				"hll_modify_prepare_fold_op - error %u cannot fold an HLL containing minhash bits",
 				AS_ERR_OP_NOT_APPLICABLE);
+		as_error_details_set_fmt(AS_SUB_OPNOT_HLL_CANNOT_FOLD_MINHASH,
+				"hll_fold: cannot fold HLL containing minhash bits");
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -1187,6 +1317,9 @@ hll_modify_prepare_fold_op(hll_op* op, const as_particle* old_p)
 				"hll_modify_prepare_fold_op - error %u existing HLL has less or equal n_index_bits (%u) than (%u)",
 				AS_ERR_OP_NOT_APPLICABLE, old_hll->n_index_bits,
 				op->n_index_bits);
+		as_error_details_set_fmt(AS_SUB_OPNOT_HLL_FOLD_INDEX_BITS_TOO_LARGE,
+				"hll_fold: existing index_bits (%u) less than requested (%u)",
+				old_hll->n_index_bits, op->n_index_bits);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -1208,6 +1341,7 @@ hll_read_prepare_noop(hll_op* op, const as_particle* old_p)
 	return AS_OK;
 }
 
+// TODO - maybe pass hll_state* to include bin name in error details?
 static int32_t
 hll_read_prepare_intersect(hll_op* op, const as_particle* old_p)
 {
@@ -1223,6 +1357,9 @@ hll_read_prepare_intersect(hll_op* op, const as_particle* old_p)
 		cf_warning(AS_PARTICLE,
 				"hll_read_prepare - error %u received %u HLLs - cannot intersect > 2 HLLs with the local HLL when n_minhash_bits do not match",
 				AS_ERR_OP_NOT_APPLICABLE, op->n_elements);
+		as_error_details_set_fmt(AS_SUB_OPNOT_HLL_INTERSECT_MINHASH_MISMATCH,
+				"hll_intersect: cannot intersect %u HLLs when minhash_bits do not match (existing %u, input %u)",
+				op->n_elements, old_hll->n_minhash_bits, n_minhash_bits);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 

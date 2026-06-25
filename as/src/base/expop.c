@@ -238,6 +238,11 @@ eval_op(as_exp* exp, const as_exp_ctx* ctx, uint64_t flags, as_bin* rb,
 
 	if (! success) {
 		if ((flags & AS_EXP_FLAG_EVAL_NO_FAIL) != 0) {
+			// Tolerated failure - a sub-op (CDT/bits/HLL) may have armed an
+			// error detail while evaluating. Discard it so it can't ride out
+			// on this op's success or mask a later genuine error in the same
+			// transaction.
+			as_error_msg_clear();
 			return AS_OK;
 		}
 

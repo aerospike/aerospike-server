@@ -41,6 +41,7 @@
 #include "base/cfg.h"
 #include "base/exp.h"
 #include "base/particle.h"
+#include "base/proto.h"
 #include "base/thr_info.h"
 
 //==========================================================
@@ -1099,6 +1100,9 @@ result_data_set_index_rank_count(cdt_result_data* rd, uint32_t start,
 		cf_warning(AS_PARTICLE,
 				"result_data_set_index_rank_count() invalid return type %d",
 				rd->type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt result type %s not supported for index/rank/count",
+				cdt_result_type_str(rd->type));
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -1118,6 +1122,7 @@ result_data_set_range(cdt_result_data* rd, uint32_t start, uint32_t count,
 	case RESULT_TYPE_REVRANK:
 	case RESULT_TYPE_INDEX:
 	case RESULT_TYPE_RANK:
+		// NOTE: error details already set by result_data_set_index_rank_count.
 		return result_data_set_index_rank_count(rd, start, count, ele_count);
 	case RESULT_TYPE_REVINDEX_RANGE:
 	case RESULT_TYPE_REVRANK_RANGE:
@@ -1129,6 +1134,9 @@ result_data_set_range(cdt_result_data* rd, uint32_t start, uint32_t count,
 			cf_warning(AS_PARTICLE,
 					"result_data_set_range() result_type %d not supported with INVERTED flag",
 					rd->type);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt result type %s not supported with INVERTED flag",
+					cdt_result_type_str(rd->type));
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 
@@ -1138,6 +1146,9 @@ result_data_set_range(cdt_result_data* rd, uint32_t start, uint32_t count,
 	default:
 		cf_warning(AS_PARTICLE,
 				"result_data_set_range() invalid return type %d", rd->type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt result type %s not supported for range",
+				cdt_result_type_str(rd->type));
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -1407,6 +1418,8 @@ cdt_calc_delta_init(cdt_calc_delta* cdv, const cdt_payload* delta_value,
 			if (! msgpack_get_int64(&mp_delta_value, &cdv->incr_int)) {
 				cf_warning(AS_PARTICLE,
 						"cdt_delta_value_init() invalid packed delta value");
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"increment: invalid packed integer delta value");
 				return false;
 			}
 		}
@@ -1414,6 +1427,8 @@ cdt_calc_delta_init(cdt_calc_delta* cdv, const cdt_payload* delta_value,
 			if (! msgpack_get_double(&mp_delta_value, &cdv->incr_double)) {
 				cf_warning(AS_PARTICLE,
 						"cdt_delta_value_init() invalid packed delta value");
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"increment: invalid packed double delta value");
 				return false;
 			}
 		}
@@ -1423,6 +1438,9 @@ cdt_calc_delta_init(cdt_calc_delta* cdv, const cdt_payload* delta_value,
 		else {
 			cf_warning(AS_PARTICLE,
 					"cdt_delta_value_init() delta is not int/double");
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"increment: delta value must be integer or double, got msgpack type %s",
+					msgpack_type_str(cdv->type));
 			return false;
 		}
 	}
@@ -1451,6 +1469,8 @@ cdt_calc_delta_add(cdt_calc_delta* cdv, msgpack_in* mp_value)
 			if (! msgpack_get_int64(mp_value, &cdv->value_int)) {
 				cf_warning(AS_PARTICLE,
 						"cdt_delta_value_add() invalid packed int");
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"increment: failed to read existing integer value");
 				return false;
 			}
 
@@ -1465,6 +1485,8 @@ cdt_calc_delta_add(cdt_calc_delta* cdv, msgpack_in* mp_value)
 			if (! msgpack_get_double(mp_value, &cdv->value_double)) {
 				cf_warning(AS_PARTICLE,
 						"cdt_delta_value_add() invalid packed double");
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"increment: failed to read existing double value");
 				return false;
 			}
 
@@ -1478,6 +1500,9 @@ cdt_calc_delta_add(cdt_calc_delta* cdv, msgpack_in* mp_value)
 		else {
 			cf_warning(AS_PARTICLE,
 					"cdt_delta_value_add() only valid for int/double");
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"increment: existing value must be integer or double, got msgpack type %s",
+					msgpack_type_str(packed_value_type));
 			return false;
 		}
 
@@ -1607,6 +1632,8 @@ cdt_process_state_init_from_vec(cdt_process_state* cdt_state, msgpack_in_vec* mv
 			cf_warning(AS_PARTICLE,
 					"cdt_parse_state_init() as_msg_op data too small to be valid: size=%u",
 					sz);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt op data size %u, minimum is %zu", sz, sizeof(uint16_t));
 			return false;
 		}
 
@@ -1625,6 +1652,9 @@ cdt_process_state_init_from_vec(cdt_process_state* cdt_state, msgpack_in_vec* mv
 			cf_warning(AS_PARTICLE,
 					"cdt_parse_state_init() unpack list header failed: size=%u type=%u ele_count=%u",
 					sz, cdt_state->type, cdt_state->ele_count);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt list header invalid: size=%u type=%u element count=%u",
+					sz, cdt_state->type, cdt_state->ele_count);
 			return false;
 		}
 
@@ -1638,6 +1668,9 @@ cdt_process_state_init_from_vec(cdt_process_state* cdt_state, msgpack_in_vec* mv
 			ele_count == 0 || ! msgpack_get_uint64_vec(cdt_state->mv, &t64)) {
 		cf_warning(AS_PARTICLE,
 				"cdt_parse_state_init() unpack parameters failed: size=%u ele_count=%u",
+				sz, ele_count);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt op parse failed - could not read op type from request: size=%u element count=%u",
 				sz, ele_count);
 		return false;
 	}
@@ -1654,6 +1687,9 @@ cdt_process_state_get_params(cdt_process_state* state, size_t n, ...)
 	as_cdt_optype op = state->type;
 
 	if (op >= cdt_op_table_size) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt op type %u is unknown (max is %u)", op,
+				(uint32_t)(cdt_op_table_size - 1));
 		return false;
 	}
 
@@ -1672,6 +1708,9 @@ cdt_process_state_get_params(cdt_process_state* state, size_t n, ...)
 		cf_warning(AS_PARTICLE,
 				"cdt_process_state_get_params() count mismatch: got %u from client < expected %u",
 				state->ele_count, required_count);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt state get params: %s: got %u params, expected at least %u",
+				entry->name, state->ele_count, required_count);
 		return false;
 	}
 
@@ -1679,6 +1718,9 @@ cdt_process_state_get_params(cdt_process_state* state, size_t n, ...)
 		cf_warning(AS_PARTICLE,
 				"cdt_process_state_get_params() count mismatch: got %u from client > expected %u",
 				state->ele_count, entry->count);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt state get params: %s: got %u params, expected at most %u",
+				entry->name, state->ele_count, entry->count);
 		return false;
 	}
 
@@ -1693,9 +1735,25 @@ cdt_process_state_get_params(cdt_process_state* state, size_t n, ...)
 
 			arg->ptr = msgpack_get_ele_vec(state->mv, &arg->sz);
 
-			if (arg->ptr == NULL ||
-					(entry->args[i] == AS_CDT_PARAM_STORAGE &&
-							state->mv->has_nonstorage)) {
+			if (arg->ptr == NULL) {
+				cf_warning(AS_PARTICLE,
+						"cdt_process_state_get_params() invalid payload at param %u",
+						i);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"%s: invalid payload at param %u", entry->name, i);
+				va_end(vl);
+				return false;
+			}
+
+			if (entry->args[i] == AS_CDT_PARAM_STORAGE &&
+					state->mv->has_nonstorage) {
+				cf_warning(AS_PARTICLE,
+						"cdt_process_state_get_params() non-storable type in storage context at param %u",
+						i);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"%s: param %u contains a non-storable type"
+						" (wildcard or infinity) in a storage context",
+						entry->name, i);
 				va_end(vl);
 				return false;
 			}
@@ -1707,6 +1765,9 @@ cdt_process_state_get_params(cdt_process_state* state, size_t n, ...)
 			uint64_t* arg = va_arg(vl, uint64_t*);
 
 			if (! msgpack_get_uint64_vec(state->mv, arg)) {
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"%s: invalid count parameter at param %u", entry->name,
+						i);
 				va_end(vl);
 				return false;
 			}
@@ -1717,6 +1778,9 @@ cdt_process_state_get_params(cdt_process_state* state, size_t n, ...)
 			int64_t* arg = va_arg(vl, int64_t*);
 
 			if (! msgpack_get_int64_vec(state->mv, arg)) {
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"%s: invalid index parameter at param %u", entry->name,
+						i);
 				va_end(vl);
 				return false;
 			}
@@ -1724,6 +1788,8 @@ cdt_process_state_get_params(cdt_process_state* state, size_t n, ...)
 			break;
 		}
 		default:
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"%s: unknown parameter type at param %u", entry->name, i);
 			va_end(vl);
 			return false;
 		}
@@ -1823,6 +1889,9 @@ cdt_select_modify(select_ctx* sel, uint32_t off, uint32_t key_sz, uint32_t sz)
 
 		if ((sel->flags & SELECT_NO_FAIL) == 0) {
 			cf_debug(AS_PARTICLE, "cdt_select_modify() exp -> AS_EXP_UNK");
+			// TODO: Eventually capture the error in the expression evaluation.
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt select apply expression evaluation failed or returned unknown");
 			sel->ret_code = -AS_ERR_UNKNOWN;
 			return false;
 		}
@@ -1832,6 +1901,8 @@ cdt_select_modify(select_ctx* sel, uint32_t off, uint32_t key_sz, uint32_t sz)
 
 	if (as_exp_result_has_nonstorage(&re->res)) {
 		select_apply_undo_entry(sel->apply);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt select apply expression result contains non-storable type");
 		sel->ret_code = -AS_ERR_INCOMPATIBLE_TYPE;
 		return false;
 	}
@@ -1879,6 +1950,7 @@ include_map_entry(select_ctx* sel, select_stack_entry* entry, uint32_t level,
 			as_pack_append(&sel->out, key, key_sz);
 		}
 
+		// NOTE: error details already set by cdt_select_level.
 		if (! cdt_select_level(sel, level + 1)) {
 			return false;
 		}
@@ -1891,6 +1963,8 @@ include_map_entry(select_ctx* sel, select_stack_entry* entry, uint32_t level,
 		uint32_t value_sz = msgpack_sz(&sel->mp_in);
 
 		if (value_sz == 0) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt select: failed to read map value at level %u", level);
 			sel->ret_code = -AS_ERR_UNKNOWN;
 			return false;
 		}
@@ -1904,6 +1978,7 @@ include_map_entry(select_ctx* sel, select_stack_entry* entry, uint32_t level,
 			mp_value->offset = key_off + key_sz;
 			sel->exp_ctx.vars_table = vars_bi_table;
 
+			// NOTE: error details already set by cdt_select_modify.
 			if (! cdt_select_modify(sel, key_off, key_sz, value_sz)) {
 				return false;
 			}
@@ -1927,6 +2002,7 @@ include_list_entry(select_ctx* sel, select_stack_entry* entry, uint32_t level,
 	}
 
 	if (! is_leaflvl && msgpack_peek_is_cdt(&sel->mp_in)) {
+		// NOTE: error details already set by cdt_select_level.
 		if (! cdt_select_level(sel, level + 1)) {
 			return false;
 		}
@@ -1937,6 +2013,10 @@ include_list_entry(select_ctx* sel, select_stack_entry* entry, uint32_t level,
 		const uint8_t* out = msgpack_get_ele(&sel->mp_in, &out_sz);
 
 		if (out == NULL) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt select: failed to read list element at level %u"
+					" index %u",
+					level, idx);
 			sel->ret_code = -AS_ERR_UNKNOWN;
 			return false;
 		}
@@ -1953,6 +2033,7 @@ include_list_entry(select_ctx* sel, select_stack_entry* entry, uint32_t level,
 				mp_index->offset = 0;
 				sel->exp_ctx.vars_table = vars_bi_table;
 
+				// NOTE: error details already set by cdt_select_modify.
 				if (! cdt_select_modify(sel, off_start, 0, out_sz)) {
 					return false;
 				}
@@ -1990,6 +2071,8 @@ cdt_select_list(select_ctx* sel, uint32_t level)
 	bool is_leaflvl = (level + 1 == sel->n_levels);
 
 	if (! msgpack_get_list_ele_count(&sel->mp_in, &ele_count)) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt select: failed to read list header at level %u", level);
 		sel->ret_code = -AS_ERR_UNKNOWN;
 		return false;
 	}
@@ -2007,6 +2090,8 @@ cdt_select_list(select_ctx* sel, uint32_t level)
 
 	if (is_leaflvl && (sel->type & SELECT_LEAF_MAP_KEY) != 0) {
 		if ((sel->flags & SELECT_NO_FAIL) == 0) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt select: map key select on list at level %u", level);
 			sel->ret_code = -AS_ERR_INCOMPATIBLE_TYPE;
 			return false;
 		}
@@ -2031,9 +2116,13 @@ cdt_select_list(select_ctx* sel, uint32_t level)
 
 			if (as_pack_list_header_get_size(ele_count) !=
 					sel->mp_in.offset - hdr_off) {
-				cf_info(AS_PARTICLE,
+				cf_warning(AS_PARTICLE,
 						"cdt_select_list() ele_count %u sz %u size mismatch",
 						ele_count, sel->mp_in.offset - hdr_off);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt select: list header size mismatch at level %u"
+						" (element count %u)",
+						level, ele_count);
 				sel->ret_code = -AS_ERR_UNKNOWN;
 				return false;
 			}
@@ -2123,6 +2212,9 @@ cdt_select_list(select_ctx* sel, uint32_t level)
 	if (cdt_type != 0 && cdt_type != AS_CDT_CTX_LIST) {
 		cf_warning(AS_PARTICLE, "cdt_select_list() invalid ctx_type 0x%u",
 				entry->ctx_type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt select: invalid context type 0x%x for list at level %u",
+				entry->ctx_type, level);
 		sel->ret_code = -AS_ERR_PARAMETER;
 		return false;
 	}
@@ -2139,12 +2231,20 @@ cdt_select_list(select_ctx* sel, uint32_t level)
 
 		if (count32 == 0) {
 			if (ele_count != 0 && msgpack_sz_rep(&sel->mp_in, ele_count) == 0) {
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt select: invalid list data at level %u"
+						" (element count %u)",
+						level, ele_count);
 				sel->ret_code = -AS_ERR_UNKNOWN;
 				return false;
 			}
 		}
 		else {
 			if (idx > 0 && msgpack_sz_rep(&sel->mp_in, idx) == 0) {
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt select: invalid list element before index %u"
+						" at level %u",
+						idx, level);
 				sel->ret_code = -AS_ERR_UNKNOWN;
 				return false;
 			}
@@ -2161,17 +2261,26 @@ cdt_select_list(select_ctx* sel, uint32_t level)
 			}
 
 			if (tri == AS_EXP_TRUE) {
+				// NOTE: error details already set by include_list_entry.
 				if (! include_list_entry(sel, entry, level, vars_bi_table, idx)) {
 					return false;
 				}
 
 				if (ele_count - idx > 1 &&
 						msgpack_sz_rep(&sel->mp_in, ele_count - idx - 1) == 0) {
+					as_error_details_set_fmt(AS_SUB_NONE,
+							"cdt select: invalid list element after index %u"
+							" at level %u",
+							idx, level);
 					sel->ret_code = -AS_ERR_UNKNOWN;
 					return false;
 				}
 			}
 			else if (msgpack_sz_rep(&sel->mp_in, ele_count - idx) == 0) {
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt select: unable to get list data size at level %u"
+						" (element count %u - idx %u)",
+						level, ele_count, idx);
 				sel->ret_code = -AS_ERR_UNKNOWN;
 				return false;
 			}
@@ -2188,6 +2297,10 @@ cdt_select_list(select_ctx* sel, uint32_t level)
 
 		if (count32 == 0) {
 			if (ele_count != 0 && msgpack_sz_rep(&sel->mp_in, ele_count) == 0) {
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt select: invalid list data at level %u"
+						" (element count %u)",
+						level, ele_count);
 				sel->ret_code = -AS_ERR_UNKNOWN;
 				return false;
 			}
@@ -2230,6 +2343,7 @@ cdt_select_list(select_ctx* sel, uint32_t level)
 				tri = as_exp_matches_metadata(entry->and_exp, &sel->exp_ctx);
 			}
 
+			// NOTE: error details already set by include_list_entry.
 			if (tri == AS_EXP_TRUE &&
 					! include_list_entry(sel, entry, level, vars_bi_table, idx)) {
 				return false;
@@ -2269,6 +2383,10 @@ cdt_select_list(select_ctx* sel, uint32_t level)
 					break;
 				case MSGPACK_CMP_ERROR:
 				case MSGPACK_CMP_END:
+					as_error_details_set_fmt(AS_SUB_NONE,
+							"cdt select: value comparison failed at list"
+							" element %u level %u",
+							i, level);
 					sel->ret_code = -AS_ERR_UNKNOWN;
 					return false;
 				default:
@@ -2292,6 +2410,11 @@ cdt_select_list(select_ctx* sel, uint32_t level)
 				if ((sel->flags & SELECT_NO_FAIL) == 0) {
 					cf_debug(AS_PARTICLE,
 							"cdt_select_list(%u) exp -> AS_EXP_UNK", level);
+					// Is this really an error case?
+					as_error_details_set_fmt(AS_SUB_NONE,
+							"cdt select: expression returned unknown at list"
+							" element %u level %u",
+							i, level);
 					sel->ret_code = -AS_ERR_PARAMETER;
 					return false;
 				}
@@ -2305,6 +2428,10 @@ cdt_select_list(select_ctx* sel, uint32_t level)
 					cf_debug(AS_PARTICLE,
 							"cdt_select_list(%u) SELECT_LEAF_MAP_KEY not allowed type 0x%x",
 							level, sel->type);
+					as_error_details_set_fmt(AS_SUB_NONE,
+							"cdt select: map key select on list element %u"
+							" level %u",
+							i, level);
 					sel->ret_code = -AS_ERR_INCOMPATIBLE_TYPE;
 					return false;
 				}
@@ -2313,11 +2440,16 @@ cdt_select_list(select_ctx* sel, uint32_t level)
 			}
 
 			if (tri == AS_EXP_TRUE) {
+				// NOTE: error details already set by include_list_entry.
 				if (! include_list_entry(sel, entry, level, vars_bi_table, i)) {
 					return false;
 				}
 			}
 			else if (msgpack_sz(&sel->mp_in) == 0) {
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt select: failed to skip list element %u"
+						" at level %u",
+						i, level);
 				sel->ret_code = -AS_ERR_UNKNOWN;
 				return false;
 			}
@@ -2354,6 +2486,8 @@ cdt_select_map(select_ctx* sel, uint32_t level)
 	bool is_leaflvl = (level + 1 == sel->n_levels);
 
 	if (! msgpack_get_map_ele_count(&sel->mp_in, &ele_count)) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt select: failed to read map header at level %u", level);
 		sel->ret_code = -AS_ERR_UNKNOWN;
 		return false;
 	}
@@ -2391,6 +2525,10 @@ cdt_select_map(select_ctx* sel, uint32_t level)
 			cf_info(AS_PARTICLE,
 					"cdt_select_map() ele_count %u sz %u size mismatch",
 					ele_count, sel->mp_in.offset - hdr_off);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt select: map header size mismatch at level %u"
+					" (element count %u)",
+					level, ele_count);
 			sel->ret_code = -AS_ERR_UNKNOWN;
 			return false;
 		}
@@ -2448,6 +2586,9 @@ cdt_select_map(select_ctx* sel, uint32_t level)
 	if (cdt_type != 0 && cdt_type != 0x20) {
 		cf_warning(AS_PARTICLE, "cdt_select_map(%u) invalid ctx_type 0x%x",
 				level, entry->ctx_type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt select: invalid context type 0x%x for map at level %u",
+				entry->ctx_type, level);
 		sel->ret_code = -AS_ERR_PARAMETER;
 		return false;
 	}
@@ -2472,6 +2613,10 @@ cdt_select_map(select_ctx* sel, uint32_t level)
 		if (count32 == 0) {
 			if (ele_count != 0 &&
 					msgpack_sz_rep(&sel->mp_in, ele_count * 2) == 0) {
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt select: corrupt map data at level %u"
+						" (element count %u)",
+						level, ele_count);
 				sel->ret_code = -AS_ERR_UNKNOWN;
 				return false;
 			}
@@ -2520,6 +2665,7 @@ cdt_select_map(select_ctx* sel, uint32_t level)
 				tri = as_exp_matches_metadata(entry->and_exp, &sel->exp_ctx);
 			}
 
+			// NOTE: error details already set by include_map_entry.
 			if (tri == AS_EXP_TRUE &&
 					! include_map_entry(sel, entry, level, vars_bi_table)) {
 				return false;
@@ -2595,6 +2741,10 @@ cdt_select_map(select_ctx* sel, uint32_t level)
 			mp_key.offset = key_off;
 
 			if (key_sz == 0) {
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt select: failed to read map key at element %u"
+						" level %u",
+						i, level);
 				sel->ret_code = -AS_ERR_UNKNOWN;
 				return false;
 			}
@@ -2635,6 +2785,10 @@ cdt_select_map(select_ctx* sel, uint32_t level)
 					break;
 				case MSGPACK_COMPARE_ERROR:
 				case MSGPACK_CMP_END:
+					as_error_details_set_fmt(AS_SUB_NONE,
+							"cdt select: key/value comparison failed at"
+							" map element %u level %u",
+							i, level);
 					sel->ret_code = -AS_ERR_UNKNOWN;
 					return false;
 				default:
@@ -2704,6 +2858,11 @@ cdt_select_map(select_ctx* sel, uint32_t level)
 				if ((sel->flags & SELECT_NO_FAIL) == 0) {
 					cf_debug(AS_PARTICLE,
 							"cdt_select_map(%u) exp -> AS_EXP_UNK", level);
+					// That's not really an error case.
+					as_error_details_set_fmt(AS_SUB_NONE,
+							"cdt select: expression returned unknown at"
+							" map element %u level %u",
+							i, level);
 					sel->ret_code = -AS_ERR_PARAMETER;
 					return false;
 				}
@@ -2715,11 +2874,16 @@ cdt_select_map(select_ctx* sel, uint32_t level)
 				mp_key.offset = key_off;
 				mp_value.offset = value_off;
 
+				// NOTE: error details already set by include_map_entry.
 				if (! include_map_entry(sel, entry, level, vars_bi_table)) {
 					return false;
 				}
 			}
 			else if (msgpack_sz(&sel->mp_in) == 0) {
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt select: failed to skip map value at"
+						" element %u level %u",
+						i, level);
 				sel->ret_code = -AS_ERR_UNKNOWN;
 				return false;
 			}
@@ -2768,6 +2932,10 @@ cdt_select_level(select_ctx* sel, uint32_t level)
 	cf_debug(AS_PARTICLE, "cdt_select_level(%u) type %u not a list or map",
 			level, msgpack_peek_type(&sel->mp_in));
 
+	as_error_details_set_fmt(AS_SUB_NONE,
+			"cdt select: element at level %u is type %s,"
+			" expected list or map",
+			level, msgpack_type_str(msgpack_peek_type(&sel->mp_in)));
 	sel->ret_code = -AS_ERR_INCOMPATIBLE_TYPE;
 	return false;
 }
@@ -3040,6 +3208,9 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 		if (! msgpack_get_uint64_vec(mv, &ctx_type)) {
 			cf_warning(AS_PARTICLE,
 					"cdt_select_stack_init() pair %u expected int", j);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt select context type at level %u is not a valid integer",
+					i);
 			ret = -AS_ERR_PARAMETER;
 			break;
 		}
@@ -3051,6 +3222,9 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 				cf_warning(AS_PARTICLE,
 						"cdt_select_stack_init() AND invalid ctx type 0x%lx at pair %u",
 						ctx_type, j);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt select AND context type 0x%lx invalid at level %u",
+						ctx_type, i);
 				ret = -AS_ERR_PARAMETER;
 				break;
 			}
@@ -3059,6 +3233,8 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 				cf_warning(AS_PARTICLE,
 						"cdt_select_stack_init() AND at pair %u has no preceding entry",
 						j);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt select AND at level 0 has no preceding entry");
 				ret = -AS_ERR_PARAMETER;
 				break;
 			}
@@ -3068,6 +3244,8 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 			if (stack[i].and_exp != NULL || stack[i].has_and) {
 				cf_warning(AS_PARTICLE,
 						"cdt_select_stack_init() duplicate AND at pair %u", j);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt select duplicate AND at context level %u", i);
 				ret = -AS_ERR_PARAMETER;
 				break;
 			}
@@ -3075,6 +3253,9 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 			if ((stack[i].ctx_type & AS_CDT_CTX_BASE_MASK) == AS_CDT_CTX_EXP) {
 				cf_warning(AS_PARTICLE,
 						"cdt_select_stack_init() AND on EXP base at pair %u", j);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt select AND not allowed on expression base at level %u",
+						i);
 				ret = -AS_ERR_PARAMETER;
 				break;
 			}
@@ -3095,6 +3276,8 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 			if (! msgpack_get_int64_vec(mv, &index)) {
 				cf_warning(AS_PARTICLE,
 						"cdt_select_stack_init() invalid index at pair %u", j);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt select invalid index/rank at context level %u", i);
 				ret = -AS_ERR_PARAMETER;
 				break;
 			}
@@ -3109,6 +3292,8 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 			if (buf == NULL) {
 				cf_warning(AS_PARTICLE,
 						"cdt_select_stack_init() invalid key at pair %u", j);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt select invalid key/value at context level %u", i);
 				ret = -AS_ERR_PARAMETER;
 				break;
 			}
@@ -3123,6 +3308,8 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 				cf_warning(AS_PARTICLE,
 						"cdt_select_stack_init() invalid expression at pair %u",
 						j);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt select invalid expression at context level %u", i);
 				ret = -AS_ERR_PARAMETER;
 				break;
 			}
@@ -3138,6 +3325,9 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 					cf_warning(AS_PARTICLE,
 							"cdt_select_stack_init() invalid expression at pair %u",
 							j);
+					as_error_details_set_fmt(AS_SUB_NONE,
+							"cdt select failed to build expression at context level %u",
+							i);
 					ret = -AS_ERR_PARAMETER;
 				}
 
@@ -3148,6 +3338,9 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 				cf_warning(AS_PARTICLE,
 						"cdt_select_stack_init() invalid expression at pair %u",
 						j);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt select unexpected expression type at context level %u",
+						i);
 				ret = -AS_ERR_PARAMETER;
 				break;
 			}
@@ -3157,6 +3350,9 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 			cf_warning(AS_PARTICLE,
 					"cdt_select_stack_init() invalid ctx type 0x%lx at pair %u",
 					ctx_type, j);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt select invalid context type 0x%lx at level %u",
+					ctx_type, i);
 			ret = -AS_ERR_PARAMETER;
 			break;
 		}
@@ -3207,6 +3403,9 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 		cf_detail(AS_PARTICLE,
 				"cdt_process_state_select() bin type %u is not list or map",
 				bin_type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt select requires list or map bin, got bin type %s",
+				as_particle_type_str(bin_type));
 		com->ret_code = -AS_ERR_INCOMPATIBLE_TYPE;
 		return false;
 	}
@@ -3218,6 +3417,9 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 		cf_warning(AS_PARTICLE,
 				"cdt_process_state_select() unpack parameters failed: size=%u ele_count=%u",
 				state->mv->vecs[state->mv->idx].buf_sz, ctx_param_count);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt select context list invalid amount of elements: element count=%u",
+				ctx_param_count);
 		com->ret_code = -AS_ERR_PARAMETER;
 		return false;
 	}
@@ -3227,6 +3429,8 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 	if (n_levels > 64) {
 		cf_warning(AS_PARTICLE, "cdt_process_state_select() ctx levels %u > 64",
 				n_levels);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt select context depth %u exceeds maximum of 64", n_levels);
 		com->ret_code = -AS_ERR_PARAMETER;
 		return false;
 	}
@@ -3235,6 +3439,7 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 
 	com->ret_code = select_stack_init(stack, &n_levels, state->mv);
 
+	// NOTE: Don't set error details here because it's already set in select_stack_init().
 	if (com->ret_code != AS_OK) {
 		cf_info(AS_PARTICLE,
 				"cdt_process_state_select() stack init failed: ret_code=%d",
@@ -3247,6 +3452,8 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 	if (! msgpack_get_int64_vec(state->mv, &flags_i64)) {
 		cf_warning(AS_PARTICLE,
 				"cdt_process_state_select() unexpected flag(s) param");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt select flags field is invalid");
 		select_stack_destroy(stack, n_levels);
 		com->ret_code = -AS_ERR_PARAMETER;
 		return false;
@@ -3264,6 +3471,8 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 	default:
 		cf_warning(AS_PARTICLE,
 				"cdt_process_state_select() invalid select type 0x%02x", type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt select type 0x%02x is not valid", type);
 		select_stack_destroy(stack, n_levels);
 		com->ret_code = -AS_ERR_PARAMETER;
 		return false;
@@ -3279,6 +3488,9 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 	if (state->ele_count != expected_count) {
 		cf_warning(AS_PARTICLE,
 				"cdt_process_state_select() param count %u != expected %u",
+				state->ele_count, expected_count);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt select param count %u does not match expected %u",
 				state->ele_count, expected_count);
 		select_stack_destroy(stack, n_levels);
 		com->ret_code = -AS_ERR_PARAMETER;
@@ -3352,6 +3564,8 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 		if (com->ctx.alloc_buf == NULL) {
 			cf_warning(AS_PARTICLE,
 					"cdt_process_state_select() APPLY flag is invalid for read op");
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt select apply is not valid for read operations");
 			com->ret_code = -AS_ERR_PARAMETER;
 			return false;
 		}
@@ -3362,6 +3576,8 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 		if (buf == NULL) {
 			cf_warning(AS_PARTICLE,
 					"cdt_process_state_select() invalid apply expression");
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt select apply expression is invalid");
 			com->ret_code = -AS_ERR_PARAMETER;
 			return false;
 		}
@@ -3371,6 +3587,8 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 		if (exp == NULL) {
 			cf_warning(AS_PARTICLE,
 					"cdt_process_state_select() invalid apply expression");
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt select apply expression failed to compile");
 			com->ret_code = -AS_ERR_PARAMETER;
 			return false;
 		}
@@ -3433,6 +3651,8 @@ cdt_process_state_context_eval(cdt_process_state* state, cdt_op_mem* com)
 		cf_warning(AS_PARTICLE,
 				"cdt_process_state_context_eval() param count %u != 2",
 				state->ele_count);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt context eval requires 2 params, got %u", state->ele_count);
 		com->ret_code = -AS_ERR_PARAMETER;
 		return false;
 	}
@@ -3450,6 +3670,9 @@ cdt_process_state_context_eval(cdt_process_state* state, cdt_op_mem* com)
 		cf_warning(AS_PARTICLE,
 				"cdt_process_state_context_eval() unpack parameters failed: size=%u ele_count=%u",
 				state->mv->vecs[state->mv->idx].buf_sz, ele_count);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt context eval failed to read element count or inner op type: element count=%u",
+				ele_count);
 		com->ret_code = -AS_ERR_PARAMETER;
 		return false;
 	}
@@ -3471,6 +3694,9 @@ cdt_process_state_context_eval(cdt_process_state* state, cdt_op_mem* com)
 
 			cf_warning(AS_PARTICLE, "subcontext type %d != expected type %d (%s)",
 					ctx_type, expected, name);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt context eval subcontext is type %s, expected %s (%s)",
+					msgpack_type_str(ctx_type), msgpack_type_str(expected), name);
 			com->ret_code = -AS_ERR_INCOMPATIBLE_TYPE;
 			return false;
 		}
@@ -4439,6 +4665,9 @@ cdt_context_dig(cdt_context* ctx, msgpack_in_vec* mv, bool is_modify)
 			bin_type != AS_PARTICLE_TYPE_MAP) {
 		cf_detail(AS_PARTICLE,
 				"cdt_context_dig() bin type %u is not list or map", bin_type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt context requires list or map bin, got bin type %s",
+				as_particle_type_str(bin_type));
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -4450,6 +4679,9 @@ cdt_context_dig(cdt_context* ctx, msgpack_in_vec* mv, bool is_modify)
 			ctx_param_count == 0 || (ctx_param_count & 1) == 1) {
 		cf_warning(AS_PARTICLE, "cdt_context_dig() bad context param count %u",
 				ctx_param_count);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt context path invalid: param count %u must be even and non-zero",
+				ctx_param_count);
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -4460,6 +4692,8 @@ cdt_context_dig(cdt_context* ctx, msgpack_in_vec* mv, bool is_modify)
 
 		if (! msgpack_get_uint64_vec(mv, &ctx_type)) {
 			cf_warning(AS_PARTICLE, "cdt_context_dig() param %u expected int", i);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt context type at level %u is not a valid integer", i / 2);
 			return -AS_ERR_PARAMETER;
 		}
 
@@ -4470,6 +4704,9 @@ cdt_context_dig(cdt_context* ctx, msgpack_in_vec* mv, bool is_modify)
 				! cdt_context_ctx_create_type_check(ctx_type)) {
 			cf_warning(AS_PARTICLE,
 					"cdt_context_dig() invalid context type 0x%lx", ctx_type);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt context type 0x%lx is not valid at level %u", ctx_type,
+					i / 2);
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 
@@ -4481,6 +4718,8 @@ cdt_context_dig(cdt_context* ctx, msgpack_in_vec* mv, bool is_modify)
 			if (! ctx->create_flag_on) {
 				cf_detail(AS_PARTICLE,
 						"cdt_context_dig() bin is empty and op has no create flag(s)");
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt context bin is empty and op has no create flag");
 				return -AS_ERR_OP_NOT_APPLICABLE;
 			}
 
@@ -4489,11 +4728,23 @@ cdt_context_dig(cdt_context* ctx, msgpack_in_vec* mv, bool is_modify)
 			ctx->create_ctx_count = (ctx_param_count - i) / 2;
 
 			if (! cdt_context_ctx_type_create_sz(mv, &ctx->create_sz, ctx_type)) {
+				cf_detail(AS_PARTICLE,
+						"cdt_context_dig() create failed to compute type size: level %u",
+						i / 2);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt context create failed to compute type size at level %u",
+						i / 2);
 				return -AS_ERR_OP_NOT_APPLICABLE;
 			}
 
 			if (! cdt_context_count_create_sz(mv, &ctx->create_sz,
 						ctx->create_ctx_count - 1)) {
+				cf_detail(AS_PARTICLE,
+						"cdt_context_dig() create failed to compute nested size: level %u",
+						i / 2);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt context create failed to compute nested size at level %u",
+						i / 2);
 				return -AS_ERR_OP_NOT_APPLICABLE;
 			}
 
@@ -4511,6 +4762,9 @@ cdt_context_dig(cdt_context* ctx, msgpack_in_vec* mv, bool is_modify)
 		if (type != MSGPACK_TYPE_MAP && type != MSGPACK_TYPE_LIST) {
 			cf_detail(AS_PARTICLE,
 					"cdt_context_dig() type %d is not list or map", type);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt context element at level %u is type %s, expected list or map",
+					i / 2, msgpack_type_str(type));
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 
@@ -4519,6 +4773,9 @@ cdt_context_dig(cdt_context* ctx, msgpack_in_vec* mv, bool is_modify)
 				cf_detail(AS_PARTICLE,
 						"cdt_context_dig() invalid context type 0x%lx for list element",
 						ctx_type);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt context type 0x%lx is map-specific but element at level %u is a list",
+						ctx_type, i / 2);
 				return -AS_ERR_OP_NOT_APPLICABLE;
 			}
 
@@ -4529,6 +4786,9 @@ cdt_context_dig(cdt_context* ctx, msgpack_in_vec* mv, bool is_modify)
 				cf_detail(AS_PARTICLE,
 						"cdt_context_dig() invalid context type 0x%lx for map element",
 						ctx_type);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt context type 0x%lx is list-specific but element at level %u is a map",
+						ctx_type, i / 2);
 				return -AS_ERR_OP_NOT_APPLICABLE;
 			}
 
@@ -4538,6 +4798,8 @@ cdt_context_dig(cdt_context* ctx, msgpack_in_vec* mv, bool is_modify)
 		if (! ret) {
 			cf_detail(AS_PARTICLE,
 					"cdt_context_dig() invalid context at param %u", i);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt context lookup failed at level %u", i / 2);
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 
@@ -4548,6 +4810,9 @@ cdt_context_dig(cdt_context* ctx, msgpack_in_vec* mv, bool is_modify)
 			if (! is_modify ||
 					! cdt_context_count_create_sz(mv, &ctx->create_sz,
 							ctx->create_ctx_count - 1)) {
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt context create-triggered but sizing failed at level %u",
+						i / 2);
 				return -AS_ERR_OP_NOT_APPLICABLE;
 			}
 
@@ -4743,8 +5008,10 @@ cdt_packed_modify(cdt_process_state* state, as_bin* b, as_bin* result,
 	rollback_alloc_rollback(alloc_convert);
 
 	if (! success) {
-		cf_info(AS_PARTICLE, "cdt_packed_modify() failed: ret_code=%d",
+		cf_warning(AS_PARTICLE, "cdt_packed_modify() failed: ret_code=%d",
 				com.ret_code);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt modify failed with status %d", -com.ret_code);
 		*b = old_bin;
 		as_bin_set_empty(result);
 		rollback_alloc_rollback(alloc_buf);
@@ -4788,6 +5055,8 @@ cdt_packed_read(cdt_process_state* state, const as_bin* b, as_bin* result)
 	if (! success) {
 		cf_info(AS_PARTICLE, "cdt_packed_read() failed: ret_code=%d",
 				com.ret_code);
+		as_error_details_set_fmt(AS_SUB_NONE, "cdt read failed with status %d",
+				-com.ret_code);
 		as_bin_set_empty(result);
 		rollback_alloc_rollback(alloc_result);
 	}
@@ -4809,6 +5078,7 @@ as_bin_cdt_modify_tr(as_bin* b, const as_msg_op* op, as_bin* result,
 	cf_debug(AS_PARTICLE, "cdt_modify_tr - sz %u buf:\n%*pH", vecs.buf_sz,
 			vecs.buf_sz, vecs.buf);
 
+	// NOTE: Don't set error details here because it's already set in cdt_process_state_init_from_vec().
 	if (! cdt_process_state_init_from_vec(&state, &mv)) {
 		return -AS_ERR_PARAMETER;
 	}
@@ -6789,6 +7059,8 @@ list_param_parse(const cdt_payload* items, msgpack_in* mp, uint32_t* count_r)
 			*count_r > CDT_MAX_PARAM_LIST_COUNT) {
 		cf_warning(AS_PARTICLE,
 				"list_param_parse() invalid param items hdr count %u", *count_r);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"invalid item list parameter (element count %u)", *count_r);
 		return false;
 	}
 
@@ -7446,6 +7718,38 @@ cdt_exp_display_name(as_cdt_optype op)
 	}
 
 	return name != NULL ? name : "INVALID_CDT_OP";
+}
+
+const char*
+cdt_result_type_str(result_type_t type)
+{
+	static const char* result_type_names[] = {
+		[RESULT_TYPE_NONE] = "none",
+		[RESULT_TYPE_INDEX] = "index",
+		[RESULT_TYPE_REVINDEX] = "reverse-index",
+		[RESULT_TYPE_RANK] = "rank",
+		[RESULT_TYPE_REVRANK] = "reverse-rank",
+		[RESULT_TYPE_COUNT] = "count",
+		[RESULT_TYPE_KEY] = "key",
+		[RESULT_TYPE_VALUE] = "value",
+		[RESULT_TYPE_KEY_VALUE_MAP] = "key-value-map",
+		[RESULT_TYPE_INDEX_RANGE] = "index-range",
+		[RESULT_TYPE_REVINDEX_RANGE] = "reverse-index-range",
+		[RESULT_TYPE_RANK_RANGE] = "rank-range",
+		[RESULT_TYPE_REVRANK_RANGE] = "reverse-rank-range",
+		[RESULT_TYPE_EXISTS] = "exists",
+		[RESULT_TYPE_UNORDERED_MAP] = "unordered-map",
+		[RESULT_TYPE_ORDERED_MAP] = "ordered-map"
+	};
+
+	const char* name = NULL;
+
+	// (uint32_t) cast because enum can be signed.
+	if ((uint32_t)type < sizeof(result_type_names) / sizeof(char*)) {
+		name = result_type_names[type];
+	}
+
+	return name != NULL ? name : "<unknown>";
 }
 
 bool

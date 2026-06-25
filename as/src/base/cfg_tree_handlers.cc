@@ -170,6 +170,8 @@ static void handle_advertise_ipv6(void* target, const FieldDescriptor& desc,
 		const nlohmann::json& value);
 static void handle_auto_pin(void* target, const FieldDescriptor& desc,
 		const nlohmann::json& value);
+static void handle_error_details_max_verbosity(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
 static void handle_cluster_name(void* target, const FieldDescriptor& desc,
 		const nlohmann::json& value);
 static void handle_feature_key_file(void* target, const FieldDescriptor& desc,
@@ -389,6 +391,7 @@ static void apply_namespace_set(const std::string& name,
 		{"/enable-health-check", offsetof(as_config, health_check_enabled), apply_bool_field},
 		{"/enable-hist-info", offsetof(as_config, info_hist_enabled), apply_bool_field},
 		{"/enforce-best-practices", offsetof(as_config, enforce_best_practices), apply_bool_field},
+		{"/error-details-max-verbosity", offsetof(as_config, error_details_max_verbosity), handle_error_details_max_verbosity},
 		{"/feature-key-file", NO_OFFSET, handle_feature_key_file, EnterpriseOnly{}}, // enterprise-only
 		{"/feature-key-files", NO_OFFSET, handle_feature_key_files, EnterpriseOnly{}}, // enterprise-only
 		{"/group", NO_OFFSET, handle_group, Deprecated{"service/group is deprecated."}},
@@ -1401,6 +1404,38 @@ handle_auto_pin(void* target, const FieldDescriptor& desc,
 	}
 	else {
 		throw config_error("/service/auto-pin", "invalid value: " + auto_pin);
+	}
+}
+
+static void
+handle_error_details_max_verbosity(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (! value.is_string()) {
+		throw config_error("/service/error-details-max-verbosity",
+				"must be a string");
+	}
+
+	std::string v = value.get<std::string>();
+
+	if (v == "off") {
+		config->error_details_max_verbosity = AS_ERROR_DETAILS_VERBOSITY_OFF;
+	}
+	else if (v == "codes") {
+		config->error_details_max_verbosity = AS_ERROR_DETAILS_VERBOSITY_CODES;
+	}
+	else if (v == "messages") {
+		config->error_details_max_verbosity =
+				AS_ERROR_DETAILS_VERBOSITY_MESSAGES;
+	}
+	else if (v == "all") {
+		config->error_details_max_verbosity = AS_ERROR_DETAILS_VERBOSITY_ALL;
+	}
+	else {
+		throw config_error("/service/error-details-max-verbosity",
+				"invalid value: " + v);
 	}
 }
 

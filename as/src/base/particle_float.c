@@ -125,6 +125,9 @@ float_incr_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 	// For now we won't allow adding integers (or anything else) to floats.
 	if (wire_type != AS_PARTICLE_TYPE_FLOAT) {
 		cf_warning(AS_PARTICLE, "increment with non float type %u", wire_type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cannot increment float bin with non-float operand (type %s)",
+				as_particle_type_str(wire_type));
 		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
@@ -136,6 +139,8 @@ float_incr_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		break;
 	default:
 		cf_warning(AS_PARTICLE, "unexpected value size %u", value_size);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"float increment: unexpected value size %u", value_size);
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -150,6 +155,8 @@ float_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 {
 	if (value_size != 8) {
 		cf_warning(AS_PARTICLE, "unexpected value size %u", value_size);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"float bin write: unexpected value size %u", value_size);
 		return -AS_ERR_PARAMETER;
 	}
 

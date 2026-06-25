@@ -88,6 +88,10 @@ mrt_allow_write(as_transaction* tr, const as_record* r)
 {
 	if (as_transaction_has_mrt_id(tr)) {
 		cf_warning(AS_RW, "MRTs are enterprise only");
+		// AS_ERR_ENTERPRISE_ONLY has no subcode family (the status says it
+		// all); don't pair it with an UNSUPP_FEAT-family subcode.
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"multi-record transactions require enterprise edition");
 		return AS_ERR_ENTERPRISE_ONLY;
 	}
 

@@ -205,4 +205,6 @@ const uint8_t* msgpack_get_bin_vec(msgpack_in_vec* mv, uint32_t* sz_r);
 
 bool msgpack_display(msgpack_in* mp, msgpack_display_str* str);
 
+const char* msgpack_type_str(msgpack_type type);
+
 void msgpack_print_vec(msgpack_in_vec* mv, const char* name);

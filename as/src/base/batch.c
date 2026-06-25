@@ -1247,6 +1247,10 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 {
 	as_namespace* ns = tr->rsv.ns;
 
+	error_msg_field f =
+			error_msg_field_prep(as_msg_include_error_details(tr->msgp->msg.info4),
+					tr->result_code != AS_OK);
+
 	// Calculate size.
 	uint16_t n_fields = 0;
 	size_t size = sizeof(as_msg);
@@ -1254,6 +1258,11 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 	if (v != NULL) {
 		n_fields++;
 		size += sizeof(as_msg_field) + sizeof(as_record_version);
+	}
+
+	if (f.add) {
+		n_fields++;
+		size += sizeof(as_msg_field) + f.len;
 	}
 
 	for (uint16_t i = 0; i < n_bins; i++) {
@@ -1314,6 +1323,8 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 			p += sizeof(as_msg_field) + sizeof(as_record_version);
 		}
 
+		error_msg_field_write(&p, &f);
+
 		for (uint16_t i = 0; i < n_bins; i++) {
 			as_bin* bin = bins[i];
 			as_msg_op* op = (as_msg_op*)p;
@@ -1337,6 +1348,7 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 		}
 	}
 	as_batch_transaction_end(shared, buffer, complete);
+	as_error_msg_clear();
 }
 
 void
@@ -1363,6 +1375,10 @@ as_batch_add_made_result(as_batch_shared* shared, uint32_t index, cl_msg* msgp,
 void
 as_batch_add_ack(as_transaction* tr, as_record_version* v)
 {
+	error_msg_field f =
+			error_msg_field_prep(as_msg_include_error_details(tr->msgp->msg.info4),
+					tr->result_code != AS_OK);
+
 	// Calculate size.
 	uint16_t n_fields = 0;
 	size_t size = sizeof(as_msg);
@@ -1370,6 +1386,11 @@ as_batch_add_ack(as_transaction* tr, as_record_version* v)
 	if (v != NULL) {
 		n_fields++;
 		size += sizeof(as_msg_field) + sizeof(as_record_version);
+	}
+
+	if (f.add) {
+		n_fields++;
+		size += sizeof(as_msg_field) + f.len;
 	}
 
 	as_batch_shared* shared = tr->from.batch_shared;
@@ -1403,20 +1424,35 @@ as_batch_add_ack(as_transaction* tr, as_record_version* v)
 			mf->type = AS_MSG_FIELD_TYPE_RECORD_VERSION;
 			*(as_record_version*)mf->data = *v;
 			as_msg_swap_field(mf);
-			//			p += sizeof(as_msg_field) + sizeof(as_record_version);
+			p += sizeof(as_msg_field) + sizeof(as_record_version);
 		}
+
+		error_msg_field_write(&p, &f);
 	}
 
 	as_batch_transaction_end(shared, buffer, complete);
+	as_error_msg_clear();
 }
 
 void
 as_batch_add_error(as_batch_shared* shared, uint32_t index, int result_code)
 {
+	// No msgp here to read the client's info4 opt-in from - rely on the
+	// author-time gate instead: a detail exists in the thread-local only if the
+	// row was armed with verbosity > 0, so error_msg_field_prep() self-gates via
+	// f.len == 0 when the calling thread never armed/authored.
+	error_msg_field f = error_msg_field_prep(true, result_code != AS_OK);
+
+	size_t size = sizeof(as_msg);
+
+	if (f.add) {
+		size += sizeof(as_msg_field) + f.len;
+	}
+
 	as_batch_buffer* buffer;
 	bool complete;
-	uint8_t* data = as_batch_reserve(shared, sizeof(as_msg), result_code,
-			&buffer, &complete);
+	uint8_t* data =
+			as_batch_reserve(shared, size, result_code, &buffer, &complete);
 
 	if (data) {
 		// Write error.
@@ -1431,11 +1467,15 @@ as_batch_add_error(as_batch_shared* shared, uint32_t index, int result_code)
 		m->record_ttl = 0;
 		// Overload transaction_ttl to store batch index.
 		m->transaction_ttl = index;
-		m->n_fields = 0;
+		m->n_fields = f.add ? 1 : 0;
 		m->n_ops = 0;
 		as_msg_swap_header(m);
+
+		uint8_t* p = m->data;
+		error_msg_field_write(&p, &f);
 	}
 	as_batch_transaction_end(shared, buffer, complete);
+	as_error_msg_clear();
 }
 
 int

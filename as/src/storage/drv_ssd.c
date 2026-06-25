@@ -1702,6 +1702,8 @@ ssd_buffer_bins(as_storage_rd* rd)
 	if (flat_w_mark_sz > limit_sz) {
 		cf_detail(AS_DRV_SSD, "{%s} write: size %u - rejecting %pD", ns->name,
 				flat_w_mark_sz, &r->keyd);
+		as_error_details_set_fmt(AS_SUB_NONE, "record too big: %u > %u",
+				flat_w_mark_sz, limit_sz);
 		return -AS_ERR_RECORD_TOO_BIG;
 	}
 
@@ -1742,6 +1744,7 @@ ssd_buffer_bins(as_storage_rd* rd)
 		if (! swb) {
 			cf_ticker_warning(AS_DRV_SSD, "{%s} out of space", ns->name);
 			cf_mutex_unlock(&cur_swb->base.lock);
+			as_error_details_set_fmt(AS_SUB_NONE, "{%s} out of space", ns->name);
 			return -AS_ERR_OUT_OF_SPACE;
 		}
 
@@ -1762,6 +1765,7 @@ ssd_buffer_bins(as_storage_rd* rd)
 		if (! swb) {
 			cf_ticker_warning(AS_DRV_SSD, "{%s} out of space", ns->name);
 			cf_mutex_unlock(&cur_swb->base.lock);
+			as_error_details_set_fmt(AS_SUB_NONE, "{%s} out of space", ns->name);
 			return -AS_ERR_OUT_OF_SPACE;
 		}
 

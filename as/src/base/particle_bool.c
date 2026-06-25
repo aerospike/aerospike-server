@@ -131,6 +131,7 @@ bool_incr_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 	(void)pp;
 	cf_warning(AS_PARTICLE, "error %u unexpected increment of bool",
 			AS_ERR_INCOMPATIBLE_TYPE);
+	as_error_details_set_fmt(AS_SUB_NONE, "cannot increment bool bin");
 	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
@@ -140,11 +141,15 @@ bool_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 {
 	if (value_size != 1) {
 		cf_warning(AS_PARTICLE, "unexpected value size %u", value_size);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"bool bin write: unexpected value size %u", value_size);
 		return -AS_ERR_PARAMETER;
 	}
 
 	if (*wire_value > 1) {
 		cf_warning(AS_PARTICLE, "bad bool value %u", (uint32_t)*wire_value);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"bool bin write: invalid value %u", (uint32_t)*wire_value);
 		return -AS_ERR_PARAMETER;
 	}
 

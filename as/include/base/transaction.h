@@ -152,6 +152,37 @@ typedef struct as_file_handle_s {
 	user_agent_key user_agent;
 } as_file_handle;
 
+static inline uint8_t
+as_msg_error_verbosity(uint8_t info4)
+{
+	return (info4 & AS_MSG_INFO4_ERROR_VERBOSITY_MASK) >>
+			AS_MSG_INFO4_ERROR_VERBOSITY_SHIFT;
+}
+
+static inline bool
+as_msg_include_error_details(uint8_t info4)
+{
+	return (info4 & AS_MSG_INFO4_ERROR_VERBOSITY_MASK) != 0;
+}
+
+// Arm the per-transaction error-detail verbosity thread-local from the client's
+// info4 bits, capped by the server's configured maximum. Mirrors the arming
+// done on the service thread in as_tsvc_process_transaction() - call at each
+// fabric continuation entry point that builds a client reply (dup-res,
+// repl-write, repl-ping), since those run on threads where the thread-local was
+// never armed and would otherwise drop all error details.
+static inline void
+as_error_msg_arm_from_msgp(const cl_msg* msgp)
+{
+	as_error_msg_clear();
+
+	uint8_t client_verbosity = as_msg_error_verbosity(msgp->msg.info4);
+	uint8_t max_verbosity = (uint8_t)g_config.error_details_max_verbosity;
+
+	as_error_msg_set_verbosity(client_verbosity < max_verbosity ? client_verbosity
+																: max_verbosity);
+}
+
 // Helpers to release transaction file handles.
 void as_end_of_transaction(as_file_handle* proto_fd_h, bool force_close);
 void as_end_of_transaction_ok(as_file_handle* proto_fd_h);

@@ -548,6 +548,10 @@ blob_concat_size_from_wire(as_particle_type wire_type,
 		cf_warning(AS_PARTICLE,
 				"error %u type mismatch concat sizing blob/string, %d:%d",
 				AS_ERR_INCOMPATIBLE_TYPE, p_blob_mem->type, wire_type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cannot append/prepend: bin type %s does not match operand type %s",
+				as_particle_type_str(p_blob_mem->type),
+				as_particle_type_str(wire_type));
 		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
@@ -564,6 +568,10 @@ blob_append_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		cf_warning(AS_PARTICLE,
 				"error %u type mismatch appending to blob/string, %d:%d",
 				AS_ERR_INCOMPATIBLE_TYPE, p_blob_mem->type, wire_type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cannot append: bin type %s does not match operand type %s",
+				as_particle_type_str(p_blob_mem->type),
+				as_particle_type_str(wire_type));
 		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
@@ -583,6 +591,10 @@ blob_prepend_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		cf_warning(AS_PARTICLE,
 				"error %u type mismatch prepending to blob/string, %d:%d",
 				AS_ERR_INCOMPATIBLE_TYPE, p_blob_mem->type, wire_type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cannot prepend: bin type %s does not match operand type %s",
+				as_particle_type_str(p_blob_mem->type),
+				as_particle_type_str(wire_type));
 		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
@@ -603,6 +615,7 @@ blob_incr_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 	(void)pp;
 	cf_warning(AS_PARTICLE, "error %u unexpected increment of blob/string",
 			AS_ERR_INCOMPATIBLE_TYPE);
+	as_error_details_set_fmt(AS_SUB_NONE, "cannot increment blob/string bin");
 	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
@@ -804,6 +817,10 @@ int
 as_bin_bits_modify_tr(as_bin* b, const as_msg_op* msg_op, cf_ll_buf* particles_llb)
 {
 	if ((as_particle_type)msg_op->particle_type != AS_PARTICLE_TYPE_BLOB) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"bits modify failed on bin %.*s: unexpected bin type %s",
+				msg_op->name_sz, msg_op->name,
+				as_particle_type_str(msg_op->particle_type));
 		cf_warning(AS_PARTICLE,
 				"as_bin_bits_trans_modify - error %u unexpected particle type %u for bin %.*s",
 				AS_ERR_INCOMPATIBLE_TYPE, msg_op->particle_type,
@@ -815,6 +832,7 @@ as_bin_bits_modify_tr(as_bin* b, const as_msg_op* msg_op, cf_ll_buf* particles_l
 	bits_state state = { 0 };
 
 	if (! bits_state_init(&state, msg_op->name, msg_op->name_sz, &mv, false)) {
+		// NOTE: Don't set error details here because it's already set in bits_state_init().
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -825,6 +843,10 @@ int
 as_bin_bits_read_tr(const as_bin* b, const as_msg_op* msg_op, as_bin* rb)
 {
 	if ((as_particle_type)msg_op->particle_type != AS_PARTICLE_TYPE_BLOB) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"bits read failed on bin %.*s: unexpected bin type %s",
+				msg_op->name_sz, msg_op->name,
+				as_particle_type_str(msg_op->particle_type));
 		cf_warning(AS_PARTICLE,
 				"as_bin_bits_trans_read - error %u unexpected particle type %u for bin %.*s",
 				AS_ERR_INCOMPATIBLE_TYPE, msg_op->particle_type,
@@ -836,6 +858,7 @@ as_bin_bits_read_tr(const as_bin* b, const as_msg_op* msg_op, as_bin* rb)
 	bits_state state = { 0 };
 
 	if (! bits_state_init(&state, msg_op->name, msg_op->name_sz, &mv, true)) {
+		// NOTE: Don't set error details here because it's already set in bits_state_init().
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -848,6 +871,7 @@ as_bin_bits_modify_exp(as_bin* b, msgpack_in_vec* mv)
 	bits_state state = { 0 };
 
 	if (! bits_state_init(&state, (const uint8_t*)"::write-exp::", 13, mv, false)) {
+		// NOTE: Don't set error details here because it's already set in bits_state_init().
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -860,6 +884,7 @@ as_bin_bits_read_exp(const as_bin* b, msgpack_in_vec* mv, as_bin* rb)
 	bits_state state = { 0 };
 
 	if (! bits_state_init(&state, (const uint8_t*)"::read-exp::", 12, mv, true)) {
+		// NOTE: Don't set error details here because it's already set in bits_state_init().
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -898,6 +923,9 @@ bits_state_init(bits_state* state, const uint8_t* bin_name, uint8_t bin_name_sz,
 
 	if (! msgpack_get_list_ele_count_vec(state->mv, &ele_count) ||
 			ele_count == 0) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"bits operation initialization failed on bin %.*s: insufficient args (%u) or unable to parse args",
+				(int)bin_name_sz, bin_name, (int)ele_count);
 		cf_warning(AS_PARTICLE,
 				"bits_state_init - error %u bin %.*s insufficient args (%u) or unable to parse args",
 				AS_ERR_PARAMETER, (int)bin_name_sz, bin_name, ele_count);
@@ -909,6 +937,9 @@ bits_state_init(bits_state* state, const uint8_t* bin_name, uint8_t bin_name_sz,
 	uint64_t type64;
 
 	if (! msgpack_get_uint64_vec(state->mv, &type64)) {
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"bits operation initialization failed on bin %.*s: unable to parse op",
+				(int)bin_name_sz, bin_name);
 		cf_warning(AS_PARTICLE,
 				"bits_state_init - error %u bin %.*s unable to parse op",
 				AS_ERR_PARAMETER, (int)bin_name_sz, bin_name);
@@ -920,6 +951,9 @@ bits_state_init(bits_state* state, const uint8_t* bin_name, uint8_t bin_name_sz,
 	if (is_read) {
 		if (! (state->op_type >= AS_BITS_READ_OP_START &&
 					state->op_type < AS_BITS_READ_OP_END)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"bits operation initialization failed on bin %.*s: op %u expected read op",
+					(int)bin_name_sz, bin_name, state->op_type);
 			cf_warning(AS_PARTICLE,
 					"bits_state_init - error %u bin %.*s op %u expected read op",
 					AS_ERR_PARAMETER, (int)bin_name_sz, bin_name, state->op_type);
@@ -931,6 +965,9 @@ bits_state_init(bits_state* state, const uint8_t* bin_name, uint8_t bin_name_sz,
 	else {
 		if (! (state->op_type >= AS_BITS_MODIFY_OP_START &&
 					state->op_type < AS_BITS_MODIFY_OP_END)) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"bits operation initialization failed on bin %.*s: op %u expected modify op",
+					(int)bin_name_sz, bin_name, state->op_type);
 			cf_warning(AS_PARTICLE,
 					"bits_state_init - error %u bin %.*s op %u expected modify op",
 					AS_ERR_PARAMETER, (int)bin_name_sz, bin_name, state->op_type);
@@ -952,6 +989,11 @@ bits_modify(bits_state* state, as_bin* b, cf_ll_buf* particles_llb)
 	bits_op op = { 0 };
 
 	if (! bits_parse_op(state, &op)) {
+		// Specific parse helpers may have set a more granular subcode;
+		// first-set-wins means this is a no-op if so.
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"bits %s: failed to parse op parameters on bin %.*s",
+				state->def->name, (int)state->bin_name_sz, state->bin_name);
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -967,6 +1009,9 @@ bits_modify(bits_state* state, as_bin* b, cf_ll_buf* particles_llb)
 					"as_bin_bits_packed_modify - error %u operation (%s) on bin %.*s would update - not allowed",
 					AS_ERR_BIN_EXISTS, state->def->name,
 					(int)state->bin_name_sz, state->bin_name);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"bits %s: bin %.*s exists but CREATE_ONLY flag is set",
+					state->def->name, (int)state->bin_name_sz, state->bin_name);
 			return -AS_ERR_BIN_EXISTS;
 		}
 
@@ -975,6 +1020,10 @@ bits_modify(bits_state* state, as_bin* b, cf_ll_buf* particles_llb)
 					"as_bin_bits_packed_modify - error %u operation (%s) on bin %.*s must be on a blob - found %u",
 					AS_ERR_INCOMPATIBLE_TYPE, state->def->name,
 					(int)state->bin_name_sz, state->bin_name,
+					as_bin_get_particle_type(b));
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"bits %s: bin %.*s must be blob type, found type %d",
+					state->def->name, (int)state->bin_name_sz, state->bin_name,
 					as_bin_get_particle_type(b));
 			return -AS_ERR_INCOMPATIBLE_TYPE;
 		}
@@ -994,6 +1043,9 @@ bits_modify(bits_state* state, as_bin* b, cf_ll_buf* particles_llb)
 					"as_bin_bits_packed_modify - error %u operation (%s) on bin %.*s would create - not allowed",
 					AS_ERR_BIN_NOT_FOUND, state->def->name,
 					(int)state->bin_name_sz, state->bin_name);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"bits %s: bin %.*s does not exist and op cannot create it",
+					state->def->name, (int)state->bin_name_sz, state->bin_name);
 			return -AS_ERR_BIN_NOT_FOUND;
 		}
 
@@ -1050,6 +1102,11 @@ bits_read(bits_state* state, const as_bin* b, as_bin* rb)
 	bits_op op = { 0 };
 
 	if (! bits_parse_op(state, &op)) {
+		// Specific parse helpers may have set a more granular subcode;
+		// first-set-wins means this is a no-op if so.
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"bits %s: failed to parse op parameters on bin %.*s",
+				state->def->name, (int)state->bin_name_sz, state->bin_name);
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -1058,6 +1115,10 @@ bits_read(bits_state* state, const as_bin* b, as_bin* rb)
 				"as_bin_bits_packed_read - error %u operation (%s) on bin %.*s bin type must be blob found %u",
 				AS_ERR_INCOMPATIBLE_TYPE, state->def->name,
 				(int)state->bin_name_sz, state->bin_name,
+				as_bin_get_particle_type(b));
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"bits %s: bin %.*s must be blob type, found type %d",
+				state->def->name, (int)state->bin_name_sz, state->bin_name,
 				as_bin_get_particle_type(b));
 		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
@@ -1114,6 +1175,9 @@ bits_parse_byte_offset(bits_state* state, bits_op* op)
 				"bits_parse_byte_offset - error %u op %s (%u) offset (%ld) larger than max (%d)",
 				AS_ERR_PARAMETER, state->def->name, state->op_type, offset,
 				PROTO_SIZE_MAX);
+		as_error_details_set_fmt(AS_SUB_PARAM_BITS_OFFSET_OUT_OF_RANGE,
+				"bits %s: byte offset %ld larger than max %d", state->def->name,
+				offset, PROTO_SIZE_MAX);
 		return false;
 	}
 
@@ -1139,6 +1203,9 @@ bits_parse_offset(bits_state* state, bits_op* op)
 				"bits_parse_offset - error %u op %s (%u) offset (%ld) is larger than max (%d)",
 				AS_ERR_PARAMETER, state->def->name, state->op_type, offset,
 				PROTO_SIZE_MAX * 8);
+		as_error_details_set_fmt(AS_SUB_PARAM_BITS_OFFSET_OUT_OF_RANGE,
+				"bits %s: bit offset %ld larger than max %d", state->def->name,
+				offset, PROTO_SIZE_MAX * 8);
 		return false;
 	}
 
@@ -1163,6 +1230,8 @@ bits_parse_integer_size(bits_state* state, bits_op* op)
 		cf_warning(AS_PARTICLE,
 				"bits_parse_integer_size - error %u op %s (%u) size may not be 0",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
+		as_error_details_set_fmt(AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
+				"bits %s: integer size may not be 0", state->def->name);
 		return false;
 	}
 
@@ -1170,6 +1239,9 @@ bits_parse_integer_size(bits_state* state, bits_op* op)
 		cf_warning(AS_PARTICLE,
 				"bits_parse_integer_size - error %u op %s (%u) size (%lu) larger than max (64)",
 				AS_ERR_PARAMETER, state->def->name, state->op_type, size);
+		as_error_details_set_fmt(AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
+				"bits %s: integer size %lu larger than max 64",
+				state->def->name, size);
 		return false;
 	}
 
@@ -1194,6 +1266,8 @@ bits_parse_byte_size(bits_state* state, bits_op* op)
 		cf_warning(AS_PARTICLE,
 				"bits_parse_byte_size - error %u op %s (%u) size may not be 0",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
+		as_error_details_set_fmt(AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
+				"bits %s: byte size may not be 0", state->def->name);
 		return false;
 	}
 
@@ -1202,6 +1276,9 @@ bits_parse_byte_size(bits_state* state, bits_op* op)
 				"bits_parse_byte_size - error %u op %s (%u) size (%lu) larger than max (%d)",
 				AS_ERR_PARAMETER, state->def->name, state->op_type, size,
 				PROTO_SIZE_MAX);
+		as_error_details_set_fmt(AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
+				"bits %s: byte size %lu larger than max %d", state->def->name,
+				size, PROTO_SIZE_MAX);
 		return false;
 	}
 
@@ -1227,6 +1304,9 @@ bits_parse_byte_size_allow_zero(bits_state* state, bits_op* op)
 				"bits_parse_byte_size_allow_zero - error %u op %s (%u) size (%lu) larger than max (%d)",
 				AS_ERR_PARAMETER, state->def->name, state->op_type, size,
 				PROTO_SIZE_MAX);
+		as_error_details_set_fmt(AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
+				"bits %s: byte size %lu larger than max %d", state->def->name,
+				size, PROTO_SIZE_MAX);
 		return false;
 	}
 
@@ -1251,6 +1331,8 @@ bits_parse_size(bits_state* state, bits_op* op)
 		cf_warning(AS_PARTICLE,
 				"bits_parse_size - error %u op %s (%u) size may not be 0",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
+		as_error_details_set_fmt(AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
+				"bits %s: bit size may not be 0", state->def->name);
 		return false;
 	}
 
@@ -1259,6 +1341,9 @@ bits_parse_size(bits_state* state, bits_op* op)
 				"bits_parse_size - error %u op %s (%u) size (%lu) is larger than max (%d)",
 				AS_ERR_PARAMETER, state->def->name, state->op_type, size,
 				PROTO_SIZE_MAX * 8);
+		as_error_details_set_fmt(AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
+				"bits %s: bit size %lu larger than max %d", state->def->name,
+				size, PROTO_SIZE_MAX * 8);
 		return false;
 	}
 
@@ -1296,6 +1381,9 @@ bits_parse_n_bits_value(bits_state* state, bits_op* op)
 				"bits_parse_n_bits_value - error %u op %s (%u) n_bits value (%lu) is larger than max (%d)",
 				AS_ERR_PARAMETER, state->def->name, state->op_type, op->value,
 				PROTO_SIZE_MAX * 8);
+		as_error_details_set_fmt(AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
+				"bits %s: n_bits value %lu larger than max %d",
+				state->def->name, op->value, PROTO_SIZE_MAX * 8);
 		return false;
 	}
 
@@ -1499,6 +1587,9 @@ bits_prepare_modify(bits_state* state, bits_op* op, const as_bin* b)
 				"bits_prepare_op - error %u op %s (%u) result blob size %u is larger than max %u",
 				AS_ERR_PARAMETER, state->def->name, state->op_type,
 				state->new_size, PROTO_SIZE_MAX);
+		as_error_details_set_fmt(AS_SUB_PARAM_BITS_RESIZE_EXCEEDED,
+				"bits %s: resulting blob size %u exceeds max %u",
+				state->def->name, state->new_size, PROTO_SIZE_MAX);
 		return -AS_ERR_PARAMETER;
 	}
 

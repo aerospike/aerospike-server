@@ -347,8 +347,9 @@ as_transaction_init_iops(as_transaction* tr, as_namespace* ns, cf_digest* keyd,
 void
 as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code)
 {
+	bool include_error_msg = as_msg_include_error_details(tr->msgp->msg.info4);
 	as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0,
-			NULL, NULL);
+			NULL, NULL, include_error_msg);
 	tr->from.proto_fd_h = NULL;
 
 	cf_free(tr->msgp);
@@ -382,8 +383,10 @@ as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		if (tr->from.proto_fd_h) {
+			bool include_error_msg =
+					as_msg_include_error_details(tr->msgp->msg.info4);
 			as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL,
-					0, NULL, NULL);
+					0, NULL, NULL, include_error_msg);
 			tr->from.proto_fd_h = NULL; // pattern, not needed
 		}
 		UPDATE_ERROR_STATS(client);
@@ -392,7 +395,8 @@ as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 		if (tr->from.proxy_orig != NULL) {
 			as_proxy_send_response(tr->from.proxy_orig->node,
 					tr->from_data.proxy_tid, error_code, 0, 0, NULL, NULL, 0,
-					NULL, NULL);
+					NULL, NULL,
+					as_msg_include_error_details(tr->msgp->msg.info4));
 			proxy_origin_destroy(tr->from.proxy_orig);
 			tr->from.proxy_orig = NULL; // pattern, not needed
 		}
@@ -450,6 +454,8 @@ as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 		cf_crash(AS_PROTO, "unexpected transaction origin %u", tr->origin);
 		break;
 	}
+
+	as_error_msg_clear();
 }
 
 // TODO - temporary, until query can do its own synchronous failure responses.
@@ -465,8 +471,10 @@ as_query_error(as_transaction* tr, uint32_t error_code)
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		if (tr->from.proto_fd_h) {
+			bool include_error_msg =
+					as_msg_include_error_details(tr->msgp->msg.info4);
 			as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL,
-					0, NULL, NULL);
+					0, NULL, NULL, include_error_msg);
 			tr->from.proto_fd_h = NULL; // pattern, not needed
 		}
 		as_incr_uint64(&g_stats.n_tsvc_client_error);
