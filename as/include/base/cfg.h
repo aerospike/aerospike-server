@@ -305,5 +305,6 @@ typedef struct cfg_line_s {
 
 void cfg_enterprise_only(const cfg_line* p_line);
 void cfg_post_process();
+void cfg_warn_encryption_at_rest_without_tls(const as_namespace* ns);
 cf_tls_spec* cfg_create_tls_spec(as_config* cfg, const char* name);
 cf_tls_spec* cfg_link_tls(const char* which, char** our_name);

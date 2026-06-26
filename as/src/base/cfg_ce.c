@@ -84,6 +84,12 @@ cfg_post_process()
 	}
 }
 
+void
+cfg_warn_encryption_at_rest_without_tls(const as_namespace* ns)
+{
+	(void)ns;
+}
+
 //==========================================================
 // Local helpers.
 //
