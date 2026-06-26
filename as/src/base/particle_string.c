@@ -167,8 +167,7 @@ static int
 string_append_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		uint32_t value_size, as_particle** pp)
 {
-	as_info_warn_deprecated(
-			"AS_MSG_OP_APPEND on string bin is deprecated - use string.append or string.concat");
+	as_info_warn_deprecated("top-level string append is deprecated - use the strings operation API (append or concat)");
 
 	return blob_append_from_wire(wire_type, wire_value, value_size, pp);
 }
@@ -178,7 +177,7 @@ string_prepend_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		uint32_t value_size, as_particle** pp)
 {
 	as_info_warn_deprecated(
-			"AS_MSG_OP_PREPEND on string bin is deprecated - use string.prepend or string.insert at index 0");
+			"top-level string prepend is deprecated - use the strings operation API (prepend, or insert at index 0)");
 
 	return blob_prepend_from_wire(wire_type, wire_value, value_size, pp);
 }

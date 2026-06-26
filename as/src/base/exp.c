@@ -1898,6 +1898,9 @@ build_compare(build_args* args)
 static bool
 build_cmp_regex(build_args* args)
 {
+	as_info_warn_deprecated(
+			"'cmp_regex' expression op is deprecated - use the strings expression API (regex_compare) instead");
+
 	op_cmp_regex* op = (op_cmp_regex*)args->mem;
 	const op_table_entry* entry = args->entry;
 
