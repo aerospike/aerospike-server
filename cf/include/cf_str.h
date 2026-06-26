@@ -1,7 +1,7 @@
 /*
  * cf_str.h
  *
- * Copyright (C) 2008-2020 Aerospike, Inc.
+ * Copyright (C) 2008-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -22,7 +22,11 @@
 
 #pragma once
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+
+bool cf_str_is_valid_utf8(const uint8_t* buf, size_t buf_sz);
 
 // These functions convert a string to a number of different integer types, and
 // returns 0 on success.

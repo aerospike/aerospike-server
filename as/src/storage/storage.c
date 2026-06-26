@@ -702,5 +702,10 @@ as_storage_rd_load_key(as_storage_rd* rd)
 		return as_storage_record_load_key(rd);
 	}
 
+	if (rd->key_size != 0) {
+		cf_assert(rd->key != NULL, AS_STORAGE, "key_size set without key");
+		return true;
+	}
+
 	return false;
 }

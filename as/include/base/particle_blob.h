@@ -47,6 +47,9 @@ int blob_incr_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 int32_t blob_size_from_wire(const uint8_t* wire_value, uint32_t value_size);
 int blob_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		uint32_t value_size, as_particle** pp);
+// STRING particle wire ingest (same blob_mem layout as blob_from_wire with type STRING).
+int blob_string_particle_from_wire(const uint8_t* wire_value,
+		uint32_t value_size, as_particle** pp);
 uint32_t blob_wire_size(const as_particle* p);
 uint32_t blob_to_wire(const as_particle* p, uint8_t* wire);
 

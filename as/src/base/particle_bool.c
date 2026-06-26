@@ -1,7 +1,7 @@
 /*
  * particle_bool.c
  *
- * Copyright (C) 2021 Aerospike, Inc.
+ * Copyright (C) 2021-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -285,4 +285,18 @@ as_bin_particle_bool_value(const as_bin* b)
 {
 	// Caller must ensure this is called only for BOOL particles.
 	return (uint64_t)b->particle != 0;
+}
+
+//==========================================================
+// to_string - bool bin to string particle.
+//
+
+int
+bool_to_string(const as_bin* b, as_bin* rb)
+{
+	bool val = as_bin_particle_bool_value(b);
+	const char* str = val ? "true" : "false";
+	uint32_t len = val ? 4 : 5;
+
+	return string_particle_bin_from_bytes((const uint8_t*)str, len, rb);
 }

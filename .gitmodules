@@ -42,3 +42,14 @@
 	path = modules/yamlcpp
 	url = https://github.com/aerospike/yaml-cpp
 	ignore = dirty
+[submodule "modules/icu"]
+	path = modules/icu
+	url = https://github.com/aerospike/icu.git
+	ignore = dirty
+[submodule "modules/pcre2"]
+	path = modules/pcre2
+	url = https://github.com/aerospike/pcre2.git
+	ignore = dirty
+[submodule "modules/simde"]
+	path = modules/simde
+	url = https://github.com/aerospike/simde.git

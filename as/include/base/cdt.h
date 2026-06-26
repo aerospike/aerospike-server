@@ -662,6 +662,34 @@ void cdt_context_push(cdt_context* ctx, uint32_t idx, uint8_t type);
 bool cdt_context_read_check_peek(const msgpack_in_vec* ctx);
 int cdt_context_dig(cdt_context* ctx, msgpack_in_vec* mv, bool is_modify);
 
+// Nested leaf apply helpers.
+// These helpers allow string/bits/HLL ops to target leaves nested inside
+// list/map CDTs. They wrap cdt_context_dig / fill_unpacker / unwind.
+//
+// cdt_leaf_apply_read: descends via ctx, validates leaf type, returns
+//   raw leaf bytes (type byte + payload) for caller to execute read op.
+//   Returns AS_OK on success, negative AS_ERR_* on failure.
+//
+// cdt_leaf_apply_modify_begin: descends via ctx with is_modify=true so
+//   the CDT modify framework is primed. Returns leaf bytes for caller
+//   to execute prepare+modify. Caller must call cdt_leaf_apply_modify_commit
+//   after transforming the bytes, or rollback on failure. Caller provides
+//   alloc_buf created via define_rollback_alloc.
+//
+// cdt_leaf_apply_modify_commit: writes the new bytes as a typed msgpack
+//   str/bin at the dug position, then unwinds parent CDT headers.
+//   new_bytes is the raw payload WITHOUT the type byte; this function
+//   prepends the correct type byte based on leaf_type.
+int cdt_leaf_apply_read(const as_bin* b, msgpack_in_vec* ctx_mv,
+		as_particle_type expected_leaf_type, const uint8_t** leaf_bytes,
+		uint32_t* leaf_sz);
+int cdt_leaf_apply_modify_begin(cdt_context* ctx, as_bin* b,
+		rollback_alloc* alloc_buf, msgpack_in_vec* ctx_mv,
+		as_particle_type expected_leaf_type, const uint8_t** leaf_bytes,
+		uint32_t* leaf_sz);
+int cdt_leaf_apply_modify_commit(cdt_context* ctx, as_particle_type leaf_type,
+		const uint8_t* new_bytes, uint32_t new_sz);
+
 static inline bool
 cdt_context_is_toplvl(const cdt_context* ctx)
 {

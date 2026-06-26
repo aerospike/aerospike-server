@@ -1,7 +1,7 @@
 /*
  * drv_ssd.c
  *
- * Copyright (C) 2009-2023 Aerospike, Inc.
+ * Copyright (C) 2009-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.

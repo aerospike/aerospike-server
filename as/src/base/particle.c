@@ -1,7 +1,7 @@
 /*
  * particle.c
  *
- * Copyright (C) 2008-2023 Aerospike, Inc.
+ * Copyright (C) 2008-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -298,6 +298,45 @@ as_particle_type_str(as_particle_type type)
 	return particle_strings[type];
 }
 
+static void
+particle_warn_append_deprecated(as_particle_type type)
+{
+	switch (type) {
+	case AS_PARTICLE_TYPE_STRING:
+		as_info_warn_deprecated("'append' operation is deprecated - "
+								"use 'string.append' or 'string.concat' instead");
+		break;
+	case AS_PARTICLE_TYPE_BLOB:
+		as_info_warn_deprecated("'append' operation is deprecated - "
+								"use 'bit_insert' at end of blob instead");
+		break;
+	default:
+		as_info_warn_deprecated("'append' operation is deprecated - "
+								"use a type-specific operation instead");
+		break;
+	}
+}
+
+static void
+particle_warn_prepend_deprecated(as_particle_type type)
+{
+	switch (type) {
+	case AS_PARTICLE_TYPE_STRING:
+		as_info_warn_deprecated(
+				"'prepend' operation is deprecated - "
+				"use 'string.prepend' or 'string.insert' at index 0 instead");
+		break;
+	case AS_PARTICLE_TYPE_BLOB:
+		as_info_warn_deprecated("'prepend' operation is deprecated - "
+								"use 'bit_insert' at byte offset 0 instead");
+		break;
+	default:
+		as_info_warn_deprecated("'prepend' operation is deprecated - "
+								"use a type-specific operation instead");
+		break;
+	}
+}
+
 as_particle_type
 as_particle_type_from_str(const char* str)
 {
@@ -419,6 +458,13 @@ as_bin_particle_modify_from_client(as_bin* b, cf_ll_buf* particles_llb,
 
 	// Currently all operations become creates if there's no existing particle.
 	if (! as_bin_is_live(b)) {
+		if (operation == AS_MSG_OP_APPEND) {
+			particle_warn_append_deprecated(op_type);
+		}
+		else if (operation == AS_MSG_OP_PREPEND) {
+			particle_warn_prepend_deprecated(op_type);
+		}
+
 		int32_t mem_size = particle_vtable[op_type]->size_from_wire_fn(op_value,
 				op_value_size);
 
@@ -466,6 +512,7 @@ as_bin_particle_modify_from_client(as_bin* b, cf_ll_buf* particles_llb,
 				op_value, op_value_size, &b->particle);
 		break;
 	case AS_MSG_OP_APPEND:
+		particle_warn_append_deprecated((as_particle_type)existing_type);
 		new_mem_size =
 				particle_vtable[existing_type]->concat_size_from_wire_fn(op_type,
 						op_value, op_value_size, &b->particle);
@@ -481,6 +528,7 @@ as_bin_particle_modify_from_client(as_bin* b, cf_ll_buf* particles_llb,
 				op_value, op_value_size, &b->particle);
 		break;
 	case AS_MSG_OP_PREPEND:
+		particle_warn_prepend_deprecated((as_particle_type)existing_type);
 		new_mem_size =
 				particle_vtable[existing_type]->concat_size_from_wire_fn(op_type,
 						op_value, op_value_size, &b->particle);
@@ -809,6 +857,64 @@ as_bin_cdt_read_from_client(const as_bin* b, as_msg_op* op, as_bin* result)
 }
 
 //==========================================================
+// as_bin particle functions specific to strings.
+//
+
+//------------------------------------------------
+// Handle "wire" format.
+//
+
+// Peek the sub-op code from the msgpack payload without advancing.
+// Returns the sub-op code, or -1 on parse error.
+static int64_t
+string_op_peek_sub_op(const as_msg_op* op)
+{
+	const uint8_t* val = as_msg_op_get_value_p(op);
+	uint32_t val_sz = as_msg_op_get_value_sz(op);
+
+	msgpack_in mp = { .buf = val, .buf_sz = val_sz };
+
+	uint32_t ele_count;
+
+	if (! msgpack_get_list_ele_count(&mp, &ele_count) || ele_count == 0) {
+		return -1;
+	}
+
+	uint64_t sub_op;
+
+	if (! msgpack_get_uint64(&mp, &sub_op)) {
+		return -1;
+	}
+
+	return (int64_t)sub_op;
+}
+
+int
+as_bin_string_modify_from_client(as_bin* b, cf_ll_buf* particles_llb,
+		as_msg_op* op)
+{
+	int64_t sub_op = string_op_peek_sub_op(op);
+
+	if (sub_op == AS_STRING_OP_CONTEXT_EVAL) {
+		return as_bin_string_modify_ctx_tr(b, op, particles_llb);
+	}
+
+	return as_bin_string_modify_tr(b, op, particles_llb);
+}
+
+int
+as_bin_string_read_from_client(const as_bin* b, as_msg_op* op, as_bin* result)
+{
+	int64_t sub_op = string_op_peek_sub_op(op);
+
+	if (sub_op == AS_STRING_OP_CONTEXT_EVAL) {
+		return as_bin_string_read_ctx_tr(b, op, result);
+	}
+
+	return as_bin_string_read_tr(b, op, result);
+}
+
+//==========================================================
 // as_bin particle functions specific to expressions.
 //
 
@@ -827,4 +933,59 @@ int
 as_bin_exp_read_from_client(const as_exp_ctx* ctx, as_msg_op* op, as_bin* rb)
 {
 	return as_exp_read_tr(ctx, op, rb);
+}
+
+//==========================================================
+// Shared STRING particle builder.
+//
+
+typedef struct string_particle_mem_s {
+	uint8_t type;
+	uint32_t sz;
+	uint8_t data[];
+} __attribute__((__packed__)) string_particle_mem;
+
+COMPILER_ASSERT(sizeof(string_particle_mem) == AS_PARTICLE_MEM_HDR_SZ);
+
+int
+string_particle_bin_from_bytes(const uint8_t* data, uint32_t sz, as_bin* rb)
+{
+	string_particle_mem* sm =
+			(string_particle_mem*)cf_malloc(sizeof(string_particle_mem) + sz);
+
+	sm->type = AS_PARTICLE_TYPE_STRING;
+	sm->sz = sz;
+	memcpy(sm->data, data, sz);
+
+	rb->particle = (as_particle*)sm;
+	as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_STRING);
+
+	return AS_OK;
+}
+
+int
+as_bin_to_string(const as_bin* b, as_bin* rb)
+{
+	switch (as_bin_get_particle_type(b)) {
+	case AS_PARTICLE_TYPE_INTEGER:
+		return integer_to_string(b, rb);
+	case AS_PARTICLE_TYPE_FLOAT:
+		return float_to_string(b, rb);
+	case AS_PARTICLE_TYPE_STRING:
+		return string_to_string(b, rb);
+	case AS_PARTICLE_TYPE_BOOL:
+		return bool_to_string(b, rb);
+	case AS_PARTICLE_TYPE_BLOB:
+		return blob_to_string(b, rb);
+	// case AS_PARTICLE_TYPE_HLL:
+	// 	return hll_to_string(b, rb);
+	// case AS_PARTICLE_TYPE_MAP:
+	// 	return map_to_string(b, rb);
+	// case AS_PARTICLE_TYPE_LIST:
+	// 	return list_to_string(b, rb);
+	// case AS_PARTICLE_TYPE_GEOJSON:
+	// 	return geojson_to_string(b, rb);
+	default:
+		return -AS_ERR_INCOMPATIBLE_TYPE;
+	}
 }

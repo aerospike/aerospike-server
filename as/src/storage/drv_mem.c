@@ -1,7 +1,7 @@
 /*
  * drv_mem.c
  *
- * Copyright (C) 2023 Aerospike, Inc.
+ * Copyright (C) 2023-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.

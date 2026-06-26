@@ -46,6 +46,7 @@ SOURCES += alloc.c
 SOURCES += arenax.c
 SOURCES += cf_mutex.c
 SOURCES += cf_str.c
+SOURCES += cf_utf8_vec.c
 SOURCES += cf_thread.c
 SOURCES += daemon.c
 SOURCES += dns.c
@@ -86,6 +87,7 @@ INCLUDES += -I$(COMMON)/target/$(PLATFORM)/include
 INCLUDES += -I$(JANSSON)/src
 INCLUDES += -I$(JEMALLOC)/include
 INCLUDES += -I$(LIBBACKTRACE)
+INCLUDES += -I$(DEPTH)/modules/simde
 
 OBJECTS = $(SOURCES:%.c=$(OBJECT_DIR)/%.o)
 DEPENDENCIES = $(OBJECTS:%.o=%.d)
@@ -100,5 +102,9 @@ clean:
 
 $(LIBRARY): $(OBJECTS)
 	$(AR) rs $(LIBRARY) $(OBJECTS)
+
+ifeq ($(ARCH),x86_64)
+  $(OBJECT_DIR)/cf_utf8_vec.o: CFLAGS += -mssse3 -msse4.1
+endif
 
 include $(DEPTH)/make_in/Makefile.targets

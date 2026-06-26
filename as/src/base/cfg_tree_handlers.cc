@@ -1,7 +1,7 @@
 /*
  * cfg_tree_handlers.cc
  *
- * Copyright (C) 2025 Aerospike, Inc.
+ * Copyright (C) 2025-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -1427,8 +1427,7 @@ handle_error_details_max_verbosity(void* target, const FieldDescriptor& desc,
 		config->error_details_max_verbosity = AS_ERROR_DETAILS_VERBOSITY_CODES;
 	}
 	else if (v == "messages") {
-		config->error_details_max_verbosity =
-				AS_ERROR_DETAILS_VERBOSITY_MESSAGES;
+		config->error_details_max_verbosity = AS_ERROR_DETAILS_VERBOSITY_MESSAGES;
 	}
 	else if (v == "all") {
 		config->error_details_max_verbosity = AS_ERROR_DETAILS_VERBOSITY_ALL;
@@ -1916,7 +1915,8 @@ handle_namespace_storage_engine_devices(void* ns, const FieldDescriptor& desc,
 		size_t colon_pos = device_str.find(':');
 		std::string device_name = device_str.substr(0, colon_pos);
 		std::string shadow_name = colon_pos == std::string::npos
-				? std::string() : device_str.substr(colon_pos + 1);
+				? std::string()
+				: device_str.substr(colon_pos + 1);
 
 		// cfg_add_storage_device does NOT strdup
 		// it stores the pointer directly.
@@ -1981,7 +1981,8 @@ handle_namespace_storage_engine_files(void* ns, const FieldDescriptor& desc,
 		size_t colon_pos = file_str.find(':');
 		std::string file_name = file_str.substr(0, colon_pos);
 		std::string shadow_name = colon_pos == std::string::npos
-				? std::string() : file_str.substr(colon_pos + 1);
+				? std::string()
+				: file_str.substr(colon_pos + 1);
 
 		// Pointer is stored directly by cfg_add_storage_file,
 		// which does NOT strdup.

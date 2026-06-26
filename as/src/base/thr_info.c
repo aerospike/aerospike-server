@@ -2067,8 +2067,8 @@ jem_stats_resolve_file_path(cf_dyn_buf* db, const char* file_str,
 
 		if (! under_tmp && ! under_output_dir) {
 			as_info_respond_error(db, AS_ERR_PARAMETER,
-					"File path is not under '/tmp' or '%s': '%s'",
-					output_dir, file_str);
+					"File path is not under '/tmp' or '%s': '%s'", output_dir,
+					file_str);
 			return false;
 		}
 
@@ -3274,7 +3274,8 @@ cmd_sindex_stat(as_info_cmd_args* args)
 		return;
 	}
 
-	cf_detail(AS_INFO, "sindex-stat - received request on index %s - namespace %s",
+	cf_detail(AS_INFO,
+			"sindex-stat - received request on index %s - namespace %s",
 			index_name_str, ns_str);
 
 	if (! as_sindex_manager_stats_str(ns, index_name_str, db)) {

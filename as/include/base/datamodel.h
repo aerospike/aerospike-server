@@ -1,7 +1,7 @@
 /*
  * datamodel.h
  *
- * Copyright (C) 2008-2025 Aerospike, Inc.
+ * Copyright (C) 2008-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -62,8 +62,8 @@
 
 #define MAX_ALLOWED_TTL (3600 * 24 * 365 * 10) // 10 years
 #define TTL_USE_DEFAULT 0
-#define TTL_NEVER_EXPIRE ((uint32_t) - 1) // config for set (but not namespace)
-#define TTL_DONT_UPDATE ((uint32_t) - 2) // not config - in client msg only
+#define TTL_NEVER_EXPIRE ((uint32_t)(-1)) // config for set (but not namespace)
+#define TTL_DONT_UPDATE ((uint32_t)(-2)) // not config - in client msg only
 
 // [0-1] for partition-id
 // [1-4] for tree sprigs and locks
@@ -143,6 +143,10 @@ typedef enum {
 	AS_PARTICLE_TYPE_BAD = AS_PARTICLE_TYPE_MAX
 } as_particle_type;
 
+// Header size shared by blob_mem, string_mem, list_mem, map_mem, etc.:
+// { uint8_t type; uint32_t sz; uint8_t data[]; } __packed__
+#define AS_PARTICLE_MEM_HDR_SZ 5
+
 typedef struct as_particle_s {
 	uint8_t type; // type for non-embedded particles
 	uint8_t data[0];
@@ -221,6 +225,13 @@ int as_bin_hll_modify_from_client(as_bin* b, cf_ll_buf* particles_llb,
 int as_bin_hll_read_from_client(const as_bin* b, struct as_msg_op_s* op,
 		as_bin* rb);
 
+// Different for STRING operations - we don't use the normal APIs and particle
+// table functions.
+int as_bin_string_modify_from_client(as_bin* b, cf_ll_buf* particles_llb,
+		struct as_msg_op_s* op);
+int as_bin_string_read_from_client(const as_bin* b, struct as_msg_op_s* op,
+		as_bin* result);
+
 // Different for CDTs - the operations may return results, so we don't use the
 // normal APIs and particle table functions.
 int as_bin_cdt_modify_from_client(as_bin* b, cf_ll_buf* particles_llb,
@@ -266,6 +277,18 @@ bool as_bin_particle_bool_value(const as_bin* b);
 
 // string:
 uint32_t as_bin_particle_string_ptr(const as_bin* b, char** p_value);
+int as_bin_string_modify_tr(as_bin* b, const struct as_msg_op_s* msg_op,
+		cf_ll_buf* particles_llb);
+int as_bin_string_read_tr(const as_bin* b, const struct as_msg_op_s* msg_op,
+		as_bin* rb);
+int as_bin_string_modify_ctx_tr(as_bin* b, const struct as_msg_op_s* msg_op,
+		cf_ll_buf* particles_llb);
+int as_bin_string_read_ctx_tr(const as_bin* b, const struct as_msg_op_s* msg_op,
+		as_bin* rb);
+int as_bin_string_modify_exp(as_bin* b, msgpack_in_vec* mv);
+int as_bin_string_read_exp(const as_bin* b, msgpack_in_vec* mv, as_bin* rb);
+int as_bin_to_string(const as_bin* b, as_bin* rb);
+const char* as_string_op_name(uint32_t op_code, bool is_modify);
 
 // blob:
 uint32_t as_bin_particle_blob_ptr(const as_bin* b, uint8_t** p_value);

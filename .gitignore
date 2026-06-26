@@ -7,7 +7,9 @@ TAGS
 run
 target
 tso/tso.so
-
+.cursor
+.clangd
+compile_flags.*
 # emacs backup / temp files
 *~
 \#*\#

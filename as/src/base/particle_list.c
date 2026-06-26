@@ -338,6 +338,7 @@ static int list_remove_all_by_value_list(cdt_op_mem* com,
 		const cdt_payload* value_list);
 static int list_remove_by_rel_rank_range(cdt_op_mem* com,
 		const cdt_payload* value, int64_t rank, uint64_t count);
+static int list_join(cdt_op_mem* com, const cdt_payload* sep);
 
 static uint8_t* list_setup_bin(as_bin* b, rollback_alloc* alloc_buf,
 		uint8_t flags, uint32_t content_sz, uint32_t ele_count,
@@ -2920,6 +2921,86 @@ packed_list_get_remove_by_rel_rank_range(const packed_list* list,
 }
 
 static int
+packed_list_join(const packed_list* list, cdt_op_mem* com, const cdt_payload* sep)
+{
+	msgpack_in mp_sep = { .buf = sep->ptr, .buf_sz = sep->sz };
+
+	uint32_t sep_raw_sz = 0;
+	const uint8_t* sep_raw = NULL;
+
+	if (sep->ptr != NULL) {
+		if (msgpack_peek_type(&mp_sep) != MSGPACK_TYPE_STRING) {
+			return -AS_ERR_PARAMETER;
+		}
+
+		sep_raw = msgpack_get_bin(&mp_sep, &sep_raw_sz);
+		sep_raw++;
+		sep_raw_sz--;
+	}
+
+	if (list->ele_count == 0) {
+		list_mem* answer = cf_malloc(AS_PARTICLE_MEM_HDR_SZ);
+		answer->type = AS_PARTICLE_TYPE_STRING;
+		answer->sz = 0;
+		as_bin* rb = com->result.result;
+		rb->particle = (as_particle*)answer;
+		as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_STRING);
+		return AS_OK;
+	}
+
+	uint64_t max_u64 = (uint64_t)list->content_sz +
+			(uint64_t)(list->ele_count - 1) * (uint64_t)sep_raw_sz;
+
+	if (max_u64 > UINT32_MAX) {
+		cf_ticker_warning(AS_PARTICLE, "packed_list_join() result size overflow");
+		return -AS_ERR_PARAMETER;
+	}
+
+	uint32_t max_result_sz = (uint32_t)max_u64;
+	list_mem* result = cf_malloc(max_result_sz + AS_PARTICLE_MEM_HDR_SZ);
+
+	result->type = AS_PARTICLE_TYPE_STRING;
+	result->sz = 0;
+
+	msgpack_in mp = { .buf = list->contents, .buf_sz = list->content_sz };
+	uint8_t* pos = result->data;
+
+	for (uint32_t i = 0; i < list->ele_count; i++) {
+		if (msgpack_peek_type(&mp) != MSGPACK_TYPE_STRING) {
+			cf_free(result);
+			cf_ticker_warning(AS_PARTICLE,
+					"packed_list_join() encountered non-string list element at index %u",
+					i);
+			return -AS_ERR_PARAMETER;
+		}
+
+		uint32_t ele_sz;
+		const uint8_t* ele_raw = msgpack_get_bin(&mp, &ele_sz);
+
+		ele_raw++;
+		ele_sz--;
+
+		if (i > 0) {
+			memcpy(pos, sep_raw, sep_raw_sz);
+			pos += sep_raw_sz;
+		}
+
+		memcpy(pos, ele_raw, ele_sz);
+		pos += ele_sz;
+	}
+
+	result->sz = pos - result->data;
+
+	as_bin* rb = com->result.result;
+
+	rb->particle = (as_particle*)result;
+
+	as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_STRING);
+
+	return AS_OK;
+}
+
+static int
 packed_list_insert(const packed_list* list, cdt_op_mem* com, int64_t index,
 		const cdt_payload* payload, bool payload_is_list, uint64_t mod_flags,
 		bool set_result)
@@ -4324,6 +4405,19 @@ list_remove_by_rel_rank_range(cdt_op_mem* com, const cdt_payload* value,
 			count);
 }
 
+static int
+list_join(cdt_op_mem* com, const cdt_payload* sep)
+{
+	packed_list list;
+
+	if (! packed_list_init_from_com(&list, com)) {
+		cf_ticker_warning(AS_PARTICLE, "list_join() invalid list");
+		return -AS_ERR_PARAMETER;
+	}
+
+	return packed_list_join(&list, com, sep);
+}
+
 // Return ptr to packed + ele_start.
 static uint8_t*
 list_setup_bin(as_bin* b, rollback_alloc* alloc_buf, uint8_t flags,
@@ -5032,6 +5126,17 @@ cdt_process_state_packed_list_read_optype(cdt_process_state* state,
 		result_data_set(result, result_type, true);
 		ret = packed_list_get_remove_by_rel_rank_range(&list, com, &value, rank,
 				count);
+		break;
+	}
+	case AS_CDT_OP_LIST_JOIN: {
+		cdt_payload sep = { 0 };
+
+		if (! CDT_OP_TABLE_GET_PARAMS(state, &sep)) {
+			com->ret_code = -AS_ERR_PARAMETER;
+			return false;
+		}
+
+		ret = list_join(com, &sep);
 		break;
 	}
 	default:

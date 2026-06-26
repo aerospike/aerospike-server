@@ -1,7 +1,7 @@
 /*
  * rw_utils.c
  *
- * Copyright (C) 2016-2021 Aerospike, Inc.
+ * Copyright (C) 2016-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -323,8 +323,7 @@ read_and_filter_bins(as_storage_rd* rd, as_exp* exp)
 	as_exp_ctx ctx = { .ns = ns, .r = rd->r, .rd = rd };
 
 	if (! as_exp_matches_record(exp, &ctx)) {
-		as_error_details_set_fmt(AS_SUB_NONE,
-				"filtered out by bins expression");
+		as_error_details_set_fmt(AS_SUB_NONE, "filtered out by bins expression");
 		return AS_ERR_FILTERED_OUT;
 	}
 
@@ -593,6 +592,101 @@ process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
 		}
 
 		return READ_OP_RESULT_SUCCESS;
+	}
+	case AS_MSG_OP_STRING_READ: {
+		as_bin* b = as_bin_get_live_w_len(rd, op->name, op->name_sz);
+
+		// Use stack bin for masked source to avoid using two result_bins slots
+		as_bin masked_src;
+		bool masked = b && as_masking_apply(rd->mask_ctx, &masked_src, b);
+
+		if (masked) {
+			b = &masked_src;
+		}
+
+		if (b) {
+			as_bin* rb = &result_bins[*p_n_result_bins];
+			as_bin_set_empty(rb);
+
+			*error_code = as_bin_string_read_from_client(b, op, rb);
+
+			if (*error_code < 0) {
+				cf_detail(AS_RW,
+						"{%s} process_bin_read_op: "
+						"failed as_bin_string_read_from_client() %pD",
+						ns->name, &rd->r->keyd);
+
+				if (masked) {
+					as_bin_particle_destroy(&masked_src);
+				}
+
+				return READ_OP_RESULT_ERROR;
+			}
+
+			if (masked) {
+				as_bin_particle_destroy(&masked_src);
+			}
+
+			if (as_bin_is_used(rb)) {
+				(*p_n_result_bins)++;
+				*result_bin_r = rb;
+			}
+			else {
+				*result_bin_r = NULL;
+			}
+
+			return READ_OP_RESULT_SUCCESS;
+		}
+		else if (respond_all_ops) {
+			*result_bin_r = NULL;
+			return READ_OP_RESULT_SUCCESS;
+		}
+
+		return READ_OP_RESULT_NOT_FOUND;
+	}
+	case AS_MSG_OP_TO_STRING: {
+		as_bin* b = as_bin_get_live_w_len(rd, op->name, op->name_sz);
+
+		// Use stack bin for masked source to avoid using two result_bins slots
+		as_bin masked_src;
+		bool masked = b && as_masking_apply(rd->mask_ctx, &masked_src, b);
+		if (masked) {
+			b = &masked_src;
+		}
+
+		if (b) {
+			as_bin* rb = &result_bins[*p_n_result_bins];
+			as_bin_set_empty(rb);
+			*error_code = as_bin_to_string(b, rb);
+			if (*error_code < 0) {
+				cf_detail(AS_RW,
+						"{%s} process_bin_read_op: "
+						"failed as_bin_to_string() %pD",
+						ns->name, &rd->r->keyd);
+				if (masked) {
+					as_bin_particle_destroy(&masked_src);
+				}
+				return READ_OP_RESULT_ERROR;
+			}
+			if (as_bin_is_used(rb)) {
+				(*p_n_result_bins)++;
+				*result_bin_r = rb;
+			}
+			else {
+				*result_bin_r = NULL;
+			}
+			if (masked) {
+				as_bin_particle_destroy(&masked_src);
+			}
+
+			return READ_OP_RESULT_SUCCESS;
+		}
+		else if (respond_all_ops) {
+			*result_bin_r = NULL;
+			return READ_OP_RESULT_SUCCESS;
+		}
+
+		return READ_OP_RESULT_NOT_FOUND;
 	}
 	default:
 		cf_warning(AS_RW, "{%s} process_bin_read_op: unsupported read op %u %pD",

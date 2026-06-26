@@ -39,6 +39,7 @@
 #include "citrusleaf/cf_clock.h"
 
 #include "bits.h"
+#include "cf_str.h"
 #include "dynbuf.h"
 #include "log.h"
 #include "msgpack_in.h"
@@ -177,6 +178,8 @@ typedef enum {
 	CALL_CDT = 0,
 	CALL_BITS = 1,
 	CALL_HLL = 2,
+	CALL_STRING = 3,
+	CALL_REPR = 4,
 
 	CALL_FLAG_MODIFY_LOCAL = 0x40
 } call_system_type;
@@ -970,13 +973,32 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 		}
 
 		break;
-	case RT_STR:
+	case RT_STR: {
+		// Validate before alloc: on failure eval_op returns without restoring
+		// rb->particle (see as_exp_modify_tr), so we must not leave a new
+		// particle allocated without bin state set.
+		if (! cf_str_is_valid_utf8(ret_val.r_bytes.contents, ret_val.r_bytes.sz)) {
+			cf_ticker_warning(AS_EXP,
+					"as_exp_eval - invalid UTF-8 detected in string data");
+			return false;
+		}
+
+		rb->particle = rt_alloc_mem(&rt, sizeof(cdt_mem) + ret_val.r_bytes.sz,
+				particles_llb);
+
+		((cdt_mem*)rb->particle)->sz = ret_val.r_bytes.sz;
+		((cdt_mem*)rb->particle)->type = (uint8_t)AS_PARTICLE_TYPE_STRING;
+		memcpy(((cdt_mem*)rb->particle)->data, ret_val.r_bytes.contents,
+				ret_val.r_bytes.sz);
+
+		as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_STRING);
+		break;
+	}
 	case RT_BLOB:
 	case RT_HLL: {
-		as_particle_type particle_type = ret_val.type == RT_STR
-				? AS_PARTICLE_TYPE_STRING
-				: (ret_val.type == RT_BLOB ? AS_PARTICLE_TYPE_BLOB
-										   : AS_PARTICLE_TYPE_HLL);
+		as_particle_type particle_type = ret_val.type == RT_BLOB
+				? AS_PARTICLE_TYPE_BLOB
+				: AS_PARTICLE_TYPE_HLL;
 
 		rb->particle = rt_alloc_mem(&rt, sizeof(cdt_mem) + ret_val.r_bytes.sz,
 				particles_llb);
@@ -1799,16 +1821,15 @@ build_check_cdt(const uint8_t* buf, uint32_t buf_sz)
 	DEFER_FREE(temp);
 
 	if (new_sz != buf_sz) {
-		cf_warning(AS_EXP,
-			"build_check_cdt - error %u cdt not compactified",
-			AS_ERR_PARAMETER);
+		cf_warning(AS_EXP, "build_check_cdt - error %u cdt not compactified",
+				AS_ERR_PARAMETER);
 		return false;
 	}
 
 	if (memcmp(buf, temp, buf_sz) != 0) {
 		cf_warning(AS_EXP,
-			"build_check_cdt - error %u cdt not ordered as expected",
-			AS_ERR_PARAMETER);
+				"build_check_cdt - error %u cdt not ordered as expected",
+				AS_ERR_PARAMETER);
 		return false;
 	}
 
@@ -3026,9 +3047,29 @@ build_call(build_args* args)
 			return false;
 		}
 		break;
+	case CALL_STRING:
+		if (args->entry->r_type != TYPE_STR) {
+			cf_warning(AS_EXP, "build_call - error %u arg %u (%s) is not string",
+					AS_ERR_PARAMETER, args->entry->r_type,
+					result_type_to_str(args->entry->r_type));
+			return false;
+		}
+		break;
 	case CALL_BITS:
 		if (args->entry->r_type != TYPE_BLOB) {
 			cf_warning(AS_EXP, "build_call - error %u arg %u (%s) is not blob",
+					AS_ERR_PARAMETER, args->entry->r_type,
+					result_type_to_str(args->entry->r_type));
+			return false;
+		}
+		break;
+	case CALL_REPR:
+		if (args->entry->r_type != TYPE_INT && args->entry->r_type != TYPE_FLOAT &&
+				args->entry->r_type != TYPE_STR &&
+				args->entry->r_type != TYPE_TRILEAN &&
+				args->entry->r_type != TYPE_BLOB) {
+			cf_warning(AS_EXP,
+					"build_call - error %u arg %u (%s) is not int, float, string, bool or blob",
 					AS_ERR_PARAMETER, args->entry->r_type,
 					result_type_to_str(args->entry->r_type));
 			return false;
@@ -4939,6 +4980,65 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 		break;
 	}
+	// rt_eval may return scalar rt_values (not RT_BIN). Downstream eval_call
+	// handlers (e.g. CALL_REPR -> as_bin_to_string) take an as_bin and dispatch
+	// on particle type, so materialize scalars into bin_arg.r_bin.
+	case RT_STR: {
+		if (is_modify_local ||
+				! cf_str_is_valid_utf8(bin_arg.r_bytes.contents,
+						bin_arg.r_bytes.sz)) {
+			ret_val->type = RT_TRILEAN;
+			ret_val->r_trilean = AS_EXP_UNK;
+			call_cleanup_fn(&bin_cleanup);
+			return;
+		}
+
+		rt_value temp = bin_arg;
+
+		b = &bin_arg.r_bin;
+		bin_arg.type = RT_BIN;
+		bin_arg.do_not_destroy = 0;
+		bin_arg.r_bin.particle = rt_alloc_mem(rt,
+				(size_t)temp.r_bytes.sz + sizeof(cdt_mem), NULL);
+
+		cdt_mem* p_cdt_mem = (cdt_mem*)bin_arg.r_bin.particle;
+
+		p_cdt_mem->type = AS_PARTICLE_TYPE_STRING;
+		as_bin_state_set_from_type(&bin_arg.r_bin, AS_PARTICLE_TYPE_STRING);
+		p_cdt_mem->sz = temp.r_bytes.sz;
+		memcpy(p_cdt_mem->data, temp.r_bytes.contents, p_cdt_mem->sz);
+
+		old = *b;
+		break;
+	}
+	case RT_INT:
+		b = &bin_arg.r_bin;
+		b->particle = (as_particle*)(uint64_t)bin_arg.r_int;
+		as_bin_state_set_from_type(b, AS_PARTICLE_TYPE_INTEGER);
+		old = *b;
+		break;
+	case RT_FLOAT: {
+		b = &bin_arg.r_bin;
+		double fval = bin_arg.r_float;
+		memcpy(&b->particle, &fval, sizeof(double));
+		as_bin_state_set_from_type(b, AS_PARTICLE_TYPE_FLOAT);
+		old = *b;
+		break;
+	}
+	case RT_TRILEAN:
+		if (bin_arg.r_trilean == AS_EXP_UNK) {
+			ret_val->type = RT_TRILEAN;
+			ret_val->r_trilean = AS_EXP_UNK;
+			call_cleanup_fn(&bin_cleanup);
+			return;
+		}
+		b = &bin_arg.r_bin;
+		b->particle =
+				(as_particle*)(uint64_t)(bin_arg.r_trilean == AS_EXP_TRUE ? 1
+																		  : 0);
+		as_bin_state_set_from_type(b, AS_PARTICLE_TYPE_BOOL);
+		old = *b;
+		break;
 	default:
 		ret_val->type = RT_TRILEAN;
 		ret_val->r_trilean = AS_EXP_UNK;
@@ -4972,6 +5072,17 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		else {
 			ret = as_bin_hll_read_exp(b, &mv, &rb);
 		}
+		break;
+	case CALL_STRING:
+		if (is_modify_local) {
+			ret = as_bin_string_modify_exp(b, &mv);
+		}
+		else {
+			ret = as_bin_string_read_exp(b, &mv, &rb);
+		}
+		break;
+	case CALL_REPR:
+		ret = as_bin_to_string(b, &rb);
 		break;
 	default:
 		cf_crash(AS_EXP, "unexpected");
@@ -6200,6 +6311,13 @@ display_call(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 	case CALL_HLL:
 		cf_dyn_buf_append_format(db, "%s(",
 				as_hll_op_name((uint32_t)op_code, is_modify));
+		break;
+	case CALL_STRING:
+		cf_dyn_buf_append_format(db, "%s(",
+				as_string_op_name((uint32_t)op_code, is_modify));
+		break;
+	case CALL_REPR:
+		cf_dyn_buf_append_format(db, "to_string(");
 		break;
 	default:
 		cf_crash(AS_EXP, "unexpected");

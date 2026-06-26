@@ -1,7 +1,7 @@
 /*
  * enhanced_alloc.h
  *
- * Copyright (C) 2013-2020 Aerospike, Inc.
+ * Copyright (C) 2013-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -134,9 +134,12 @@ __cf_defer_atomic_free_optional_internal(void* p)
 
 #define DEFER_ATTR_FREE __attribute__((cleanup(__cf_defer_free_internal)))
 
-#define DEFER_FREE(__x)                                                                \
-	__attribute__((cleanup(__cf_defer_free_internal))) void* __defer_free_##__LINE__ = \
-			(__x)
+#define CONCAT_IMPL(a, b) a##b
+#define CONCAT(a, b) CONCAT_IMPL(a, b)
+
+#define DEFER_FREE(__x)                                                            \
+	__attribute__((cleanup(__cf_defer_free_internal))) void* CONCAT(__defer_free_, \
+			__LINE__) = (__x)
 
 #define DEFER_ATOMIC_FREE(__x)                                                 \
 	__attribute__((cleanup(__cf_defer_atomic_free_assert_internal))) void*     \

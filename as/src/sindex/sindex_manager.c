@@ -807,8 +807,7 @@ sindex_list(as_info_cmd_args* args)
 
 	if (ns == NULL) {
 		for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
-			as_sindex_list_str(g_config.namespaces[ns_ix], b64,
-					use_integer, db);
+			as_sindex_list_str(g_config.namespaces[ns_ix], b64, use_integer, db);
 		}
 
 		cf_dyn_buf_chomp_char(db, ';');

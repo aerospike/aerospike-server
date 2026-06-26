@@ -43,7 +43,7 @@ lib: aslibs
 	$(MAKE) -C as $@ STATIC_LIB=1 OS=$(OS)
 
 .PHONY: aslibs
-aslibs: targetdirs version $(JANSSON)/Makefile $(JEMALLOC)/Makefile $(LIBBACKTRACE)/Makefile s2lib jsonlib jsonschema yamlcpp
+aslibs: targetdirs version $(JANSSON)/Makefile $(JEMALLOC)/Makefile $(LIBBACKTRACE)/Makefile s2lib jsonlib jsonschema yamlcpp iculib pcre2lib
 	$(MAKE) -C $(JANSSON)
 	$(MAKE) -C $(JEMALLOC)
 	$(MAKE) -C $(LIBBACKTRACE)
@@ -95,6 +95,36 @@ yamlcpp:
 		-DCMAKE_INSTALL_PREFIX=$(YAML_CPP_PATH)/installation
 	$(MAKE) -C $(YAML_CPP_PATH)/build
 
+# ICU4C configure options for static build
+# Note: tools are enabled as they're needed to build data files
+ICU_CONFIG_OPT = --enable-static --disable-shared --disable-tests --disable-samples \
+	--disable-extras --disable-icuio --disable-layoutex \
+	--with-data-packaging=static --prefix=$(ICU)/installation
+
+# Subset ICU locale data (root only) and drop unused feature packages; see
+# make_in/icu_data_filter.json and particle_string.c (root collator/case map).
+ICU_DATA_FILTER_JSON := $(abspath $(DEPTH)/make_in/icu_data_filter.json)
+
+# Sentinel file to ensure configure runs only once with parallel make
+$(ICU)/source/.configured: $(ICU_DATA_FILTER_JSON)
+	cd $(ICU)/source && ICU_DATA_FILTER_FILE=$(ICU_DATA_FILTER_JSON) ./configure $(ICU_CONFIG_OPT)
+	touch $@
+
+.PHONY: iculib
+iculib: $(ICU)/source/.configured
+	$(MAKE) -C $(ICU)/source
+	$(MAKE) -C $(ICU)/source install
+
+.PHONY: pcre2lib
+pcre2lib:
+	git -C $(PCRE2) submodule update --init
+	$(CMAKE) -S $(PCRE2) -B $(PCRE2)/build -G 'Unix Makefiles' \
+		-DCMAKE_INSTALL_PREFIX=$(PCRE2)/installation \
+		-DCMAKE_INSTALL_LIBDIR=lib \
+		-DPCRE2_SUPPORT_JIT=ON -DPCRE2_BUILD_PCRE2GREP=OFF \
+		-DPCRE2_BUILD_TESTS=OFF -DBUILD_SHARED_LIBS=OFF
+	$(MAKE) -C $(PCRE2)/build install
+
 .PHONY: targetdirs
 targetdirs:
 	mkdir -p $(GEN_DIR) $(LIBRARY_DIR) $(BIN_DIR)
@@ -143,6 +173,12 @@ cleanmodules:
 	$(MAKE) -C $(MOD_LUA) COMMON=$(COMMON) LUAMOD=$(LUAMOD) clean
 	$(RM) -rf $(ABSL)/build $(ABSL)/installation # ABSL default clean leaves files in build directory
 	$(RM) -rf $(S2)/build # S2 default clean leaves files in build directory
+	if [ -e "$(ICU)/source/Makefile" ]; then \
+		$(MAKE) -C $(ICU)/source clean; \
+		$(MAKE) -C $(ICU)/source distclean; \
+	fi
+	$(RM) -rf $(ICU)/installation $(ICU)/source/.configured
+	$(RM) -rf $(PCRE2)/build $(PCRE2)/installation
 
 .PHONY: cleandist
 cleandist:
@@ -167,6 +203,8 @@ cleangit:
 	cd $(S2); $(GIT_CLEAN)
 	cd $(JSON_SCHEMA_PATH); $(GIT_CLEAN)
 	cd $(JSON_PATH); $(GIT_CLEAN)
+	cd $(ICU); $(GIT_CLEAN)
+	cd $(PCRE2); $(GIT_CLEAN)
 	$(GIT_CLEAN)
 
 .PHONY: rpm deb
@@ -207,3 +245,4 @@ tags etags:
 ifneq ($(EEREPO),)
   include $(EEREPO)/make_in/Makefile.targets
 endif
+

@@ -1,7 +1,7 @@
 /*
  * proto.h
  *
- * Copyright (C) 2008-2022 Aerospike, Inc.
+ * Copyright (C) 2008-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -98,7 +98,9 @@ extern __thread uint8_t g_error_verbosity;
 #define AS_ERR_OP_NOT_APPLICABLE        26
 #define AS_ERR_FILTERED_OUT             27
 #define AS_ERR_LOST_CONFLICT            28
-#define AS_ERR_UNUSED_29                29 // safe to recycle (never shipped)
+// Ill-formed or unrepresentable encoding
+// (e.g. invalid UTF-8, UTF-16 that cannot be written as UTF-8 per ICU).
+#define AS_ERR_INVALID_ENCODING         29
 #define AS_ERR_UNUSED_30                30 // safe to recycle (never shipped)
 #define AS_ERR_UNUSED_31                31 // safe to recycle (never shipped)
 #define AS_ERR_XDR_KEY_BUSY             32
@@ -403,6 +405,18 @@ typedef enum {
 	// App use: prune least-valuable bins and retry.
 	// Form-A parallel of AS_SUB_BIN_NAME_COUNT_TOO_LARGE (write path).
 	AS_SUB_PARAM_BIN_COUNT_TOO_LARGE = 5,
+	// String op wire/expression args malformed or out of range.
+	AS_SUB_PARAM_STRING_OP_PARAMS_INVALID = 6,
+	// String op code or modifier/read class mismatch on the wire path.
+	AS_SUB_PARAM_STRING_OP_INVALID = 7,
+	// String context-eval path malformed (mirrors CDT context-eval shape).
+	AS_SUB_PARAM_STRING_CTX_NOT_APPLICABLE = 8,
+	// String modify/read index or code-point range out of bounds.
+	AS_SUB_PARAM_STRING_INDEX_OUT_OF_BOUNDS = 9,
+	// String regex pattern invalid (compile / ICU failure).
+	AS_SUB_PARAM_STRING_REGEX_INVALID = 10,
+	// String or string op argument is not valid UTF-8 (AS_ERR_PARAMETER).
+	AS_SUB_PARAM_STRING_UTF8_INVALID = 11,
 } as_sub_param_t;
 
 // Subcodes paired with AS_ERR_UNAVAILABLE.
@@ -434,6 +448,8 @@ typedef enum {
 	// App use: dispatch a one-time init op with default index_bits,
 	// then retry the count/fold.
 	AS_SUB_BIN_NOT_FOUND_HLL_CANNOT_CREATE_WITH_OP = 1,
+	// String modify on a missing bin (non-NO_FAIL path).
+	AS_SUB_BIN_NOT_FOUND_STRING_VALUE_NOT_FOUND = 2,
 } as_sub_bin_not_found_t;
 
 // Subcodes paired with AS_ERR_BIN_NAME. Form-A parallel of
@@ -505,6 +521,10 @@ typedef enum {
 	// Intersect inputs have mismatched minhash parameters.
 	// App use: harmonize sketches (fold/strip minhash) before retry.
 	AS_SUB_OPNOT_HLL_INTERSECT_MINHASH_MISMATCH = 9,
+	// String to numeric conversion failed (strtoll/strtod).
+	AS_SUB_OPNOT_STRING_CONVERSION_FAILED = 10,
+	// Source blob/string is not valid UTF-8 for an OP_NOT_APPLICABLE path.
+	AS_SUB_OPNOT_STRING_UTF8_INVALID = 11,
 } as_sub_opnot_t;
 
 // Subcodes paired with AS_ERR_MRT_BLOCKED.
@@ -581,6 +601,9 @@ typedef struct as_msg_op_s {
 #define AS_MSG_OP_DELETE_ALL    14 // used without bin name
 #define AS_MSG_OP_HLL_READ      15 // HLL top-level op
 #define AS_MSG_OP_HLL_MODIFY    16 // HLL top-level op
+#define AS_MSG_OP_STRING_READ   17 // string top-level op
+#define AS_MSG_OP_STRING_MODIFY 18 // string top-level op
+#define AS_MSG_OP_TO_STRING     19 // to_string / __repr__ top-level op
 
 //------------------------------------------------
 // UDF ops.
@@ -681,6 +704,94 @@ typedef enum {
 	AS_HLL_FLAG_NO_FAIL     = 1 << 2,
 	AS_HLL_FLAG_ALLOW_FOLD  = 1 << 3
 } as_hll_flags;
+
+//------------------------------------------------
+// String ops.
+//
+
+typedef enum {
+	AS_STRING_READ_OP_START    = 0,
+	AS_STRING_OP_STRLEN        = AS_STRING_READ_OP_START,
+	AS_STRING_OP_SUBSTR        = 1,
+	AS_STRING_OP_CHAR_AT       = 2, // substr(offset, 1)
+	AS_STRING_OP_FIND          = 3,
+	AS_STRING_OP_CONTAINS      = 4, // find(needle) >= 0
+	AS_STRING_OP_STARTS_WITH   = 5,
+	AS_STRING_OP_ENDS_WITH     = 6,
+	AS_STRING_OP_TO_INTEGER    = 7,
+	AS_STRING_OP_TO_DOUBLE     = 8,
+	AS_STRING_OP_BYTE_LENGTH   = 9,
+	AS_STRING_OP_IS_NUMERIC    = 10,
+	AS_STRING_OP_IS_UPPER      = 11,
+	AS_STRING_OP_IS_LOWER      = 12,
+	AS_STRING_OP_TO_BLOB       = 13,
+	AS_STRING_OP_SPLIT         = 14,
+	AS_STRING_OP_B64_DECODE    = 15,
+	AS_STRING_OP_REGEX_COMPARE = 16, // ICU regex match (find), returns 0/1
+
+	AS_STRING_READ_OP_END,
+
+	AS_STRING_MODIFY_OP_START  = 50,
+	AS_STRING_OP_INSERT        = AS_STRING_MODIFY_OP_START,
+	AS_STRING_OP_OVERWRITE     = 51,
+	AS_STRING_OP_CONCAT        = 52,
+	AS_STRING_OP_SNIP          = 53,
+	AS_STRING_OP_REPLACE       = 54,
+	AS_STRING_OP_REPLACE_ALL   = 55,
+
+	AS_STRING_OP_UPPER         = 56,
+	AS_STRING_OP_LOWER         = 57,
+	AS_STRING_OP_CASE_FOLD     = 58,
+	AS_STRING_OP_NORMALIZE_NFC = 59,
+
+	AS_STRING_OP_TRIM_START    = 60,
+	AS_STRING_OP_TRIM_END      = 61,
+	AS_STRING_OP_TRIM          = 62,
+	AS_STRING_OP_PAD_START     = 63,
+	AS_STRING_OP_PAD_END       = 64,
+	AS_STRING_OP_REPEAT        = 65,
+	AS_STRING_OP_REGEX_REPLACE = 66, // ICU regex replaceAll
+
+	AS_STRING_OP_APPEND        = 67,
+	AS_STRING_OP_PREPEND       = 68,
+
+	AS_STRING_MODIFY_OP_END,
+
+	// Sub-op sentinel for context-aware operations. Mirrors AS_CDT_OP_CONTEXT_EVAL.
+	// Wire format: [0xFF, ctx_list, inner_sub_op, inner_args...]
+	AS_STRING_OP_CONTEXT_EVAL  = 0xFF
+} as_string_op_type;
+
+typedef enum {
+	// CREATE_ONLY is valid only on INSERT, CONCAT, APPEND, and PREPEND.
+	// UPDATE_ONLY is valid on all string modify ops.
+	AS_STRING_FLAG_CREATE_ONLY  = 1 << 0,
+	AS_STRING_FLAG_UPDATE_ONLY  = 1 << 1,
+	AS_STRING_FLAG_NO_FAIL      = 1 << 2,
+} as_string_flags;
+
+typedef enum {
+	AS_STRING_NUMERIC_ANY     = 0, // int-class OR float-class (default); disjoint union
+	AS_STRING_NUMERIC_INT     = 1, // int-class: fits int64; optional sign, digits only
+	AS_STRING_NUMERIC_FLOAT   = 2, // float-class: fits double AND '.' then [0-9]+
+} as_string_numeric_type;
+
+typedef enum {
+	AS_STRING_REGEX_CASE_INSENSITIVE = 1 << 0,
+	AS_STRING_REGEX_MULTILINE        = 1 << 1,
+	AS_STRING_REGEX_DOTALL           = 1 << 2,
+	AS_STRING_REGEX_UNIX_LINES_ONLY  = 1 << 3,
+	AS_STRING_REGEX_GLOBAL           = 1 << 4, // replace only
+
+	// Possible flags to be supported in the future:
+	// REGEX_FLAG_FAIL_ON_UNKNOWN_ESCAPE = 1 << 5,
+	// REGEX_FLAG_UWORD = 1 << 6,
+	// REGEX_FLAG_CANON_EQ = 1 << 7,
+	// ^^Not supported by ICU at this time^^
+	// ------------------------------------------------------------
+	// NO OTHER REGEX FLAGS TO BE SUPPORTED IN THE FUTURE
+	// ============================================================
+} as_string_regex_flags;
 
 //------------------------------------------------
 // CDT ops.
@@ -812,6 +923,7 @@ typedef enum {
 	AS_CDT_OP_LIST_GET_BY_VALUE_INTERVAL            = 25,
 	AS_CDT_OP_LIST_GET_BY_RANK_RANGE                = 26,
 	AS_CDT_OP_LIST_GET_BY_VALUE_REL_RANK_RANGE      = 27,
+	AS_CDT_OP_LIST_JOIN                             = 28,
 
 	// More modify - remove by.
 	AS_CDT_OP_LIST_REMOVE_BY_INDEX                  = 32,
@@ -1145,10 +1257,17 @@ as_msg_op_iterate(const as_msg* msg, as_msg_op* current, uint16_t* n)
 	return as_msg_op_get_next(current);
 }
 
-#define OP_IS_READ(op)                                                         \
-	((op) == AS_MSG_OP_READ || (op) == AS_MSG_OP_CDT_READ ||                   \
-			(op) == AS_MSG_OP_BITS_READ || (op) == AS_MSG_OP_HLL_READ ||       \
-			(op) == AS_MSG_OP_EXP_READ)
+// clang-format off
+#define OP_IS_READ(op) ( \
+		(op) == AS_MSG_OP_READ || \
+		(op) == AS_MSG_OP_CDT_READ || \
+		(op) == AS_MSG_OP_BITS_READ || \
+		(op) == AS_MSG_OP_HLL_READ || \
+		(op) == AS_MSG_OP_STRING_READ || \
+		(op) == AS_MSG_OP_EXP_READ || \
+		(op) == AS_MSG_OP_TO_STRING \
+	)
+// clang-format on
 
 #define OP_IS_MODIFY(op)                                                       \
 	((op) == AS_MSG_OP_INCR || (op) == AS_MSG_OP_APPEND ||                     \

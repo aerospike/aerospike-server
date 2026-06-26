@@ -1,7 +1,7 @@
 /*
  * particle_blob.c
  *
- * Copyright (C) 2015-2020 Aerospike, Inc.
+ * Copyright (C) 2015-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -29,9 +29,11 @@
 #include "aerospike/as_bytes.h"
 #include "aerospike/as_val.h"
 #include "citrusleaf/alloc.h"
+#include "citrusleaf/cf_b64.h"
 #include "citrusleaf/cf_byte_order.h"
 
 #include "bits.h"
+#include "cf_str.h"
 #include "log.h"
 #include "msgpack_in.h"
 
@@ -634,6 +636,19 @@ blob_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 	blob_mem* p_blob_mem = (blob_mem*)*pp;
 
 	p_blob_mem->type = wire_type;
+	p_blob_mem->sz = value_size;
+	memcpy(p_blob_mem->data, wire_value, p_blob_mem->sz);
+
+	return 0;
+}
+
+int
+blob_string_particle_from_wire(const uint8_t* wire_value, uint32_t value_size,
+		as_particle** pp)
+{
+	blob_mem* p_blob_mem = (blob_mem*)*pp;
+
+	p_blob_mem->type = AS_PARTICLE_TYPE_STRING;
 	p_blob_mem->sz = value_size;
 	memcpy(p_blob_mem->data, wire_value, p_blob_mem->sz);
 
@@ -1472,7 +1487,7 @@ bits_parse_resize_subflags(bits_state* state, bits_op* op)
 		return false;
 	}
 
-	uint64_t bad_flags = (uint64_t) ~(AS_BITS_SUBFLAG_RESIZE_FROM_FRONT |
+	uint64_t bad_flags = (uint64_t)~(AS_BITS_SUBFLAG_RESIZE_FROM_FRONT |
 			AS_BITS_SUBFLAG_RESIZE_GROW_ONLY |
 			AS_BITS_SUBFLAG_RESIZE_SHRINK_ONLY);
 
@@ -1501,7 +1516,7 @@ bits_parse_arithmetic_subflags(bits_state* state, bits_op* op)
 		return false;
 	}
 
-	uint64_t bad_flags = (uint64_t) ~(AS_BITS_INT_SUBFLAG_SIGNED |
+	uint64_t bad_flags = (uint64_t)~(AS_BITS_INT_SUBFLAG_SIGNED |
 			AS_BITS_INT_SUBFLAG_SATURATE | AS_BITS_INT_SUBFLAG_WRAP);
 
 	if ((op->subflags & bad_flags) != 0) {
@@ -1529,7 +1544,7 @@ bits_parse_get_integer_subflags(bits_state* state, bits_op* op)
 		return false;
 	}
 
-	uint64_t bad_flags = (uint64_t) ~(AS_BITS_INT_SUBFLAG_SIGNED);
+	uint64_t bad_flags = (uint64_t)~(AS_BITS_INT_SUBFLAG_SIGNED);
 
 	if ((op->subflags & bad_flags) != 0) {
 		cf_warning(AS_PARTICLE,
@@ -2045,7 +2060,7 @@ bits_modify_op_not(const bits_op* op, uint8_t* to, const uint8_t* from,
 	const uint8_t* end = &from[n_bytes];
 
 	while (cur < end) {
-		*to++ = (uint8_t) ~*cur++;
+		*to++ = (uint8_t)~*cur++;
 	}
 
 	restore_ends(op, orig_to, orig_from, n_bytes);
@@ -2208,7 +2223,7 @@ bits_read_op_count(const bits_op* op, const uint8_t* from, as_bin* rb,
 	uint64_t answer = 0;
 
 	if (n_bytes == 1) {
-		uint8_t m = (uint8_t) ~(head_m | tail_m);
+		uint8_t m = (uint8_t)~(head_m | tail_m);
 
 		answer = cf_bit_count64((uint64_t)(*cur & m));
 	}
@@ -2611,4 +2626,34 @@ restore_ends(const bits_op* op, uint8_t* to, const uint8_t* from, uint32_t n_byt
 		to += (n_bytes - 1);
 		*to = (uint8_t)((*to & ~from_tail_m) | (from_tail & from_tail_m));
 	}
+}
+
+static int
+blob_b64_encode(const uint8_t* from, uint32_t sz, as_bin* rb)
+{
+	size_t enc_len = cf_b64_encoded_len(sz);
+	blob_mem* bm = (blob_mem*)cf_malloc(sizeof(blob_mem) + enc_len);
+
+	cf_b64_encode(from, sz, (char*)bm->data);
+	bm->type = AS_PARTICLE_TYPE_STRING;
+	bm->sz = (uint32_t)enc_len;
+
+	rb->particle = (as_particle*)bm;
+	as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_STRING);
+
+	return AS_OK;
+}
+
+int
+blob_to_string(const as_bin* b, as_bin* rb)
+{
+	blob_mem* bm = (blob_mem*)b->particle;
+
+	if (! cf_str_is_valid_utf8(bm->data, bm->sz)) {
+		as_error_details_set_fmt(AS_SUB_OPNOT_STRING_UTF8_INVALID,
+				"blob_to_string: blob contains non-UTF-8 bytes");
+		return -AS_ERR_OP_NOT_APPLICABLE;
+	}
+
+	return string_particle_bin_from_bytes(bm->data, bm->sz, rb);
 }

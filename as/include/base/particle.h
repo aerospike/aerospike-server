@@ -105,3 +105,19 @@ typedef struct as_particle_vtable_s {
 	as_particle_flat_size_fn flat_size_fn;
 	as_particle_to_flat_fn to_flat_fn;
 } as_particle_vtable;
+
+//------------------------------------------------
+// Build a STRING particle in rb from raw bytes (string_mem / blob_mem layout).
+//
+
+int string_particle_bin_from_bytes(const uint8_t* data, uint32_t sz, as_bin* rb);
+
+//------------------------------------------------
+// Per-type to_string helpers (dispatched from as_bin_to_string).
+//
+
+int integer_to_string(const as_bin* b, as_bin* rb);
+int float_to_string(const as_bin* b, as_bin* rb);
+int string_to_string(const as_bin* b, as_bin* rb);
+int bool_to_string(const as_bin* b, as_bin* rb);
+int blob_to_string(const as_bin* b, as_bin* rb);

@@ -1,7 +1,7 @@
 /*
  * particle_integer.c
  *
- * Copyright (C) 2015-2020 Aerospike, Inc.
+ * Copyright (C) 2015-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -24,6 +24,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "aerospike/as_integer.h"
 #include "aerospike/as_val.h"
@@ -436,4 +437,18 @@ void
 as_bin_particle_integer_set(as_bin* b, int64_t i)
 {
 	b->particle = (as_particle*)i;
+}
+
+//==========================================================
+// to_string - integer bin to string particle.
+//
+
+int
+integer_to_string(const as_bin* b, as_bin* rb)
+{
+	int64_t val = as_bin_particle_integer_value(b);
+	char buf[32];
+	int len = snprintf(buf, sizeof(buf), "%ld", val);
+
+	return string_particle_bin_from_bytes((const uint8_t*)buf, (uint32_t)len, rb);
 }

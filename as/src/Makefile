@@ -254,6 +254,8 @@ INCLUDES += $(INCLUDE_DIR:%=-I%)
 INCLUDES += -I$(ABSL)
 INCLUDES += -I$(CF)/include
 INCLUDES += -I$(COMMON)/target/$(PLATFORM)/include
+INCLUDES += -I$(ICU)/installation/include
+INCLUDES += -I$(PCRE2)/installation/include
 INCLUDES += -I$(JANSSON)/src
 INCLUDES += -I$(JSON_PATH)/installation/include
 INCLUDES += -I$(JSON_SCHEMA_PATH)/installation/include
@@ -284,6 +286,10 @@ LIBRARIES += $(shell curl-config --libs) -lstdc++
 
 AS_LIBRARIES += $(S2)/build/libs2.a
 AS_LIBRARIES += $(ABSL_LIB_DIR)/libabsl.a
+AS_LIBRARIES += $(ICU)/installation/lib/libicui18n.a
+AS_LIBRARIES += $(ICU)/installation/lib/libicuuc.a
+AS_LIBRARIES += $(ICU)/installation/lib/libicudata.a
+AS_LIBRARIES += $(PCRE2)/installation/lib/libpcre2-8.a
 
 LIBRARIES := $(AS_LIBRARIES) $(LIBRARIES)
 

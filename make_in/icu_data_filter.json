@@ -1,0 +1,22 @@
+{
+  "localeFilter": {
+    "filterType": "locale",
+    "includeChildren": false,
+    "includelist": ["root"]
+  },
+  "featureFilters": {
+    "conversion_mappings": "exclude",
+    "translit": "exclude",
+    "stringprep": "exclude",
+    "confusables": "exclude"
+  },
+  "resourceFilters": [
+    {
+      "categories": ["coll_tree"],
+      "rules": [
+        "-/collations/big5han",
+        "-/collations/gb2312han"
+      ]
+    }
+  ]
+}

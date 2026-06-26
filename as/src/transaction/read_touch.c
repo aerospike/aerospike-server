@@ -1,7 +1,7 @@
 /*
  * read_touch.c
  *
- * Copyright (C) 2024 Aerospike, Inc.
+ * Copyright (C) 2024-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -55,7 +55,7 @@
 //
 
 #define USE_CONFIG_DEFAULT 0
-#define NEVER_TOUCH ((uint32_t) - 1)
+#define NEVER_TOUCH ((uint32_t)-1)
 
 //==========================================================
 // Forward declarations.

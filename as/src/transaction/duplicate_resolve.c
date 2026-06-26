@@ -1,7 +1,7 @@
 /*
  * duplicate_resolve.c
  *
- * Copyright (C) 2016-2022 Aerospike, Inc.
+ * Copyright (C) 2016-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -520,6 +520,8 @@ parse_dup_meta(msg* m, uint32_t* p_generation, uint64_t* p_last_update_time)
 
 	if (msg_get_uint32(m, RW_FIELD_RESULT, &result_code) != 0) {
 		cf_warning(AS_RW, "dup-res ack: no result_code");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"duplicate-resolution ack from remote node missing result_code");
 		return AS_ERR_UNKNOWN;
 	}
 
@@ -533,6 +535,8 @@ parse_dup_meta(msg* m, uint32_t* p_generation, uint64_t* p_last_update_time)
 	if (msg_get_buf(m, RW_FIELD_RECORD, &pickle, &pickle_sz, MSG_GET_DIRECT) !=
 			0) {
 		cf_warning(AS_RW, "dup-res ack: no record");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"duplicate-resolution ack from remote node missing record pickle");
 		return AS_ERR_UNKNOWN;
 	}
 
@@ -540,6 +544,8 @@ parse_dup_meta(msg* m, uint32_t* p_generation, uint64_t* p_last_update_time)
 
 	if (*p_generation == 0) {
 		cf_warning(AS_RW, "dup-res ack: generation 0");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"duplicate-resolution ack from remote node has generation 0");
 		return AS_ERR_UNKNOWN;
 	}
 
@@ -579,6 +585,8 @@ apply_winner(rw_request* rw)
 
 	if (! as_flat_unpack_remote_record_meta(ns, &rr)) {
 		cf_warning(AS_RW, "dup-res ack: bad record %pD", &rw->keyd);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"duplicate-resolution ack: record metadata unreadable");
 		rw->result_code = AS_ERR_UNKNOWN;
 		return;
 	}

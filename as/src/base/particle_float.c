@@ -1,7 +1,7 @@
 /*
  * particle_float.c
  *
- * Copyright (C) 2015-2020 Aerospike, Inc.
+ * Copyright (C) 2015-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -22,6 +22,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "aerospike/as_double.h"
 #include "aerospike/as_val.h"
@@ -262,4 +263,18 @@ as_bin_particle_float_value(const as_bin* b)
 {
 	// Caller must ensure this is called only for FLOAT particles.
 	return *(double*)&b->particle;
+}
+
+//==========================================================
+// to_string - float bin to string particle.
+//
+
+int
+float_to_string(const as_bin* b, as_bin* rb)
+{
+	double val = as_bin_particle_float_value(b);
+	char buf[64];
+	int len = snprintf(buf, sizeof(buf), "%g", val);
+
+	return string_particle_bin_from_bytes((const uint8_t*)buf, (uint32_t)len, rb);
 }

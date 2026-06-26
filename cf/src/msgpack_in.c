@@ -339,7 +339,7 @@ msgpack_type_str(msgpack_type type)
 		[MSGPACK_TYPE_GEOJSON] = "geojson",
 		[MSGPACK_TYPE_EXT] = "ext",
 		[MSGPACK_TYPE_CMP_WILDCARD] = "wildcard",
-		[MSGPACK_TYPE_CMP_INF] = "infinity"
+		[MSGPACK_TYPE_CMP_INF] = "infinity",
 	};
 
 	const char* name = NULL;
@@ -986,7 +986,7 @@ msgpack_get_ext(msgpack_in* mp, msgpack_ext* ext)
 		break;
 	case 0xc7: // ext 8
 		mp->offset++;
-		ext->size = (uint32_t) * (buf + 1);
+		ext->size = (uint32_t)(*(buf + 1));
 		break;
 	case 0xc8: // ext 16
 		mp->offset += 2;
@@ -1257,30 +1257,26 @@ msgpack_sz_table(const uint8_t* buf, const uint8_t* const end, uint32_t* count,
 
 	case 0xdc: // list with 16 bit header
 		SZ_PARSE_BUF_CHECK(buf, end, 2);
-		if (! msgpack_sz_count_add(count,
-				cf_swap_from_be16(*(uint16_t*)buf))) {
+		if (! msgpack_sz_count_add(count, cf_swap_from_be16(*(uint16_t*)buf))) {
 			return NULL;
 		}
 		return buf + 2;
 	case 0xdd: { // list with 32 bit header
 		SZ_PARSE_BUF_CHECK(buf, end, 4);
-		if (! msgpack_sz_count_add(count,
-				cf_swap_from_be32(*(uint32_t*)buf))) {
+		if (! msgpack_sz_count_add(count, cf_swap_from_be32(*(uint32_t*)buf))) {
 			return NULL;
 		}
 		return buf + 4;
 	}
 	case 0xde: // map with 16 bit header
 		SZ_PARSE_BUF_CHECK(buf, end, 2);
-		if (! msgpack_sz_count_add_map(count,
-				cf_swap_from_be16(*(uint16_t*)buf))) {
+		if (! msgpack_sz_count_add_map(count, cf_swap_from_be16(*(uint16_t*)buf))) {
 			return NULL;
 		}
 		return buf + 2;
 	case 0xdf: // map with 32 bit header
 		SZ_PARSE_BUF_CHECK(buf, end, 4);
-		if (! msgpack_sz_count_add_map(count,
-				cf_swap_from_be32(*(uint32_t*)buf))) {
+		if (! msgpack_sz_count_add_map(count, cf_swap_from_be32(*(uint32_t*)buf))) {
 			return NULL;
 		}
 		return buf + 4;

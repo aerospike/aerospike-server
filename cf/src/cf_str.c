@@ -1,7 +1,7 @@
 /*
  * cf_str.c
  *
- * Copyright (C) 2008-2020 Aerospike, Inc.
+ * Copyright (C) 2008-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -33,6 +33,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "cf_utf8_vec.h"
 
 // return 0 on success, -1 on fail
 int
@@ -458,4 +460,156 @@ cf_strtol_i32(const char* s, int32_t* value)
 	*value = (int32_t)i;
 
 	return 0;
+}
+
+// DSB-stable aligned ASCII scan. Returns index of first non-ASCII 8-byte word
+// or n64 * 8 if all ASCII.
+__attribute__((noinline, hot)) static size_t
+utf8_fast_bulk(const uint64_t* p64, size_t n64)
+{
+	if (n64 == 0) {
+		return 0;
+	}
+
+	const uint64_t mask = 0x8080808080808080ULL;
+
+#if defined(__x86_64__) || defined(__i386__)
+	__asm__ volatile(".p2align 5" ::: "memory");
+#endif
+
+	for (size_t i = 0; i < n64; i++) {
+		const uint64_t t = p64[i] & mask;
+
+		if (t != 0) {
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+			unsigned j = (unsigned)__builtin_clzll(t) / 8u;
+#else
+			unsigned j = ((unsigned)__builtin_ctzll(t) - 7u) / 8u;
+#endif
+			return i * 8 + (size_t)j;
+		}
+	}
+
+	return n64 * 8;
+}
+
+// Scan buf for the first non-ASCII byte. Returns buf_sz if all ASCII.
+static inline size_t
+utf8_fast_scalar(const uint8_t* buf, size_t buf_sz)
+{
+	size_t off = 0;
+
+	uintptr_t addr = (uintptr_t)buf;
+	size_t head = (-addr) & 7;
+
+	if (head > buf_sz) {
+		head = buf_sz;
+	}
+
+	for (size_t i = 0; i < head; i++) {
+		if ((buf[i] & 0x80) != 0) {
+			return i;
+		}
+	}
+
+	off += head;
+
+	size_t rem = buf_sz - off;
+	size_t n64 = rem / 8;
+	const uint64_t* p64 = (const uint64_t*)(buf + off);
+	size_t bulk = utf8_fast_bulk(p64, n64);
+
+	if (bulk < n64 * 8) {
+		return off + bulk;
+	}
+
+	off += n64 * 8;
+
+	size_t tail = buf_sz - off;
+
+	for (size_t i = 0; i < tail; i++) {
+		if ((buf[off + i] & 0x80) != 0) {
+			return off + i;
+		}
+	}
+
+	return buf_sz;
+}
+
+// Strict scalar UTF-8 validator (multibyte + overlong + surrogates).
+static inline bool
+utf8_slow_scalar(const uint8_t* buf, size_t buf_sz)
+{
+	static const uint32_t cp_min[] = { 0, 0x80, 0x800, 0x10000 };
+
+	for (size_t i = 0; i < buf_sz; i++) {
+		uint8_t b = buf[i];
+
+		if (b <= 0x7F) {
+			continue;
+		}
+
+		uint32_t cp;
+		uint32_t n;
+
+		if ((b & 0xE0) == 0xC0) {
+			cp = b & 0x1F;
+			n = 1;
+		}
+		else if ((b & 0xF0) == 0xE0) {
+			cp = b & 0x0F;
+			n = 2;
+		}
+		else if ((b & 0xF8) == 0xF0) {
+			cp = b & 0x07;
+			n = 3;
+		}
+		else {
+			return false;
+		}
+
+		if (i + n >= buf_sz) {
+			return false;
+		}
+
+		for (uint32_t j = 0; j < n; j++) {
+			uint8_t c = buf[++i];
+
+			if ((c & 0xC0) != 0x80) {
+				return false;
+			}
+
+			cp = (cp << 6) | (c & 0x3F);
+		}
+
+		if (cp < cp_min[n] || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool
+cf_str_is_valid_utf8(const uint8_t* buf, size_t buf_sz)
+{
+	if (buf == NULL) {
+		return buf_sz == 0;
+	}
+
+	if (buf_sz < 64) {
+		const size_t k = utf8_fast_scalar(buf, buf_sz);
+
+		return k == buf_sz || utf8_slow_scalar(buf + k, buf_sz - k);
+	}
+
+#if defined(__x86_64__) || defined(__i386__)
+	if (! __builtin_cpu_supports("sse4.1")) {
+		const size_t k = utf8_fast_scalar(buf, buf_sz);
+
+		return k == buf_sz || utf8_slow_scalar(buf + k, buf_sz - k);
+	}
+#endif
+
+	return cf_utf8_validate_128(buf, buf_sz);
 }

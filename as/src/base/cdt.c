@@ -28,6 +28,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "aerospike/as_bytes.h"
 #include "aerospike/as_map_iterator.h"
 #include "aerospike/as_msgpack.h"
 #include "citrusleaf/cf_byte_order.h"
@@ -178,6 +179,7 @@ const cdt_op_table_entry cdt_op_table[] = {
 	CDT_OP_ENTRY(AS_CDT_OP_LIST_SIZE,			AS_OPERATOR_CDT_READ, 0),
 	CDT_OP_ENTRY(AS_CDT_OP_LIST_GET,			AS_OPERATOR_CDT_READ, 0, AS_CDT_PARAM_INDEX),
 	CDT_OP_ENTRY(AS_CDT_OP_LIST_GET_RANGE,		AS_OPERATOR_CDT_READ, 1, AS_CDT_PARAM_INDEX, AS_CDT_PARAM_COUNT),
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_JOIN,			AS_OPERATOR_CDT_READ, 1, AS_CDT_PARAM_PAYLOAD),
 
 	//--------------------------------------------
 	// GET/REMOVE
@@ -326,6 +328,7 @@ static const char* cdt_exp_display_names[] = {
 		[AS_CDT_OP_LIST_REMOVE_BY_VALUE_INTERVAL] = "list_remove_by_value_range",
 		[AS_CDT_OP_LIST_SET] = "list_set",
 		[AS_CDT_OP_LIST_SORT] = "list_sort",
+		[AS_CDT_OP_LIST_JOIN] = "list_join",
 
 		[AS_CDT_OP_LIST_GET_BY_INDEX] = "list_get_by_index",
 		[AS_CDT_OP_LIST_GET_BY_INDEX_RANGE] = "list_get_by_index_range",
@@ -7739,7 +7742,7 @@ cdt_result_type_str(result_type_t type)
 		[RESULT_TYPE_REVRANK_RANGE] = "reverse-rank-range",
 		[RESULT_TYPE_EXISTS] = "exists",
 		[RESULT_TYPE_UNORDERED_MAP] = "unordered-map",
-		[RESULT_TYPE_ORDERED_MAP] = "ordered-map"
+		[RESULT_TYPE_ORDERED_MAP] = "ordered-map",
 	};
 
 	const char* name = NULL;
@@ -7939,4 +7942,158 @@ cdt_context_print(const cdt_context* ctx, const char* name)
 		print_packed(p->data, p->sz, name);
 		cf_warning(AS_PARTICLE, "cdt_mem: %p sz %u", p, p->sz);
 	}
+}
+
+//==========================================================
+// Nested leaf apply helpers.
+//
+// These helpers allow string/bits/HLL ops to target leaves nested inside
+// list/map CDTs. They wrap cdt_context_dig / fill_unpacker / unwind and
+// the splice pattern used by cdt_select_modify.
+//
+
+// Validate that the msgpack type matches the expected particle type for a leaf.
+static bool
+cdt_leaf_type_matches(msgpack_type mp_type, as_particle_type expected)
+{
+	switch (expected) {
+	case AS_PARTICLE_TYPE_STRING:
+		return mp_type == MSGPACK_TYPE_STRING;
+	case AS_PARTICLE_TYPE_BLOB:
+		return mp_type == MSGPACK_TYPE_BYTES;
+	default:
+		return false;
+	}
+}
+
+int
+cdt_leaf_apply_read(const as_bin* b, msgpack_in_vec* ctx_mv,
+		as_particle_type expected_leaf_type, const uint8_t** leaf_bytes,
+		uint32_t* leaf_sz)
+{
+	uint8_t bin_type = as_bin_get_particle_type(b);
+
+	if (bin_type != AS_PARTICLE_TYPE_LIST && bin_type != AS_PARTICLE_TYPE_MAP) {
+		cf_detail(AS_PARTICLE,
+				"cdt_leaf_apply_read() bin type %u is not list or map", bin_type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"nested context requires list or map, got %s",
+				as_particle_type_str(bin_type));
+		return -AS_ERR_INCOMPATIBLE_TYPE;
+	}
+
+	cdt_context ctx = { .b = (as_bin*)b, .alloc_buf = NULL };
+
+	int rv = cdt_context_dig(&ctx, ctx_mv, false);
+
+	if (rv != AS_OK) {
+		return rv;
+	}
+
+	msgpack_in mp;
+
+	cdt_context_fill_unpacker(&ctx, &mp);
+
+	msgpack_type mp_type = msgpack_peek_type(&mp);
+
+	if (! cdt_leaf_type_matches(mp_type, expected_leaf_type)) {
+		cf_detail(AS_PARTICLE,
+				"cdt_leaf_apply_read() leaf type %d does not match expected %u",
+				mp_type, expected_leaf_type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"nested element type does not match expected %s",
+				as_particle_type_str(expected_leaf_type));
+		return -AS_ERR_INCOMPATIBLE_TYPE;
+	}
+
+	const uint8_t* bin_data = msgpack_get_bin(&mp, leaf_sz);
+
+	if (bin_data == NULL) {
+		return -AS_ERR_UNKNOWN;
+	}
+
+	// bin_data points to type byte + payload; caller expects type byte + payload.
+	*leaf_bytes = bin_data;
+
+	return AS_OK;
+}
+
+int
+cdt_leaf_apply_modify_begin(cdt_context* ctx, as_bin* b,
+		rollback_alloc* alloc_buf, msgpack_in_vec* ctx_mv,
+		as_particle_type expected_leaf_type, const uint8_t** leaf_bytes,
+		uint32_t* leaf_sz)
+{
+	uint8_t bin_type = as_bin_get_particle_type(b);
+
+	if (bin_type != AS_PARTICLE_TYPE_LIST && bin_type != AS_PARTICLE_TYPE_MAP) {
+		cf_detail(AS_PARTICLE,
+				"cdt_leaf_apply_modify_begin() bin type %u is not list or map",
+				bin_type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"nested context requires list or map, got %s",
+				as_particle_type_str(bin_type));
+		return -AS_ERR_INCOMPATIBLE_TYPE;
+	}
+
+	*ctx = (cdt_context){ .b = b, .orig = b->particle, .alloc_buf = alloc_buf };
+
+	int rv = cdt_context_dig(ctx, ctx_mv, true);
+
+	if (rv != AS_OK) {
+		return rv;
+	}
+
+	msgpack_in mp;
+
+	cdt_context_fill_unpacker(ctx, &mp);
+
+	msgpack_type mp_type = msgpack_peek_type(&mp);
+
+	if (! cdt_leaf_type_matches(mp_type, expected_leaf_type)) {
+		cf_detail(AS_PARTICLE,
+				"cdt_leaf_apply_modify_begin() leaf type %d does not match expected %u",
+				mp_type, expected_leaf_type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"nested element type does not match expected %s",
+				as_particle_type_str(expected_leaf_type));
+		cf_free(ctx->pstack);
+		return -AS_ERR_INCOMPATIBLE_TYPE;
+	}
+
+	const uint8_t* bin_data = msgpack_get_bin(&mp, leaf_sz);
+
+	if (bin_data == NULL) {
+		cf_free(ctx->pstack);
+		return -AS_ERR_UNKNOWN;
+	}
+
+	// bin_data points to type byte + payload; caller expects type byte + payload.
+	*leaf_bytes = bin_data;
+
+	return AS_OK;
+}
+
+int
+cdt_leaf_apply_modify_commit(cdt_context* ctx, as_particle_type leaf_type,
+		const uint8_t* new_bytes, uint32_t new_sz)
+{
+	uint32_t total_content_sz = 1 + new_sz; // type byte + payload
+	uint32_t new_ele_sz = as_pack_str_size(total_content_sz);
+
+	uint8_t* ptr = cdt_context_create_new_particle(ctx, new_ele_sz);
+
+	if (ptr == NULL) {
+		return -AS_ERR_UNKNOWN;
+	}
+
+	as_packer pk = { .buffer = ptr, .capacity = new_ele_sz };
+	uint8_t type_byte = (leaf_type == AS_PARTICLE_TYPE_STRING) ? AS_BYTES_STRING
+															   : AS_BYTES_BLOB;
+
+	as_pack_str_with_type(&pk, type_byte, new_bytes, new_sz);
+
+	cdt_context_unwind(ctx);
+
+	return AS_OK;
 }
