@@ -1252,6 +1252,24 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 			has_read_op = true;
 			generates_response_bin = true;
 		}
+		else if (op->op == AS_MSG_OP_STRING_MODIFY) {
+			if (is_replace) {
+				cf_warning(AS_RW,
+						"{%s} write_master: string modify op can't have record-level replace flag %pD",
+						ns->name, &tr->keyd);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"string modify op can't have record-level replace flag");
+				return AS_ERR_PARAMETER;
+			}
+		}
+		else if (op->op == AS_MSG_OP_STRING_READ) {
+			has_read_op = true;
+			generates_response_bin = true;
+		}
+		else if (op->op == AS_MSG_OP_TO_STRING) {
+			has_read_op = true;
+			generates_response_bin = true;
+		}
 	}
 
 	if (has_read_op && (m->info1 & AS_MSG_INFO1_READ) == 0) {
@@ -1879,6 +1897,42 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 
 					(*p_n_response_bins)++;
 				}
+			}
+		}
+		else if (op->op == AS_MSG_OP_STRING_MODIFY) {
+			as_bin* b = as_bin_get_or_create_w_len(rd, op->name, op->name_sz);
+
+			if (as_masking_apply(rd->mask_ctx, NULL, b)) {
+				return as_masking_log_violation(tr, "write",
+						"masking: blocked writing string value to masked bin",
+						op->name, op->name_sz);
+			}
+
+			if ((result = as_bin_string_modify_from_client(b, particles_llb,
+						 op)) < 0) {
+				cf_detail(AS_RW,
+						"{%s} write_master: failed as_bin_string_modify_from_client() %pD",
+						ns->name, &tr->keyd);
+				return -result;
+			}
+
+			if (as_masking_type_mismatch(rd->mask_ctx, b)) {
+				cf_warning(AS_RW,
+						"string modify would create masked bin with type that does not match rule, bin: %s",
+						op->name);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"string modify failed on bin %.*s: masked-bin type mismatch after write",
+						op->name_sz, op->name);
+				return AS_ERR_INCOMPATIBLE_TYPE;
+			}
+
+			if (respond_all_ops) {
+				ops[*p_n_response_bins] = op;
+				as_bin_set_empty(&response_bins[(*p_n_response_bins)++]);
+			}
+
+			if (as_bin_is_unused(b)) {
+				rd->n_bins--;
 			}
 		}
 		else {
