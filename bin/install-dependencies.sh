@@ -77,9 +77,19 @@ main() {
         local -a pkgs=(libssl-dev zlib1g-dev) # common (build + runtime)
 
         if ! $RUNTIME_ONLY; then
+            # gcc-plugin.h is in gcc-<major>-plugin-dev; resolve the version apt maps 'gcc' to.
+            local gcc_major
+            # '|| true' keeps a non-zero apt-cache exit (cold cache, before
+            # apt-get update) from tripping 'set -e' via pipefail, so the
+            # fallback below is reachable instead of aborting the script.
+            gcc_major=$(apt-cache show gcc 2>/dev/null |
+                awk '/^Version:/{v=$2; sub(/^[0-9]+:/, "", v); sub(/\..*/, "", v); print v; exit}') || true
+            : "${gcc_major:=13}" # fallback when apt-cache is unavailable or the cache is cold
+
             pkgs+=(
                 autoconf automake cmake dpkg-dev fakeroot g++ git libtool make pkg-config
                 libcurl4-openssl-dev libldap2-dev libgtest-dev
+                "gcc-${gcc_major}-plugin-dev"
             )
         fi
 
@@ -97,7 +107,7 @@ main() {
         if ! $RUNTIME_ONLY; then
             pkgs+=(
                 autoconf automake make cmake gcc gcc-c++ git libtool glibc-devel rpm-build
-                libcurl-devel openldap-devel
+                libcurl-devel openldap-devel gcc-plugin-devel
             )
         fi
 
