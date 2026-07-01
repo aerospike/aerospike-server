@@ -9,7 +9,7 @@ DIST = $(PKG)/dist
 SOURCE = $(DIST)/SOURCE
 SOURCE_ASD = $(SOURCE)/aerospike-server
 
-REV = $(shell $(DEPTH)/build/version)
+REV = $(shell $(DEPTH)/build/version -v)
 
 # Name of the source package:
 ARCHIVE = $(DEPTH)/pkg/packages/aerospike-server-$(EDITION)-$(REV).src.tar.bz2
