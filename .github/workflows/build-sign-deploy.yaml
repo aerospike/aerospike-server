@@ -77,7 +77,7 @@ jobs:
             version="$INPUT_VERSION"
           fi
           count=$(bash .github/bin/artifact_count.bash)
-          release=$(bash build/version)
+          release=$(bash build/version -v)
           if [[ ! "$GITHUB_REF_NAME" =~ ^[a-zA-Z0-9._/\-]+$ ]]; then
             echo "ERROR: GITHUB_REF_NAME contains unsafe characters: '$GITHUB_REF_NAME'" >&2
             exit 1

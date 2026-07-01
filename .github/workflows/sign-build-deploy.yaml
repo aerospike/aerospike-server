@@ -52,24 +52,13 @@ jobs:
           INPUT_VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || '' }}
         run: |
           set -euo pipefail
-          # Align with build/version: no *.*.*.*-start tags; semver-like x.y.z.w tags + --long on feature branches.
-          if [[ "$GITHUB_REF_NAME" == "master" || "$GITHUB_REF_NAME" =~ ^hotfix/ ]]; then
-            # Strip git describe --long suffix (-<n>-g<hash>); do not use cut -f1 — hyphenated tags (e.g. 8.0.0.1-rc1) would truncate wrong.
-            version="$(git describe --first-parent --tags --always --long | sed 's/-[0-9]*-g[0-9a-f]*$//')"
-          else
-            version="$(git describe --first-parent --tags --always --abbrev=9 --long --match '[0-9]*.[0-9]*.[0-9]*.[0-9]*' 2>/dev/null)"
-            if [[ "$version" != *-*-* ]]; then
-              version="$(git describe --first-parent --tags --always --abbrev=9 --long 2>/dev/null)"
-            fi
-          fi
-          if [[ -z "$version" ]]; then
-            version="$(git rev-parse --short=9 HEAD)"
-          fi
+          # Single source of truth: build/version -v anchors on the bare (dev-began) x.y.z.w tag.
+          version="$(bash build/version -v)"
           if [[ -n "${INPUT_VERSION:-}" ]]; then
             version="$INPUT_VERSION"
           fi
           count=$(bash .github/bin/artifact_count.bash)
-          release=$(bash build/version)
+          release=$(bash build/version -v)
           if [[ ! "$GITHUB_REF_NAME" =~ ^[a-zA-Z0-9._/\-]+$ ]]; then
             echo "ERROR: GITHUB_REF_NAME contains unsafe characters: '$GITHUB_REF_NAME'" >&2
             exit 1
