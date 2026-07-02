@@ -131,7 +131,10 @@ def main():
         % (len(findings), len({p for p, _ in findings})),
         file=sys.stderr,
     )
-    print("Convention: after the license header, write comments as // not /* */.", file=sys.stderr)
+    print(
+        "Convention: after the license header, write comments as // not /* */.",
+        file=sys.stderr,
+    )
     return 1
 
 

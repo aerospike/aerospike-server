@@ -1,7 +1,8 @@
-# Format and comment-style checks for C/C++ files changed in a PR (base..head SHAs).
-# Two independent jobs:
-#   clang-format   - changed files match the repo .clang-format (clang-format 18-21 per .clang-format header).
+# Format and comment-style checks for code changed in a PR (base..head SHAs).
+# Three independent jobs:
+#   clang-format   - changed C/C++ files match the repo .clang-format (clang-format 18-21 per .clang-format header).
 #   comment-style  - the PR does not introduce a C-style /* */ comment after the leading license header.
+#   ruff-format    - the repo's Python (.github/bin helpers) matches ruff's default style.
 # All PRs / all target branches; default activity types: opened, synchronize, reopened.
 # This workflow is standalone - it does not modify or call other CI workflows.
 name: format (PR)
@@ -29,6 +30,12 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
+          # Check out the PR head itself, not the default pull/N/merge ref. The
+          # check formats only the changed lines (--lines), whose numbers come
+          # from the head-side diff, so the working tree must BE the head commit
+          # -- otherwise merged-in base-branch content shifts lines and leaks
+          # out-of-scope violations into the PR.
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Install clang-format
         run: |
@@ -40,6 +47,10 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           CLANG_FORMAT: clang-format-19
+          # Lines of context padded around each changed hunk (grep -C style):
+          # the pad catches reflow the edit forces on adjacent lines. 0 = only
+          # the changed lines; 3 is the CI default.
+          FORMAT_CONTEXT: "3"
         run: |
           echo "Comparing BASE_SHA=$BASE_SHA to HEAD_SHA=$HEAD_SHA"
           .github/bin/check_clang_format_changes.bash --base "$BASE_SHA" --head "$HEAD_SHA"
@@ -64,3 +75,24 @@ jobs:
         run: |
           echo "Comparing BASE_SHA=$BASE_SHA to HEAD_SHA=$HEAD_SHA"
           .github/bin/check_comment_style_changes.py --base "$BASE_SHA" --head "$HEAD_SHA"
+
+  ruff-format:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Pinned so the runner formats identically to local (an unpinned formatter
+      # is a CI flake waiting to happen).
+      - name: Install ruff
+        run: pipx install ruff==0.15.20
+
+      # Scoped to first-party tooling: modules/ vendors third-party Python
+      # (googletest, yamlcpp) we neither own nor format.
+      - name: Verify Python is formatted (ruff default style)
+        run: ruff format --check --diff .github/bin

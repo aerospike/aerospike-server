@@ -3,7 +3,9 @@
 #
 # Used by CI (.github/workflows/format.yaml) and as a local pre-push helper.
 # Rules: git diff --name-only -z --diff-filter=ACMRT, suffix filter (.c .h .cc .cpp .hpp .cxx .inc),
-#        then:  clang-format -style=file FILE  |  diff -u FILE -
+#        then:  clang-format -style=file --lines=A:B... FILE  |  diff -u FILE -
+#        Only the changed lines (plus FORMAT_CONTEXT lines of padding) are
+#        checked, so pre-existing violations on untouched lines do not fail a PR.
 #
 # Quick examples (run from anywhere under the repo; script cds to repo root):
 #
@@ -21,6 +23,10 @@
 #
 set -euo pipefail
 
+# Directory of this script, so the range filter can be found after we cd to the
+# repo root below.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 usage() {
     cat <<'EOF' >&2
 check_clang_format_changes.bash — scan *changed* C/C++ files with clang-format (same rules as CI).
@@ -36,7 +42,8 @@ OPTIONS
   -h, --help   Print this message (includes examples).
 
 ENVIRONMENT
-  CLANG_FORMAT  Clang-format binary (default: clang-format-19 on PATH, else clang-format-18, else clang-format).
+  CLANG_FORMAT    Clang-format binary (default: clang-format-19 on PATH, else clang-format-18, else clang-format).
+  FORMAT_CONTEXT  Context lines padded around each changed hunk, grep -C style (default: 3; 0 = changed lines only).
 
 MODES
   Default (no --base, no positional args)
@@ -174,6 +181,14 @@ else
     fi
 fi
 
+# Context lines padded around each changed hunk (grep -C style). 0 = changed
+# lines only; default 3 catches reflow the edit forces on adjacent lines.
+context="${FORMAT_CONTEXT:-3}"
+if ! [[ "$context" =~ ^[0-9]+$ ]]; then
+    echo "error: FORMAT_CONTEXT must be a non-negative integer, got: $context" >&2
+    exit 2
+fi
+
 cf="${CLANG_FORMAT:-}"
 if [[ -z "$cf" ]]; then
     if command -v clang-format-19 >/dev/null 2>&1; then
@@ -195,6 +210,23 @@ is_c_like() {
     esac
 }
 
+# Lines to check for one file: the new-side lines the PR introduced, padded by
+# FORMAT_CONTEXT on each side and merged. Echoes repeated `--lines=START:END`
+# args for clang-format (empty if the file only has deletions on the new side).
+# The hunk-header -> --lines math is delegated to format_ranges.py (one job,
+# unit-tested). Line numbers are HEAD-side, so the caller MUST run clang-format
+# against the HEAD content (CI checks out the head SHA, not the pull/N/merge
+# ref) or the ranges will be off.
+format_line_args() {
+    local file="$1" nlines
+    # grep -c '' counts lines without needing a trailing newline (wc -l would
+    # undercount a no-final-newline file by one). '|| true' keeps set -e happy
+    # on an empty file, where grep exits 1 after printing 0.
+    nlines="$(grep -c '' "$file" || true)"
+    git diff -U0 "$diff_range" -- "$file" |
+        python3 "$here/format_ranges.py" "$context" "$nlines"
+}
+
 declare -a files=()
 _tmplist="$(mktemp)"
 trap 'rm -f "$_tmplist"' EXIT
@@ -212,7 +244,7 @@ if [[ ${#files[@]} -eq 0 ]]; then
     exit 0
 fi
 
-echo "Checking ${#files[@]} file(s) with ${cf} -style=file (repository .clang-format)."
+echo "Checking ${#files[@]} file(s) with ${cf} -style=file (repository .clang-format), changed lines +/-${context} context."
 
 exit_code=0
 declare -a failed_files=()
@@ -223,9 +255,23 @@ for f in "${files[@]}"; do
         echo "warning: skipping missing path: $f" >&2
         continue
     fi
+    # Capture status so a git/filter failure fails the build (exit 2) instead of
+    # silently skipping a real source file (a process substitution would hide it).
+    declare -a line_args=()
+    if ! mapped="$(format_line_args "$f")"; then
+        echo "error: range computation failed for $f" >&2
+        exit 2
+    fi
+    if [[ -n "$mapped" ]]; then
+        mapfile -t line_args <<<"$mapped"
+    fi
+    if [[ ${#line_args[@]} -eq 0 ]]; then
+        # Only deletions on the new side (no lines to format).
+        continue
+    fi
     tmpdiff="$(mktemp)"
     set +e
-    "$cf" -style=file "$f" | diff -u "$f" --label "$f" - --label "$f (formatted)" >"$tmpdiff"
+    "$cf" -style=file "${line_args[@]}" "$f" | diff -u "$f" --label "$f" - --label "$f (formatted)" >"$tmpdiff"
     _pipe_status=("${PIPESTATUS[@]}")
     set -e
     cf_rc=${_pipe_status[0]}
