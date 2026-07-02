@@ -1,7 +1,7 @@
 /*
  * exp.h
  *
- * Copyright (C) 2016-2023 Aerospike, Inc.
+ * Copyright (C) 2016-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -48,6 +48,7 @@
 typedef struct as_exp_s {
 	uint8_t expected_type;
 	uint8_t flags;
+	const void* bin_table;
 	void** cleanup_stack;
 	uint32_t cleanup_stack_ix;
 	uint32_t max_var_count;

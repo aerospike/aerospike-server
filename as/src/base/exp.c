@@ -204,7 +204,8 @@ typedef enum {
 	RT_END
 } runtime_type;
 
-static const char* result_type_str[] = { [TYPE_NIL] = "nil",
+static const char* result_type_str[] = {
+	[TYPE_NIL] = "nil",
 	[TYPE_TRILEAN] = "bool",
 	[TYPE_INT] = "int",
 	[TYPE_STR] = "str",
@@ -214,11 +215,13 @@ static const char* result_type_str[] = { [TYPE_NIL] = "nil",
 	[TYPE_FLOAT] = "float",
 	[TYPE_GEOJSON] = "geojson",
 	[TYPE_HLL] = "hll",
-	[TYPE_RESULT_REMOVE] = "result_remove" };
+	[TYPE_RESULT_REMOVE] = "result_remove",
+};
 
 ARRAY_ASSERT(result_type_str, TYPE_END);
 
-static const exp_op_code result_type_to_op_code[] = { [TYPE_NIL] = VOP_VALUE_NIL,
+static const exp_op_code result_type_to_op_code[] = {
+	[TYPE_NIL] = VOP_VALUE_NIL,
 	[TYPE_TRILEAN] = VOP_VALUE_TRILEAN,
 	[TYPE_INT] = VOP_VALUE_INT,
 	[TYPE_STR] = VOP_VALUE_STR,
@@ -228,7 +231,8 @@ static const exp_op_code result_type_to_op_code[] = { [TYPE_NIL] = VOP_VALUE_NIL
 	[TYPE_FLOAT] = VOP_VALUE_FLOAT,
 	[TYPE_GEOJSON] = VOP_VALUE_GEO,
 	[TYPE_HLL] = VOP_VALUE_HLL,
-	[TYPE_RESULT_REMOVE] = EXP_RESULT_REMOVE };
+	[TYPE_RESULT_REMOVE] = EXP_RESULT_REMOVE,
+};
 
 ARRAY_ASSERT(result_type_to_op_code, TYPE_END);
 
@@ -243,11 +247,6 @@ typedef struct op_cmp_regex_s {
 	uint32_t regex_str_sz;
 	int32_t flags;
 } op_cmp_regex;
-typedef struct op_bin_name_s {
-	op_base_mem base;
-	const uint8_t* name;
-	uint32_t name_sz;
-} op_bin_type;
 
 typedef struct op_rec_digest_modulo_s {
 	op_base_mem base;
@@ -258,13 +257,6 @@ typedef struct op_rec_key_s {
 	op_base_mem base;
 	runtime_type type;
 } op_rec_key;
-
-typedef struct op_bin_s {
-	op_base_mem base;
-	const uint8_t* name;
-	uint32_t name_sz;
-	result_type type;
-} op_bin;
 
 typedef struct op_cond_s {
 	op_base_mem base;
@@ -416,15 +408,39 @@ typedef struct var_scope_s {
 	var_entry* entries;
 } var_scope;
 
+typedef struct bin_name_entry_s {
+	uint32_t off : 27; // 27 bits spans PROTO_SIZE_MAX (128 MiB)
+	uint8_t sz : 4; // bin name length 0..AS_BIN_NAME_MAX_SZ-1
+	bool need_memcpy : 1;
+} __attribute__((__packed__)) bin_name_entry;
+
+COMPILER_ASSERT(sizeof(bin_name_entry) == 4);
+// off must span the wire limit; widen it if PROTO_SIZE_MAX grows.
+COMPILER_ASSERT(PROTO_SIZE_MAX <= (1u << 27));
+COMPILER_ASSERT(AS_BIN_NAME_MAX_SZ <= (1u << 4));
+
+typedef struct rt_bin_table_s {
+	const uint8_t* base;
+	uint32_t n_bins;
+	bin_name_entry table[];
+} rt_bin_table;
+
 typedef struct runtime_s {
 	const as_exp_ctx* ctx;
 	const uint8_t* instr_ptr;
 	rt_value* vars;
+	const rt_bin_table* bin_table;
 	rt_value vars_builtin[AS_EXP_BUILTIN_COUNT];
 	uint32_t op_ix;
 } runtime;
 
 typedef struct op_table_entry_s op_table_entry;
+
+typedef struct build_bin_table_s {
+	const uint8_t* base;
+	bin_name_entry* table;
+	uint32_t n_bins;
+} build_bin_table;
 
 typedef struct build_args_s {
 	as_exp* exp;
@@ -439,8 +455,17 @@ typedef struct build_args_s {
 	uint32_t max_var_idx;
 	var_scope* current;
 
+	build_bin_table bin_table;
 	cf_vector* bins_info_r; // only valid for secondary index expressions
 } build_args;
+
+typedef struct build_counts_s {
+	uint32_t total_sz;
+	uint32_t cleanup_count;
+	uint32_t counter;
+	const uint8_t* end;
+	build_bin_table bin_table;
+} build_counts;
 
 typedef bool (*op_table_build_cb)(build_args* args);
 typedef void (*op_table_eval_cb)(runtime* rt, const op_base_mem* ob,
@@ -492,10 +517,12 @@ static as_exp* build_internal(const uint8_t* buf, uint32_t buf_sz,
 		bool cpy_wire, cf_vector* bins_info_r);
 static bool build_next(build_args* args);
 static const op_table_entry* build_get_entry(result_type type);
-static bool build_count_sz(msgpack_in* mp, uint32_t* total_sz,
-		uint32_t* cleanup_count, uint32_t* counter_r);
+static bool build_count_sz(msgpack_in* mp, build_counts* bc);
 static var_entry* build_find_var_entry(build_args* args, const uint8_t* name,
 		uint32_t name_sz);
+static uint32_t build_find_bin_idx(const build_bin_table* t, bin_name128 name128);
+static bool build_get_or_add_bin_entry(build_bin_table* t,
+		const bin_name_entry* n);
 static bool build_check_cdt(const uint8_t* buf, uint32_t buf_sz);
 static bool build_default(build_args* args);
 static bool build_meta_default(build_args* args);
@@ -632,9 +659,11 @@ static void rt_value_translate(rt_value* to, const rt_value* from);
 static void rt_defer_value_destroy(rt_value** p_val);
 static void rt_value_destroy(rt_value* val);
 static void rt_value_get_geo(rt_value* val, geo_data* result);
-static bool get_live_bin(as_storage_rd* rd, const uint8_t* name, size_t len,
-		as_bin** p_bin);
+static void rt_bin_translate(rt_value* bin, rt_value* ret_val);
+static void rt_load_bin(runtime* rt, uint32_t idx, rt_value* ret_val);
 static bool rt_is_type(const rt_value* v, result_type type);
+static as_particle_type rt_value_particle_type(const rt_value* v);
+static void rt_release_bins(runtime* rt, rt_value* ret_val);
 static void rt_init_builtin_vars(runtime* rt, op_value_geo* geo_mem);
 
 // Runtime compare utilities.
@@ -717,7 +746,7 @@ rt_has_rd(const runtime* rt)
 }
 
 static inline bool
-rt_value_is_unknown(const rt_value* entry)
+rt_value_is_unk(const rt_value* entry)
 {
 	return entry->type == RT_TRILEAN && entry->r_trilean == AS_EXP_UNK;
 }
@@ -755,6 +784,18 @@ rt_value_keep_do_not_destroy(const rt_value* bin_arg, const as_bin* b)
 {
 	return bin_arg->type == RT_BIN && bin_arg->do_not_destroy &&
 			bin_arg->r_bin.particle == b->particle;
+}
+
+static inline const uint8_t*
+rt_get_bin_name(const runtime* rt, uint32_t idx)
+{
+	return rt->bin_table->base + rt->bin_table->table[idx].off;
+}
+
+static inline const uint8_t*
+bin_table_get_name(const build_bin_table* t, uint32_t idx)
+{
+	return t->base + t->table[idx].off;
 }
 
 //==========================================================
@@ -821,8 +862,8 @@ static const op_table_entry op_table[] = {
 		OP_TABLE_ENTRY(EXP_META_RECORD_SIZE, "record_size", op_base_mem, build_meta_default, eval_meta_record_size, display_0_args, 0, 0, TYPE_INT)
 
 		OP_TABLE_ENTRY(EXP_REC_KEY, "key", op_rec_key, build_rec_key, eval_rec_key, display_0_args, 1, 0, TYPE_END)
-		OP_TABLE_ENTRY(EXP_BIN, "bin", op_bin, build_bin, eval_bin, display_bin, 2, 0, TYPE_END)
-		OP_TABLE_ENTRY(EXP_BIN_TYPE, "bin_type", op_bin_type, build_bin_type, eval_bin_type, display_bin_type, 1, 0, TYPE_INT)
+		OP_TABLE_ENTRY(EXP_BIN, "bin", op_var, build_bin, eval_bin, display_bin, 2, 0, TYPE_END)
+		OP_TABLE_ENTRY(EXP_BIN_TYPE, "bin_type", op_var, build_bin_type, eval_bin_type, display_bin_type, 1, 0, TYPE_INT)
 
 		OP_TABLE_ENTRY(EXP_RESULT_REMOVE, "result_remove", op_base_mem, build_default, eval_result_remove, display_0_args, 0, 0, TYPE_RESULT_REMOVE)
 
@@ -909,12 +950,20 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 	rt_value vars[exp->max_var_count];
 	rt_value ret_val;
 
-	runtime rt = { .ctx = ctx,
+	runtime rt = {
+		.ctx = ctx,
 		.instr_ptr = exp->mem,
 		.vars = vars,
-		.vars_builtin = { [0 ...(AS_EXP_BUILTIN_COUNT - 1)] = rt_unk } };
+		.bin_table = exp->bin_table,
+		.vars_builtin = { [0 ...(AS_EXP_BUILTIN_COUNT - 1)] = rt_unk },
+	};
+
+	for (uint32_t i = 0; i < exp->max_var_count; i++) {
+		rt.vars[i] = (rt_value){ .type = RT_END };
+	}
 
 	rt_eval(&rt, &ret_val);
+	rt_release_bins(&rt, &ret_val);
 
 	if (ret_val.type == RT_BIN_PTR) {
 		rt_value_bin_ptr_to_bin(&rt, rb, &ret_val, particles_llb);
@@ -1177,10 +1226,17 @@ as_exp_eval_to_result(const as_exp* exp, const as_exp_ctx* ctx, as_exp_result* r
 	rt_value vars[exp->max_var_count];
 	rt_value ret_val;
 
-	runtime rt = { .ctx = ctx,
+	runtime rt = {
+		.ctx = ctx,
 		.instr_ptr = exp->mem,
 		.vars = vars,
-		.vars_builtin = { [0 ...(AS_EXP_BUILTIN_COUNT - 1)] = rt_unk } };
+		.bin_table = exp->bin_table,
+		.vars_builtin = { [0 ...(AS_EXP_BUILTIN_COUNT - 1)] = rt_unk },
+	};
+
+	for (uint32_t i = 0; i < exp->max_var_count; i++) {
+		rt.vars[i] = (rt_value){ .type = RT_END };
+	}
 
 	op_value_geo geo_mem = {
 		.contents = NULL
@@ -1192,6 +1248,8 @@ as_exp_eval_to_result(const as_exp* exp, const as_exp_ctx* ctx, as_exp_result* r
 	if (geo_mem.contents != NULL && geo_mem.compiled.type == GEO_REGION) {
 		geo_region_destroy(geo_mem.compiled.region);
 	}
+
+	rt_release_bins(&rt, &ret_val);
 
 	if (ret_val.type == RT_BIN) {
 		as_bin* b = &ret_val.r_bin;
@@ -1347,7 +1405,7 @@ as_exp_display(const as_exp* exp, cf_dyn_buf* db)
 		return false;
 	}
 
-	runtime rt = { .instr_ptr = exp->mem };
+	runtime rt = { .instr_ptr = exp->mem, .bin_table = exp->bin_table };
 
 	rt_display(&rt, db);
 
@@ -1398,22 +1456,30 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 		return NULL;
 	}
 
-	uint32_t total_sz = 0;
-	uint32_t cleanup_count = 0;
-	uint32_t counter = 1;
+	// Proto layer caps this upstream; a larger buffer is a caller bug.
+	cf_assert(buf_sz <= PROTO_SIZE_MAX, AS_EXP,
+			"build_internal - expression field too large %u bytes", buf_sz);
 
-	if (! build_count_sz(&mp, &total_sz, &cleanup_count, &counter)) {
+	bin_name_entry table[RECORD_MAX_BINS];
+
+	build_counts bc = {
+		.counter = 1,
+		.end = mp.buf + mp.buf_sz,
+		.bin_table = { .table = table, .base = mp.buf },
+	};
+
+	if (! build_count_sz(&mp, &bc)) {
 		return NULL;
 	}
 
-	if (counter != 0) {
+	if (bc.counter != 0) {
 		cf_warning(AS_EXP,
 				"build_internal - incomplete expression field expected %u more elements",
-				counter);
-		return false;
+				bc.counter);
+		return NULL;
 	}
 
-	if (total_sz >= EXP_MAX_SIZE) {
+	if (bc.total_sz >= EXP_MAX_SIZE) {
 		cf_warning(AS_EXP,
 				"build_internal - expression size exceeds limit of %u bytes",
 				EXP_MAX_SIZE);
@@ -1425,22 +1491,36 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 		return NULL;
 	}
 
-	uint32_t cleanup_offset = total_sz;
+	bc.total_sz = (bc.total_sz + 7) & ~7; // align to 8 bytes
 
-	total_sz += cleanup_count * (uint32_t)sizeof(void*);
+	uint32_t cleanup_offset = bc.total_sz;
+
+	bc.total_sz += bc.cleanup_count * (uint32_t)sizeof(void*);
+
+	uint32_t bin_table_offset = bc.total_sz;
+
+	bc.total_sz +=
+			sizeof(rt_bin_table) + bc.bin_table.n_bins * sizeof(bin_name_entry);
 
 	if (cpy_wire) {
-		total_sz += mp.buf_sz;
+		bc.total_sz += mp.buf_sz;
 	}
 
-	build_args args = { .exp = cf_calloc(1, sizeof(as_exp) + total_sz),
-		.bins_info_r = bins_info_r };
+	build_args args = {
+		.exp = cf_calloc(1, sizeof(as_exp) + bc.total_sz),
+		.bins_info_r = bins_info_r,
+	};
 
 	args.mem = args.exp->mem;
 	args.exp->cleanup_stack = (void**)(args.mem + cleanup_offset);
 
+	rt_bin_table* rt_bins = (rt_bin_table*)(args.mem + bin_table_offset);
+
+	args.exp->bin_table = rt_bins;
+	args.bin_table = bc.bin_table;
+
 	if (cpy_wire) {
-		uint8_t* wire_mem = args.mem + total_sz - mp.buf_sz;
+		uint8_t* wire_mem = args.mem + bc.total_sz - mp.buf_sz;
 
 		memcpy(wire_mem, buf, mp.buf_sz);
 		args.mp.buf = wire_mem;
@@ -1451,6 +1531,10 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 
 	args.mp.buf_sz = mp.buf_sz;
 
+	// Bins occupy the first n_bins var slots; let-vars follow.
+	args.var_idx = bc.bin_table.n_bins;
+	args.max_var_idx = bc.bin_table.n_bins;
+
 	debug_exp_check(args.exp);
 
 	if (! build_next(&args)) {
@@ -1460,9 +1544,15 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 
 	cf_assert(args.mem <= (uint8_t*)args.exp->cleanup_stack, AS_EXP,
 			"read past cleanup_stack %p > %p", args.mem, args.exp->cleanup_stack);
-	cf_assert(args.exp->cleanup_stack_ix <= cleanup_count, AS_EXP,
+	cf_assert(args.exp->cleanup_stack_ix <= bc.cleanup_count, AS_EXP,
 			"cleanup_stack_ix (%u) not equal to cleanup_count (%u)",
-			args.exp->cleanup_stack_ix, cleanup_count);
+			args.exp->cleanup_stack_ix, bc.cleanup_count);
+
+	memcpy(rt_bins->table, bc.bin_table.table,
+			bc.bin_table.n_bins * sizeof(bin_name_entry));
+	rt_bins->n_bins = bc.bin_table.n_bins;
+	// buf may have been copied so we cannot use bc.bin_table.base here.
+	rt_bins->base = args.mp.buf;
 
 	args.exp->max_var_count = args.max_var_idx;
 
@@ -1473,7 +1563,10 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 
 	if (cf_log_check_level(AS_EXP, CF_DETAIL)) {
 		cf_dyn_buf_define_size(db, 10240);
-		runtime rt = { .instr_ptr = args.exp->mem };
+		runtime rt = {
+			.instr_ptr = args.exp->mem,
+			.bin_table = args.exp->bin_table,
+		};
 
 		rt_display(&rt, &db);
 
@@ -1560,8 +1653,7 @@ build_get_entry(result_type type)
 }
 
 static bool
-build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
-		uint32_t* counter_r)
+build_count_sz(msgpack_in* mp, build_counts* bc)
 {
 	while (mp->offset < mp->buf_sz) {
 		msgpack_type type = msgpack_peek_type(mp);
@@ -1573,7 +1665,7 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 			return false;
 		}
 
-		(*counter_r)--;
+		bc->counter--;
 
 		uint64_t op_code;
 		uint32_t ele_count = 0;
@@ -1637,7 +1729,7 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 				return false;
 			}
 
-			*counter_r += ele_count - 1;
+			bc->counter += ele_count - 1;
 
 			if (! msgpack_get_uint64(mp, &op_code)) {
 				cf_warning(AS_EXP,
@@ -1661,22 +1753,66 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 			return false;
 		}
 
-		if (entry->static_param_count != 0 &&
-				msgpack_sz_rep(mp, entry->static_param_count) == 0) {
-			cf_warning(AS_EXP,
-					"build_count_sz - invalid instruction at offset %u",
-					mp->offset);
-			return false;
+		// Static parameters -- special processing.
+		switch (op_code) {
+		case EXP_BIN:
+			if (msgpack_sz(mp) == 0) {
+				cf_warning(AS_EXP,
+						"build_count_sz - invalid instruction at offset %u",
+						mp->offset);
+				return false;
+			}
+			// no break
+		case EXP_BIN_TYPE: {
+			uint32_t name_sz;
+			const uint8_t* name = msgpack_get_bin(mp, &name_sz);
+
+			if (name == NULL || ! as_bin_name_sz_check(name_sz)) {
+				cf_warning(AS_EXP,
+						"build_count_sz - invalid bin name at offset %u",
+						mp->offset);
+				return false;
+			}
+
+			// Offsets are relative to the one top-level base, not the
+			// repositioned 'let' sub-buffer this recursion may walk.
+			bin_name_entry bn = {
+				.off = (uint32_t)(name - bc->bin_table.base),
+				.sz = name_sz,
+				.need_memcpy = as_bin_name_need_memcpy(name, bc->end),
+			};
+
+			if (! build_get_or_add_bin_entry(&bc->bin_table, &bn)) {
+				cf_warning(AS_EXP,
+						"build_count_sz - invalid bin name at offset %u",
+						mp->offset);
+				return false;
+			}
+
+			break;
+		}
+		default:
+			if (entry->static_param_count != 0 &&
+					msgpack_sz_rep(mp, entry->static_param_count) == 0) {
+				cf_warning(AS_EXP,
+						"build_count_sz - invalid instruction at offset %u",
+						mp->offset);
+				return false;
+			}
+
+			break;
 		}
 
-		*counter_r -= entry->static_param_count;
-		*total_sz += entry->size;
+		bc->counter -= entry->static_param_count;
+		bc->total_sz += entry->size;
 
-		if (op_code == EXP_CALL) {
+		// Evaled parameters -- special processing.
+		switch (op_code) {
+		case EXP_CALL: {
 			uint32_t param_count;
 			uint64_t call_op_code;
 
-			(*counter_r)--;
+			bc->counter--;
 
 			if (! msgpack_get_list_ele_count(mp, &param_count) ||
 					param_count == 0 || ! msgpack_get_uint64(mp, &call_op_code)) {
@@ -1723,7 +1859,7 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 				// Non lists after the first list will result in over-allocation
 				// of op space. May want to improve accounting in the future.
 				if (msgpack_peek_type(mp) == MSGPACK_TYPE_LIST) {
-					*counter_r += param_count - i;
+					bc->counter += param_count - i;
 					break;
 				}
 
@@ -1734,11 +1870,13 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 					return false;
 				}
 			}
+
+			break;
 		}
-		else if (op_code == EXP_COND) {
-			*total_sz += (ele_count / 2) * op_table[VOP_COND_CASE].size;
-		}
-		else if (op_code == EXP_LET) {
+		case EXP_COND:
+			bc->total_sz += (ele_count / 2) * op_table[VOP_COND_CASE].size;
+			break;
+		case EXP_LET: {
 			if (ele_count % 2 == 1) {
 				cf_warning(AS_EXP,
 						"build_count_sz - invalid 'let' op at offset %u ele_count %u",
@@ -1749,7 +1887,7 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 			for (uint32_t i = 0; i < (ele_count - 1) / 2; i++) {
 				uint32_t sz;
 
-				(*counter_r)--;
+				bc->counter--;
 
 				if (msgpack_get_bin(mp, &sz) == NULL) {
 					cf_warning(AS_EXP,
@@ -1769,19 +1907,24 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 					return false;
 				}
 
-				if (! build_count_sz(&mp_var, total_sz, cleanup_count, counter_r)) {
+				if (! build_count_sz(&mp_var, bc)) {
 					cf_warning(AS_EXP,
 							"build_count_sz - invalid 'let' value at offset %u",
 							mp->offset);
 					return false;
 				}
 			}
+
+			break;
+		}
+		default:
+			break;
 		}
 
 		switch (op_code) {
 		case EXP_CMP_REGEX:
 		case VOP_VALUE_GEO:
-			(*cleanup_count)++;
+			bc->cleanup_count++;
 			break;
 		default:
 			break;
@@ -1807,6 +1950,41 @@ build_find_var_entry(build_args* args, const uint8_t* name, uint32_t name_sz)
 	}
 
 	return NULL;
+}
+
+static uint32_t
+build_find_bin_idx(const build_bin_table* t, bin_name128 name128)
+{
+	for (uint32_t i = 0; i < t->n_bins; i++) {
+		define_bin_name128(e, bin_table_get_name(t, i), t->table[i].sz,
+				t->table[i].need_memcpy);
+
+		if (name128.name128 == e.name128) {
+			return i;
+		}
+	}
+
+	return t->n_bins;
+}
+
+static bool
+build_get_or_add_bin_entry(build_bin_table* t, const bin_name_entry* n)
+{
+	define_bin_name128(name128, t->base + n->off, n->sz, n->need_memcpy);
+
+	if (! as_bin_name128_check(name128, n->sz)) {
+		return false;
+	}
+
+	if (build_find_bin_idx(t, name128) == t->n_bins) {
+		if (t->n_bins == RECORD_MAX_BINS) {
+			return false; // never more distinct bins than a record can hold
+		}
+
+		t->table[t->n_bins++] = *n;
+	}
+
+	return true;
 }
 
 static bool
@@ -2573,7 +2751,7 @@ build_rec_key(build_args* args)
 static bool
 build_bin(build_args* args)
 {
-	op_bin* op = (op_bin*)args->mem;
+	op_var* op = (op_var*)args->mem;
 
 	if (! build_args_setup(args, "build_bin")) {
 		return false;
@@ -2594,24 +2772,25 @@ build_bin(build_args* args)
 	}
 
 	op->type = (result_type)type64;
-	op->name = msgpack_get_bin(&args->mp, &op->name_sz);
 
-	if (op->name == NULL) {
-		cf_warning(AS_EXP, "build_bin - error %u failed to parse a string",
-				AS_ERR_PARAMETER);
-		return false;
-	}
+	uint32_t name_sz;
+	const uint8_t* name = msgpack_get_bin(&args->mp, &name_sz);
 
-	if (! as_bin_name_check(op->name, op->name_sz)) {
-		cf_warning(AS_EXP, "build_bin - error %u parsed invalid bin name",
-				AS_ERR_PARAMETER);
-		return false;
-	}
+	cf_assert(name != NULL, AS_EXP, "build_bin - name prechecked");
+
+	define_bin_name128(name128, name, name_sz,
+			as_bin_name_need_memcpy(name, args->mp.buf + args->mp.buf_sz));
+	uint32_t idx = build_find_bin_idx(&args->bin_table, name128);
+
+	cf_assert(idx < args->bin_table.n_bins, AS_EXP,
+			"build_bin - unexpected error bin name %.*s", name_sz, name);
+
+	op->idx = idx;
 
 	if (args->bins_info_r != NULL) {
 		as_bin_info bin_info;
 
-		snprintf(bin_info.name, op->name_sz + 1, "%s", op->name);
+		memcpy(bin_info.name, &name128, sizeof(name128));
 		bin_info.type = result_type_to_particle_type(op->type);
 		cf_vector_append(args->bins_info_r, &bin_info);
 	}
@@ -2628,32 +2807,32 @@ build_bin(build_args* args)
 static bool
 build_bin_type(build_args* args)
 {
-	op_bin_type* op = (op_bin_type*)args->mem;
+	op_var* op = (op_var*)args->mem;
 
 	if (! build_args_setup(args, "build_bin_type")) {
 		return false;
 	}
 
-	op->name = msgpack_get_bin(&args->mp, &op->name_sz);
+	uint32_t name_sz;
+	const uint8_t* name = msgpack_get_bin(&args->mp, &name_sz);
 
-	if (op->name == NULL) {
-		cf_warning(AS_EXP, "build_bin_type - error %u failed to parse a string",
-				AS_ERR_PARAMETER);
-		return false;
-	}
+	cf_assert(name != NULL, AS_EXP, "build_bin_type - name prechecked");
 
-	if (! as_bin_name_check(op->name, op->name_sz)) {
-		cf_warning(AS_EXP, "build_bin_type - error %u parsed invalid bin name",
-				AS_ERR_PARAMETER);
-		return false;
-	}
+	define_bin_name128(name128, name, name_sz,
+			as_bin_name_need_memcpy(name, args->mp.buf + args->mp.buf_sz));
+	uint32_t idx = build_find_bin_idx(&args->bin_table, name128);
+
+	cf_assert(idx < args->bin_table.n_bins, AS_EXP,
+			"build_bin_type - unexpected error bin name %.*s", name_sz, name);
+
+	op->idx = idx;
+	op->type = TYPE_INT;
 
 	if (args->bins_info_r != NULL) {
 		as_bin_info bin_info;
 
-		snprintf(bin_info.name, op->name_sz + 1, "%s", op->name);
-		bin_info.type =
-				AS_PARTICLE_TYPE_NULL; // wildcard, we depend on bins with this name with *all* types.
+		memcpy(bin_info.name, &name128, sizeof(name128));
+		bin_info.type = AS_PARTICLE_TYPE_NULL; // works for all types
 		cf_vector_append(args->bins_info_r, &bin_info);
 	}
 
@@ -3489,10 +3668,17 @@ match_internal(const as_exp* exp, const as_exp_ctx* ctx)
 	rt_value vars[exp->max_var_count];
 	rt_value ret_val;
 
-	runtime rt = { .ctx = ctx,
+	runtime rt = {
+		.ctx = ctx,
 		.instr_ptr = exp->mem,
 		.vars = vars,
-		.vars_builtin = { [0 ...(AS_EXP_BUILTIN_COUNT - 1)] = rt_unk } };
+		.bin_table = exp->bin_table,
+		.vars_builtin = { [0 ...(AS_EXP_BUILTIN_COUNT - 1)] = rt_unk },
+	};
+
+	for (uint32_t i = 0; i < exp->max_var_count; i++) {
+		rt.vars[i] = (rt_value){ .type = RT_END };
+	}
 
 	op_value_geo geo_mem = {
 		.contents = NULL
@@ -3505,6 +3691,8 @@ match_internal(const as_exp* exp, const as_exp_ctx* ctx)
 			geo_mem.compiled.type == GEO_REGION) { // geojson needs cleanup
 		geo_region_destroy(geo_mem.compiled.region);
 	}
+
+	rt_release_bins(&rt, &ret_val);
 
 	if (ret_val.type != RT_TRILEAN) {
 		rt_value_destroy(&ret_val);
@@ -3529,7 +3717,7 @@ rt_eval(runtime* rt, rt_value* ret_val)
 	*ret_val = (rt_value){ 0 };
 	entry->eval_cb(rt, ob, ret_val);
 
-	bool ret = rt_value_is_unknown(ret_val);
+	bool ret = rt_value_is_unk(ret_val);
 
 	return ret;
 }
@@ -3663,7 +3851,7 @@ eval_in_list(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	defer_rt_value_destroy(arg1);
 	rt_value list;
 
-	if (rt_value_is_unknown(&arg1) || ! rt_value_bin_translate(&list, &arg1)) {
+	if (rt_value_is_unk(&arg1) || ! rt_value_bin_translate(&list, &arg1)) {
 		*ret_val = rt_unk;
 		return;
 	}
@@ -4586,118 +4774,57 @@ eval_rec_key(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 static void
 eval_bin(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
-	if (! rt_has_rd(rt)) {
+	if (rt->ctx->rd == NULL) {
 		*ret_val = rt_unk;
 		return;
 	}
 
-	op_bin* op = (op_bin*)ob;
-	as_bin* bin;
+	op_var* op = (op_var*)ob;
 
-	if (! get_live_bin(rt->ctx->rd, op->name, op->name_sz, &bin)) {
+	// op->idx is a build-time bin slot index (see build_internal).
+	cf_assert(op->idx < rt->bin_table->n_bins, AS_EXP,
+			"bin idx %u out of range %u", op->idx, rt->bin_table->n_bins);
+
+	rt_value* brt = &rt->vars[op->idx];
+
+	if (brt->type == RT_END) {
+		rt_load_bin(rt, op->idx, brt);
+	}
+
+	// Borrow the cached value; do_not_destroy carries to the copy so
+	// rt_release_bins frees it. The per-reference type check is on the copy and
+	// never poisons the shared slot.
+	*ret_val = *brt;
+
+	if (result_type_to_particle_type(op->type) != rt_value_particle_type(brt)) {
 		*ret_val = rt_unk;
-		return;
-	}
-
-	if (bin == NULL) {
-		*ret_val = rt_unk;
-		return;
-	}
-
-	as_particle_type bin_type = as_bin_get_particle_type(bin);
-
-	if (! bin_is_type(bin, op->type)) {
-		cf_detail(AS_EXP,
-				"eval_bin - bin (%.*s) type mismatch %u does not map to %u",
-				op->name_sz, op->name, bin_type, op->type);
-		*ret_val = rt_unk;
-		return;
-	}
-
-	if (as_masking_apply(rt->ctx->rd->mask_ctx, &ret_val->r_bin, bin)) {
-		switch (bin_type) {
-		case AS_PARTICLE_TYPE_INTEGER: {
-			int64_t val = as_bin_particle_integer_value(&ret_val->r_bin);
-			as_bin_particle_destroy(&ret_val->r_bin);
-			ret_val->type = RT_INT;
-			ret_val->r_int = val;
-			break;
-		}
-		case AS_PARTICLE_TYPE_FLOAT: {
-			double val = as_bin_particle_float_value(&ret_val->r_bin);
-			as_bin_particle_destroy(&ret_val->r_bin);
-			ret_val->type = RT_FLOAT;
-			ret_val->r_float = val;
-			break;
-		}
-		case AS_PARTICLE_TYPE_BOOL: {
-			bool val = as_bin_particle_bool_value(&ret_val->r_bin);
-			as_bin_particle_destroy(&ret_val->r_bin);
-			ret_val->type = RT_TRILEAN;
-			ret_val->r_trilean = val;
-			break;
-		}
-		case AS_PARTICLE_TYPE_STRING:
-		case AS_PARTICLE_TYPE_BLOB:
-		case AS_PARTICLE_TYPE_HLL:
-		case AS_PARTICLE_TYPE_MAP:
-		case AS_PARTICLE_TYPE_LIST:
-		case AS_PARTICLE_TYPE_GEOJSON:
-			ret_val->type = RT_BIN;
-			break;
-		default:
-			cf_crash(AS_EXP, "unexpected");
-		}
-	}
-	else {
-		switch (bin_type) {
-		case AS_PARTICLE_TYPE_INTEGER:
-			ret_val->type = RT_INT;
-			ret_val->r_int = as_bin_particle_integer_value(bin);
-			break;
-		case AS_PARTICLE_TYPE_FLOAT:
-			ret_val->type = RT_FLOAT;
-			ret_val->r_float = as_bin_particle_float_value(bin);
-			break;
-		case AS_PARTICLE_TYPE_BOOL:
-			ret_val->type = RT_TRILEAN;
-			ret_val->r_trilean = as_bin_particle_bool_value(bin);
-			break;
-		case AS_PARTICLE_TYPE_STRING:
-		case AS_PARTICLE_TYPE_BLOB:
-		case AS_PARTICLE_TYPE_HLL:
-		case AS_PARTICLE_TYPE_MAP:
-		case AS_PARTICLE_TYPE_LIST:
-		case AS_PARTICLE_TYPE_GEOJSON:
-			ret_val->type = RT_BIN_PTR;
-			ret_val->r_bin_p = bin;
-			break;
-		default:
-			cf_crash(AS_EXP, "unexpected");
-		}
 	}
 }
 
 static void
 eval_bin_type(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
-	op_bin_type* op = (op_bin_type*)ob;
-
-	if (! rt_has_rd(rt)) {
+	if (rt->ctx->rd == NULL) {
 		*ret_val = rt_unk;
 		return;
 	}
 
-	as_bin* b;
+	op_var* op = (op_var*)ob;
 
-	if (! get_live_bin(rt->ctx->rd, op->name, op->name_sz, &b)) {
-		*ret_val = rt_unk;
-		return;
+	// op->idx is a build-time bin slot index (see build_internal).
+	cf_assert(op->idx < rt->bin_table->n_bins, AS_EXP,
+			"bin idx %u out of range %u", op->idx, rt->bin_table->n_bins);
+
+	rt_value* brt = &rt->vars[op->idx];
+
+	if (brt->type == RT_END) {
+		rt_load_bin(rt, op->idx, brt);
 	}
 
+	// Absent bin reports AS_PARTICLE_TYPE_NULL, not unknown -- preserves
+	// bin-type existence-check semantics.
 	ret_val->type = RT_INT;
-	ret_val->r_int = (b == NULL) ? AS_PARTICLE_TYPE_NULL
-								 : (uint64_t)as_bin_get_particle_type(b);
+	ret_val->r_int = (uint64_t)rt_value_particle_type(brt);
 }
 
 static void
@@ -5113,9 +5240,22 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	}
 
 	if (! bin_is_type(b, op->type)) {
-		if (! is_modify_local || bin_arg.type == RT_BIN ||
-				old.particle != b->particle) {
-			if (rt_value_need_destroy(&bin_arg, &old, b)) {
+		if (is_modify_local) {
+			bool live_noop = bin_arg.type == RT_BIN_PTR &&
+					bin_arg.r_bin_p->particle == b->particle;
+			bool borrowed_unchanged = bin_arg.do_not_destroy &&
+					old.particle == b->particle;
+
+			if (! live_noop && ! borrowed_unchanged) {
+				as_bin_particle_destroy(b);
+			}
+		}
+		else {
+			const as_particle* bin_arg_p = bin_arg.type == RT_BIN_PTR
+					? bin_arg.r_bin_p->particle
+					: bin_arg.r_bin.particle;
+
+			if (b->particle != bin_arg_p) { // not a no-op
 				as_bin_particle_destroy(b);
 			}
 		}
@@ -5135,7 +5275,10 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 		ret_val->type = RT_BIN;
 		ret_val->r_bin = *b;
-		ret_val->do_not_destroy = rt_value_keep_do_not_destroy(&bin_arg, b);
+		// Keep the borrowed (slot-owned) status only if the modify left the
+		// particle unchanged; a reallocated result is owned by this value.
+		ret_val->do_not_destroy = bin_arg.do_not_destroy &&
+				old.particle == b->particle;
 		return;
 	}
 
@@ -5341,6 +5484,31 @@ bin_is_type(const as_bin* b, result_type type)
 	return as_bin_get_particle_type(b) == result_type_to_particle_type(type);
 }
 
+// Inverse of result_type_to_particle_type() for the rt_value forms rt_load_bin
+// caches; unknown/absent reports NULL.
+static as_particle_type
+rt_value_particle_type(const rt_value* v)
+{
+	switch (v->type) {
+	case RT_INT:
+		return AS_PARTICLE_TYPE_INTEGER;
+	case RT_FLOAT:
+		return AS_PARTICLE_TYPE_FLOAT;
+	case RT_TRILEAN:
+		if (v->r_trilean == AS_EXP_UNK) {
+			return AS_PARTICLE_TYPE_NULL;
+		}
+
+		return AS_PARTICLE_TYPE_BOOL;
+	case RT_BIN:
+		return as_bin_get_particle_type(&v->r_bin);
+	case RT_BIN_PTR:
+		return as_bin_get_particle_type(v->r_bin_p);
+	default:
+		return AS_PARTICLE_TYPE_NULL;
+	}
+}
+
 static void
 rt_skip(runtime* rt, uint32_t instr_end_ix)
 {
@@ -5449,6 +5617,27 @@ rt_value_destroy(rt_value* val)
 	}
 }
 
+// Free the per-bin slots after eval. Only masked object bins hold a particle;
+// they're borrowed views (do_not_destroy=1) and this is their sole freer. If
+// the result aliases a slot's particle, hand ownership to the result instead
+// so it is freed exactly once.
+static void
+rt_release_bins(runtime* rt, rt_value* ret_val)
+{
+	for (uint32_t i = 0; i < rt->bin_table->n_bins; i++) {
+		rt_value* val = &rt->vars[i];
+
+		if (ret_val->type == RT_BIN && val->type == RT_BIN &&
+				ret_val->r_bin.particle == val->r_bin.particle) {
+			ret_val->do_not_destroy = 0;
+			continue;
+		}
+
+		val->do_not_destroy = 0;
+		rt_value_destroy(val);
+	}
+}
+
 static void
 rt_value_get_geo(rt_value* val, geo_data* result)
 {
@@ -5464,18 +5653,76 @@ rt_value_get_geo(rt_value* val, geo_data* result)
 	}
 }
 
-static bool
-get_live_bin(as_storage_rd* rd, const uint8_t* name, size_t len, as_bin** p_bin)
+static void
+rt_bin_translate(rt_value* bin, rt_value* ret_val)
 {
-	// Note - empty bin name ok for now - single-bin "soft landing".
-	//	if (len == 0) {
-	//		cf_warning(AS_EXP, "get_live_bin - illegal zero length bin name for multi-bin");
-	//		return false;
-	//	}
+	cf_assert(bin->type == RT_BIN_PTR, AS_EXP, "unexpected");
 
-	*p_bin = as_bin_get_live_w_len(rd, name, len);
+	as_bin* b = bin->r_bin_p;
+	as_particle_type type = as_bin_get_particle_type(b);
 
-	return true;
+	switch (type) {
+	case AS_PARTICLE_TYPE_INTEGER:
+		ret_val->type = RT_INT;
+		ret_val->r_int = as_bin_particle_integer_value(b);
+		break;
+	case AS_PARTICLE_TYPE_FLOAT:
+		ret_val->type = RT_FLOAT;
+		ret_val->r_float = as_bin_particle_float_value(b);
+		break;
+	case AS_PARTICLE_TYPE_BOOL:
+		ret_val->type = RT_TRILEAN;
+		ret_val->r_trilean = as_bin_particle_bool_value(b);
+		break;
+	case AS_PARTICLE_TYPE_STRING:
+	case AS_PARTICLE_TYPE_BLOB:
+	case AS_PARTICLE_TYPE_HLL:
+	case AS_PARTICLE_TYPE_MAP:
+	case AS_PARTICLE_TYPE_LIST:
+	case AS_PARTICLE_TYPE_GEOJSON:
+		ret_val->type = RT_BIN_PTR;
+		ret_val->r_bin_p = b;
+		break;
+	default:
+		cf_crash(AS_EXP, "unexpected");
+	}
+}
+
+static void
+rt_load_bin(runtime* rt, uint32_t idx, rt_value* ret_val)
+{
+	const uint8_t* name = rt_get_bin_name(rt, idx);
+	size_t name_sz = rt->bin_table->table[idx].sz;
+	as_bin* bin = as_bin_get_live_w_len(rt->ctx->rd, name, name_sz);
+
+	if (bin == NULL) {
+		*ret_val = rt_unk;
+		return;
+	}
+
+	if (as_masking_apply(rt->ctx->rd->mask_ctx, &ret_val->r_bin, bin)) {
+		// Reuse rt_bin_translate on the owned masked particle: scalars copy
+		// their value out and we free the temporary here; objects keep the
+		// particle (RT_BIN, freed by rt_release_bins).
+		rt_value masked = { .type = RT_BIN_PTR, .r_bin_p = &ret_val->r_bin };
+		rt_value translated = { 0 };
+
+		rt_bin_translate(&masked, &translated);
+
+		if (translated.type == RT_BIN_PTR) {
+			ret_val->type = RT_BIN;
+			ret_val->do_not_destroy = 1;
+		}
+		else {
+			as_bin_particle_destroy(&ret_val->r_bin);
+			*ret_val = translated;
+		}
+	}
+	else {
+		rt_value temp = { .type = RT_BIN_PTR, .r_bin_p = bin };
+
+		rt_bin_translate(&temp, ret_val);
+	}
 }
 
 static bool
@@ -5863,7 +6110,7 @@ rt_value_to_msgpack_vec(as_packer* pk, msgpack_vec* vec, rollback_alloc* alloc,
 {
 	rt_value to;
 
-	if (rt_value_is_unknown(from) || ! rt_value_bin_translate(&to, from)) {
+	if (rt_value_is_unk(from) || ! rt_value_bin_translate(&to, from)) {
 		return false;
 	}
 
@@ -6152,23 +6399,21 @@ display_meta_digest_mod(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 static void
 display_bin(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 {
-	(void)rt;
-
-	op_bin* op = (op_bin*)ob;
+	op_var* op = (op_var*)ob;
+	const bin_name_entry* bn = &rt->bin_table->table[op->idx];
 
 	cf_dyn_buf_append_format(db, "%s_%s(\"%.*s\")", op_table[ob->code].name,
-			result_type_str[op->type], op->name_sz, op->name);
+			result_type_str[op->type], bn->sz, rt_get_bin_name(rt, op->idx));
 }
 
 static void
 display_bin_type(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 {
-	(void)rt;
-
-	op_bin* op = (op_bin*)ob;
+	op_var* op = (op_var*)ob;
+	const bin_name_entry* bn = &rt->bin_table->table[op->idx];
 
 	cf_dyn_buf_append_format(db, "%s(\"%.*s\")", op_table[ob->code].name,
-			op->name_sz, op->name);
+			bn->sz, rt_get_bin_name(rt, op->idx));
 }
 
 static void

@@ -177,6 +177,12 @@ typedef struct as_bin_info_s {
 	char name[AS_BIN_NAME_MAX_SZ];
 } as_bin_info;
 
+typedef union bin_name128_s {
+	__uint128_t name128;
+	uint64_t name64[2];
+	uint8_t name8[AS_BIN_NAME_MAX_SZ];
+} bin_name128;
+
 /* Particle function declarations */
 
 static inline bool
@@ -346,9 +352,62 @@ bool as_bin_cdt_get_by_context(const as_bin* b, const uint8_t* ctx,
 		uint32_t ctx_sz, as_bin* result);
 
 static inline bool
+as_bin_name_sz_check(uint32_t bin_name_sz)
+{
+	return bin_name_sz < AS_BIN_NAME_MAX_SZ;
+}
+
+static inline bool
+as_bin_name_need_memcpy(const uint8_t* name, const void* end)
+{
+	return ((uintptr_t)(end) - (uintptr_t)(name)) < AS_BIN_NAME_MAX_SZ;
+}
+
+#define define_bin_name128(_name, _name_ptr, _name_sz, _need_memcpy)           \
+	cf_assert(as_bin_name_sz_check(_name_sz), AS_BIN,                          \
+			"bin name size out of range");                                     \
+	bin_name128 _name;                                                         \
+	if (_need_memcpy) {                                                        \
+		memcpy(_name.name8, (_name_ptr), (_name_sz));                          \
+	}                                                                          \
+	else {                                                                     \
+		memcpy(&_name.name128, (_name_ptr), sizeof(__uint128_t));              \
+	}                                                                          \
+	_name.name128 &= ~((~(__uint128_t)0) << ((_name_sz) * 8));
+
+static inline uint32_t
+as_bin_name128_sz(bin_name128 name)
+{
+	const uint64_t mask_01 = 0x0101010101010101ULL;
+	const uint64_t mask_80 = 0x8080808080808080ULL;
+	uint64_t val0 = name.name64[0];
+	uint64_t match0 = (val0 - mask_01) & ~val0 & mask_80;
+
+	if (match0 != 0) {
+		// Little-Endian
+		return __builtin_ctzll(match0) / 8;
+	}
+
+	uint64_t val1 = name.name64[1];
+	uint64_t match1 = (val1 - mask_01) & ~val1 & mask_80;
+
+	if (match1 != 0) {
+		return 8 + (__builtin_ctzll(match1) / 8);
+	}
+
+	return AS_BIN_NAME_MAX_SZ;
+}
+
+static inline bool
+as_bin_name128_check(bin_name128 name, uint32_t name_sz)
+{
+	return as_bin_name128_sz(name) == name_sz && name_sz != AS_BIN_NAME_MAX_SZ;
+}
+
+static inline bool
 as_bin_name_check(const uint8_t* name, uint32_t len)
 {
-	if (len >= AS_BIN_NAME_MAX_SZ) {
+	if (! as_bin_name_sz_check(len)) {
 		return false;
 	}
 
