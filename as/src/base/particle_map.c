@@ -2140,7 +2140,7 @@ map_add(cdt_op_mem* com, const cdt_payload* ukey, const cdt_payload* uval,
 		return -AS_ERR_PARAMETER;
 	}
 
-	define_deferred_memory(val_mem, rewrite_sz, CDT_MAX_STACK_OBJ_SZ);
+	define_deferred_memory(val_mem, rewrite_sz);
 
 	k_sz = cdt_untrusted_rewrite(val_mem, ukey->ptr, ukey->sz, false);
 
@@ -2558,7 +2558,7 @@ map_add_items(cdt_op_mem* com, const cdt_payload* items,
 		return -AS_ERR_PARAMETER;
 	}
 
-	define_deferred_memory(val_mem, rewrite_sz, CDT_MAX_STACK_OBJ_SZ);
+	define_deferred_memory(val_mem, rewrite_sz);
 
 	rewrite_sz = cdt_untrusted_rewrite(val_mem, items->ptr, items->sz, false);
 

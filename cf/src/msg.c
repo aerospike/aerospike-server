@@ -518,7 +518,7 @@ msg_reset(msg* m)
 void
 msg_preserve_fields(msg* m, uint32_t n_field_ids, ...)
 {
-	bool reflect[m->n_fields];
+	define_deferred_array(reflect, bool, m->n_fields);
 
 	for (uint16_t i = 0; i < m->n_fields; i++) {
 		reflect[i] = false;

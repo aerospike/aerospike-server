@@ -2055,8 +2055,8 @@ jem_stats_resolve_file_path(cf_dyn_buf* db, const char* file_str,
 	// Length of the "<work_dir>/output" string (excluding the null terminator).
 	size_t output_dir_len = strlen(work_dir) + 1 + strlen(output_subdir);
 
-	char output_dir[output_dir_len + 1];
-	snprintf(output_dir, sizeof(output_dir), "%s/%s", work_dir, output_subdir);
+	define_deferred_array(output_dir, char, output_dir_len + 1);
+	snprintf(output_dir, output_dir_len + 1, "%s/%s", work_dir, output_subdir);
 
 	if (file_str[0] == '/') {
 		// Absolute path - restrict to "/tmp" or the output directory.
@@ -3120,7 +3120,7 @@ cmd_sets(as_info_cmd_args* args)
 
 		if (set_name != NULL) {
 			int ns_name_len = (set_name - params);
-			char ns_name[ns_name_len + 1];
+			define_deferred_array(ns_name, char, ns_name_len + 1);
 
 			memcpy(ns_name, params, ns_name_len);
 			ns_name[ns_name_len] = '\0';
@@ -3174,7 +3174,7 @@ cmd_sindex(as_info_cmd_args* args)
 		// pull out namespace, and namespace name...
 		if (index_name != NULL) {
 			int ns_name_len = (index_name - params);
-			char ns_name[ns_name_len + 1];
+			define_deferred_array(ns_name, char, ns_name_len + 1);
 
 			memcpy(ns_name, params, ns_name_len);
 			ns_name[ns_name_len] = '\0';
@@ -4863,7 +4863,7 @@ namespace_rack_info(as_namespace* ns, cf_dyn_buf* db, uint32_t* rack_ids,
 		return;
 	}
 
-	rack_node rack_nodes[n_nodes];
+	define_deferred_array(rack_nodes, rack_node, n_nodes);
 
 	for (uint32_t n = 0; n < n_nodes; n++) {
 		rack_nodes[n].rack_id = rack_ids[n];

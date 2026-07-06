@@ -1445,7 +1445,7 @@ hll_modify_op_union(const hll_op* op, hll_t* to, const hll_t* from, as_bin* rb)
 	(void)rb;
 
 	uint32_t n_hmhs = op->n_elements;
-	const hll_t* hmhs[n_hmhs + 1];
+	define_deferred_array(hmhs, const hll_t*, n_hmhs + 1);
 
 	for (uint32_t i = 0; i < op->n_elements; i++) {
 		hmhs[i] = (hll_t*)op->elements[i].buf;
@@ -1510,7 +1510,7 @@ static void
 hll_read_op_union(const hll_op* op, const hll_t* from, as_bin* rb)
 {
 	uint32_t n_hmhs = op->n_elements + 1;
-	const hll_t* hmhs[n_hmhs];
+	define_deferred_array(hmhs, const hll_t*, n_hmhs);
 
 	for (uint32_t i = 0; i < op->n_elements; i++) {
 		hmhs[i] = (hll_t*)op->elements[i].buf;
@@ -1544,7 +1544,7 @@ static void
 hll_read_op_union_count(const hll_op* op, const hll_t* from, as_bin* rb)
 {
 	uint32_t n_hmhs = op->n_elements + 1;
-	const hll_t* hmhs[n_hmhs];
+	define_deferred_array(hmhs, const hll_t*, n_hmhs);
 
 	for (uint32_t i = 0; i < op->n_elements; i++) {
 		hmhs[i] = (hll_t*)op->elements[i].buf;
@@ -1562,7 +1562,7 @@ static void
 hll_read_op_intersect_count(const hll_op* op, const hll_t* from, as_bin* rb)
 {
 	uint32_t n_hmhs = op->n_elements + 1;
-	const hll_t* hmhs[n_hmhs];
+	define_deferred_array(hmhs, const hll_t*, n_hmhs);
 
 	for (uint32_t i = 0; i < op->n_elements; i++) {
 		hmhs[i] = (hll_t*)op->elements[i].buf;
@@ -1580,7 +1580,7 @@ static void
 hll_read_op_similarity(const hll_op* op, const hll_t* from, as_bin* rb)
 {
 	uint32_t n_hmhs = op->n_elements + 1;
-	const hll_t* hmhs[n_hmhs];
+	define_deferred_array(hmhs, const hll_t*, n_hmhs);
 
 	for (uint32_t i = 0; i < op->n_elements; i++) {
 		hmhs[i] = (hll_t*)op->elements[i].buf;
@@ -1757,7 +1757,7 @@ hmh_estimate_union_cardinality(uint32_t n_hmhs, const hll_t** hmhs)
 	hll_t template;
 	hmh_compatible_template(n_hmhs, hmhs, &template);
 	uint32_t sz = hmh_required_sz(template.n_index_bits, template.n_minhash_bits);
-	uint8_t buf[sz];
+	define_deferred_memory(buf, sz);
 	hll_t* hmhunion = (hll_t*)buf;
 
 	hmh_init(hmhunion, template.n_index_bits, template.n_minhash_bits);
@@ -1878,7 +1878,7 @@ hmh_estimate_similarity(uint32_t n_hmhs, const hll_t** hmhs)
 	}
 
 	uint32_t sz = hmh_required_sz(template.n_index_bits, template.n_minhash_bits);
-	uint8_t agg_buf[sz];
+	define_deferred_memory(agg_buf, sz);
 	hll_t* agg_hmh = (hll_t*)agg_buf;
 
 	hmh_init(agg_hmh, template.n_index_bits, template.n_minhash_bits);

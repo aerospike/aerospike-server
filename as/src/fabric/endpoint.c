@@ -565,10 +565,9 @@ as_endpoint_list_info(const as_endpoint_list* endpoint_list, cf_dyn_buf* db)
 	// 4 chars for delimiters, 50 chars for ipv6 ip and port, rounded to 64
 	size_t endpoint_list_str_size = 64 * endpoint_list_size;
 
-	char endpoint_list_str[endpoint_list_str_size];
+	define_deferred_array(endpoint_list_str, char, endpoint_list_str_size);
 	as_endpoint_list_to_string_match_capabilities(endpoint_list,
-			endpoint_list_str, sizeof(endpoint_list_str), AS_ENDPOINT_TLS_MASK,
-			0);
+			endpoint_list_str, endpoint_list_str_size, AS_ENDPOINT_TLS_MASK, 0);
 
 	cf_dyn_buf_append_string(db, "endpoint=");
 	if (endpoint_list_str[0] != '\0') {
@@ -577,7 +576,7 @@ as_endpoint_list_info(const as_endpoint_list* endpoint_list, cf_dyn_buf* db)
 	cf_dyn_buf_append_string(db, ":");
 
 	as_endpoint_list_to_string_match_capabilities(endpoint_list,
-			endpoint_list_str, sizeof(endpoint_list_str), AS_ENDPOINT_TLS_MASK,
+			endpoint_list_str, endpoint_list_str_size, AS_ENDPOINT_TLS_MASK,
 			AS_ENDPOINT_TLS_MASK);
 
 	cf_dyn_buf_append_string(db, "endpoint-tls=");

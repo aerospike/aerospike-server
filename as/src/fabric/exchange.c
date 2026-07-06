@@ -1477,28 +1477,28 @@ exchange_msg_data_payload_set(msg* msg)
 	cf_vector_define(namespace_list, sizeof(msg_buf_ele), ns_count, 0);
 	cf_vector_define(partition_versions, sizeof(msg_buf_ele), ns_count, 0);
 
-	uint32_t replication_factors[ns_count];
+	define_deferred_array(replication_factors, uint32_t, ns_count);
 
-	uint32_t rack_ids[ns_count];
+	define_deferred_array(rack_ids, uint32_t, ns_count);
 
 	bool have_roster = false;
 	bool have_active_rack = false;
 	bool have_roster_active_rack = false;
 	bool have_roster_rack_ids = false;
-	uint32_t active_racks[ns_count];
-	uint32_t roster_generations[ns_count];
-	uint32_t roster_active_racks[ns_count];
+	define_deferred_array(active_racks, uint32_t, ns_count);
+	define_deferred_array(roster_generations, uint32_t, ns_count);
+	define_deferred_array(roster_active_racks, uint32_t, ns_count);
 	cf_vector_define(rosters, sizeof(msg_buf_ele), ns_count, 0);
 	cf_vector_define(rosters_rack_ids, sizeof(msg_buf_ele), ns_count, 0);
 
 	bool have_regimes = false;
-	uint32_t eventual_regimes[ns_count];
-	uint32_t rebalance_regimes[ns_count];
+	define_deferred_array(eventual_regimes, uint32_t, ns_count);
+	define_deferred_array(rebalance_regimes, uint32_t, ns_count);
 
 	bool have_rebalance_flags = false;
-	uint32_t rebalance_flags[ns_count];
+	define_deferred_array(rebalance_flags, uint32_t, ns_count);
 
-	memset(rebalance_flags, 0, sizeof(rebalance_flags));
+	memset(rebalance_flags, 0, ns_count * sizeof(uint32_t));
 
 	msg_set_uint32(msg, AS_EXCHANGE_MSG_COMPATIBILITY_ID,
 			AS_EXCHANGE_COMPATIBILITY_ID);
@@ -2844,32 +2844,32 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 		cf_vector_define(partition_versions, sizeof(msg_buf_ele),
 				num_namespaces_sent, 0);
 
-		uint32_t replication_factors[num_namespaces_sent];
+		define_deferred_array(replication_factors, uint32_t, num_namespaces_sent);
 
-		memset(replication_factors, 0, sizeof(replication_factors));
+		memset(replication_factors, 0, num_namespaces_sent * sizeof(uint32_t));
 
-		uint32_t rack_ids[num_namespaces_sent];
+		define_deferred_array(rack_ids, uint32_t, num_namespaces_sent);
 
-		uint32_t active_racks[num_namespaces_sent];
-		uint32_t roster_active_racks[num_namespaces_sent];
+		define_deferred_array(active_racks, uint32_t, num_namespaces_sent);
+		define_deferred_array(roster_active_racks, uint32_t, num_namespaces_sent);
 
-		memset(active_racks, 0, sizeof(active_racks));
-		memset(roster_active_racks, 0, sizeof(roster_active_racks));
+		memset(active_racks, 0, num_namespaces_sent * sizeof(uint32_t));
+		memset(roster_active_racks, 0, num_namespaces_sent * sizeof(uint32_t));
 
-		uint32_t roster_generations[num_namespaces_sent];
+		define_deferred_array(roster_generations, uint32_t, num_namespaces_sent);
 		cf_vector_define(rosters, sizeof(msg_buf_ele), num_namespaces_sent, 0);
 		cf_vector_define(rosters_rack_ids, sizeof(msg_buf_ele),
 				num_namespaces_sent, 0);
 
-		memset(roster_generations, 0, sizeof(roster_generations));
+		memset(roster_generations, 0, num_namespaces_sent * sizeof(uint32_t));
 
-		uint32_t eventual_regimes[num_namespaces_sent];
-		uint32_t rebalance_regimes[num_namespaces_sent];
-		uint32_t rebalance_flags[num_namespaces_sent];
+		define_deferred_array(eventual_regimes, uint32_t, num_namespaces_sent);
+		define_deferred_array(rebalance_regimes, uint32_t, num_namespaces_sent);
+		define_deferred_array(rebalance_flags, uint32_t, num_namespaces_sent);
 
-		memset(eventual_regimes, 0, sizeof(eventual_regimes));
-		memset(rebalance_regimes, 0, sizeof(rebalance_regimes));
-		memset(rebalance_flags, 0, sizeof(rebalance_flags));
+		memset(eventual_regimes, 0, num_namespaces_sent * sizeof(uint32_t));
+		memset(rebalance_regimes, 0, num_namespaces_sent * sizeof(uint32_t));
+		memset(rebalance_flags, 0, num_namespaces_sent * sizeof(uint32_t));
 
 		if (! msg_msgpack_list_get_buf_array_presized(msg_event->msg,
 					AS_EXCHANGE_MSG_NAMESPACES, &namespace_list)) {

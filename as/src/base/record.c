@@ -380,7 +380,7 @@ as_record_apply(as_remote_record* rr, as_index_ref* r_ref, as_storage_rd* rd)
 	}
 
 	int result;
-	as_bin old_bins[si_needs_bins ? RECORD_MAX_BINS : 0];
+	define_deferred_array(old_bins, as_bin, si_needs_bins ? RECORD_MAX_BINS : 0);
 
 	if (si_needs_bins) {
 		// TODO - don't need to load a bin cemetery for sindex - optimize?
@@ -392,7 +392,7 @@ as_record_apply(as_remote_record* rr, as_index_ref* r_ref, as_storage_rd* rd)
 	}
 
 	uint16_t n_new_bins = rr->n_bins;
-	as_bin new_bins[set_has_si ? n_new_bins : 0];
+	define_deferred_array(new_bins, as_bin, set_has_si ? n_new_bins : 0);
 
 	if (set_has_si && n_new_bins != 0 &&
 			(result = as_flat_unpack_remote_bins(rr, new_bins)) != 0) {

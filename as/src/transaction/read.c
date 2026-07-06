@@ -641,12 +641,12 @@ read_local(as_transaction* tr)
 	uint32_t bin_count = (m->info1 & AS_MSG_INFO1_GET_ALL) != 0 ? rd.n_bins
 																: m->n_ops;
 
-	as_msg_op* ops[bin_count];
+	define_deferred_array(ops, as_msg_op*, bin_count);
 	as_msg_op** p_ops = ops;
-	as_bin* response_bins[bin_count];
+	define_deferred_array(response_bins, as_bin*, bin_count);
 	uint16_t n_bins = 0;
 
-	as_bin result_bins[bin_count];
+	define_deferred_array(result_bins, as_bin, bin_count);
 	uint32_t n_result_bins = 0;
 
 	if ((m->info1 & AS_MSG_INFO1_GET_ALL) != 0) {

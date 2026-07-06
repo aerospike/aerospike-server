@@ -600,7 +600,7 @@ as_fabric_info_peer_endpoints_get(cf_dyn_buf* db)
 		bool retry = true;
 
 		while (true) {
-			uint8_t stack_mem[endpoint_list_capacity];
+			define_deferred_memory(stack_mem, endpoint_list_capacity);
 			as_endpoint_list* endpoint_list = (as_endpoint_list*)stack_mem;
 
 			if (! fabric_endpoint_list_get(node->node_id, endpoint_list,
@@ -835,7 +835,7 @@ fabric_dump_fc_reduce_fn(const void* key, void* data, void* udata)
 											   : "INVALID";
 
 	size_t max_len = 45 + 2 + 1 + 5 + 1;
-	char sock_addr[max_len];
+	define_deferred_array(sock_addr, char, max_len);
 
 	cf_sock_addr_to_string_safe(&fc->peer, sock_addr, max_len);
 
@@ -1041,7 +1041,7 @@ fabric_node_connect(fabric_node* node, uint32_t ch)
 	int tries_remaining = 3;
 
 	while (tries_remaining--) {
-		uint8_t endpoint_list_mem[endpoint_list_capacity];
+		define_deferred_memory(endpoint_list_mem, endpoint_list_capacity);
 		as_endpoint_list* endpoint_list = (as_endpoint_list*)endpoint_list_mem;
 
 		if (fabric_endpoint_list_get(node->node_id, endpoint_list,
@@ -2032,7 +2032,7 @@ fabric_connection_process_msg(fabric_connection* fc, bool do_rearm)
 		read_ahead_sz -= sz;
 	}
 
-	uint8_t stack_mem[mem_sz + 1]; // +1 to account for mem_sz == 0
+	define_deferred_memory(stack_mem, mem_sz + 1);
 
 	memcpy(stack_mem, fc->r_buf, mem_sz);
 	fc->r_sz -= mem_sz;

@@ -535,7 +535,7 @@ gc_reduce_and_delete(as_sindex* si, si_btree* bt)
 																: MAX_GC_BURST;
 
 	bool first = true;
-	si_btree_key keys[max_burst];
+	define_deferred_array(keys, si_btree_key, max_burst);
 
 	gc_collect_cb_info ci = { .ns = ns, .max_burst = max_burst, .keys = keys };
 

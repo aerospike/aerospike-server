@@ -229,7 +229,7 @@ cf_ip_addr_from_string_multi_a(const char* string, cf_ip_addr_from_string_cb cb,
 		void* udata)
 {
 	uint32_t n_addrs = CF_SOCK_CFG_MAX;
-	cf_ip_addr ip_addrs[n_addrs];
+	define_deferred_array(ip_addrs, cf_ip_addr, n_addrs);
 
 	int32_t res = ip_addr_from_string_multi_local(string, ip_addrs, &n_addrs);
 

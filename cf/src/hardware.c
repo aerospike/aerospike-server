@@ -108,7 +108,7 @@ struct nvme_admin_cmd {
 	uint32_t result;
 };
 
-#define INVALID_INDEX ((uint16_t) - 1)
+#define INVALID_INDEX ((uint16_t)-1)
 #define POLICY_SCRIPT "/etc/aerospike/irqbalance-ban.sh"
 
 #define MEM_PAGE_SIZE (4096L)
@@ -1359,9 +1359,9 @@ interface_irqs(const char* if_name, irq_list* irqs)
 	fclose(fh);
 
 	int32_t n_groups = 0;
-	int32_t group_sizes[count];
-	int32_t group_extra[count];
-	int32_t action_groups[count];
+	define_deferred_array(group_sizes, int32_t, count);
+	define_deferred_array(group_extra, int32_t, count);
+	define_deferred_array(action_groups, int32_t, count);
 	int32_t inactive_group = -1;
 
 	for (int32_t i = 0; i < count; ++i) {
@@ -1537,7 +1537,7 @@ config_steering(const char* format, const char* if_name, uint16_t n_queues,
 		bool enable)
 {
 	uint16_t i_queue;
-	cpu_set_t masks[n_queues];
+	define_deferred_array(masks, cpu_set_t, n_queues);
 
 	for (i_queue = 0; i_queue < n_queues; ++i_queue) {
 		CPU_ZERO(&masks[i_queue]);
@@ -1758,7 +1758,7 @@ static void
 config_interface_numa(uint32_t i_addr, const char* if_name, irq_list* irqs)
 {
 	uint16_t n_irq_cpus = 0;
-	cf_topo_os_cpu_index i_os_cpu[g_n_numa_nodes];
+	define_deferred_array(i_os_cpu, cf_topo_os_cpu_index, g_n_numa_nodes);
 	uint16_t i_numa_node;
 
 	for (i_numa_node = 0; i_numa_node < g_n_numa_nodes; ++i_numa_node) {

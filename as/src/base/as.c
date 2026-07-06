@@ -573,7 +573,7 @@ static void
 validate_smd_directory(void)
 {
 	size_t len = strlen(g_config.work_directory);
-	char smd_path[len + sizeof(SMD_DIR_NAME)];
+	define_deferred_array(smd_path, char, len + sizeof(SMD_DIR_NAME));
 
 	strcpy(smd_path, g_config.work_directory);
 	strcpy(smd_path + len, SMD_DIR_NAME);

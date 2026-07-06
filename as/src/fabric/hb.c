@@ -2312,7 +2312,7 @@ as_hb_info_duplicates_get(cf_dyn_buf* db)
 	HB_LOCK();
 	bool self_is_duplicate = hb_self_is_duplicate();
 	int num_probation = cf_shash_get_size(g_hb.on_probation);
-	cf_node duplicate_list[num_probation + 1];
+	define_deferred_array(duplicate_list, cf_node, num_probation + 1);
 
 	if (! self_is_duplicate && num_probation == 0) {
 		cf_dyn_buf_append_string(db, "null");
@@ -6483,7 +6483,7 @@ mesh_channel_on_pulse(msg* msg)
 		return;
 	}
 
-	cf_node to_discover[adj_length];
+	define_deferred_array(to_discover, cf_node, adj_length);
 	size_t num_to_discover = 0;
 
 	// TODO: Track already queried nodes so that we do not retry immediately.
@@ -6966,7 +6966,7 @@ mesh_start()
 
 	mesh_listening_sockets_open();
 	channel_mesh_listening_socks_register(&g_hb.mode_state.mesh_state
-												   .listening_sockets);
+					.listening_sockets);
 
 	g_hb.mode_state.mesh_state.status = AS_HB_STATUS_RUNNING;
 
@@ -6997,7 +6997,7 @@ mesh_stop()
 	MESH_LOCK();
 
 	channel_mesh_listening_socks_deregister(&g_hb.mode_state.mesh_state
-													 .listening_sockets);
+					.listening_sockets);
 
 	mesh_listening_sockets_close();
 
@@ -7152,7 +7152,7 @@ multicast_start()
 	MULTICAST_LOCK();
 	multicast_listening_sockets_open();
 	channel_multicast_listening_socks_register(&g_hb.mode_state.multicast_state
-														.listening_sockets);
+					.listening_sockets);
 	MULTICAST_UNLOCK();
 }
 
@@ -7176,8 +7176,8 @@ static void
 multicast_stop()
 {
 	MULTICAST_LOCK();
-	channel_multicast_listening_socks_deregister(
-			&g_hb.mode_state.multicast_state.listening_sockets);
+	channel_multicast_listening_socks_deregister(&g_hb.mode_state
+					.multicast_state.listening_sockets);
 	multicast_listening_sockets_close();
 
 	MULTICAST_UNLOCK();
@@ -7514,7 +7514,7 @@ hb_plugin_set_fn(msg* msg)
 {
 	HB_LOCK();
 
-	cf_node adj_list[cf_shash_get_size(g_hb.adjacency)];
+	define_deferred_array(adj_list, cf_node, cf_shash_get_size(g_hb.adjacency));
 	as_hb_adjacency_reduce_udata adjacency_reduce_udata = { adj_list, 0 };
 
 	cf_shash_reduce(g_hb.adjacency, hb_adjacency_iterate_reduce,
@@ -7825,9 +7825,9 @@ hb_adjacent_node_plugin_data_get(as_hb_adjacent_node* adjacent_node,
 
 	*plugin_data = *plugin_data_size
 			? (cf_node*)(adjacent_node
-								 ->plugin_data[plugin_id]
-											  [adjacent_node->plugin_data_cycler % 2]
-								 .data)
+							  ->plugin_data[plugin_id]
+										   [adjacent_node->plugin_data_cycler % 2]
+							  .data)
 			: NULL;
 }
 
@@ -8021,8 +8021,10 @@ hb_adjacency_tender(void* arg)
 		DETAIL("tending adjacency list");
 
 		HB_LOCK();
-		cf_node dead_nodes[cf_shash_get_size(g_hb.adjacency)];
-		cf_node evicted_nodes[cf_shash_get_size(g_hb.adjacency)];
+		define_deferred_array(dead_nodes, cf_node,
+				cf_shash_get_size(g_hb.adjacency));
+		define_deferred_array(evicted_nodes, cf_node,
+				cf_shash_get_size(g_hb.adjacency));
 		as_hb_adjacency_tender_udata adjacency_tender_udata;
 		adjacency_tender_udata.dead_nodes = dead_nodes;
 		adjacency_tender_udata.dead_node_count = 0;
@@ -8316,7 +8318,8 @@ hb_adjacent_node_update(as_hb_channel_event* msg_event,
 
 	as_hlc_timestamp send_ts = adjacent_node->last_msg_hlc_ts.send_ts;
 
-	if (hb_endpoint_change_tracker_has_changed(adjacent_node->endpoint_change_tracker)) {
+	if (hb_endpoint_change_tracker_has_changed(adjacent_node
+						->endpoint_change_tracker)) {
 		// Allow a little more slack for obsolete checking because the two nodes
 		// might not have matching send timestamps.
 		send_ts = as_hlc_timestamp_subtract_ms(send_ts, config_tx_interval_get());
@@ -8403,7 +8406,8 @@ hb_adjacent_node_update(as_hb_channel_event* msg_event,
 static bool
 hb_node_can_consider_adjacent(as_hb_adjacent_node* adjacent_node)
 {
-	return hb_endpoint_change_tracker_is_normal(adjacent_node->endpoint_change_tracker);
+	return hb_endpoint_change_tracker_is_normal(adjacent_node
+					->endpoint_change_tracker);
 }
 
 /**

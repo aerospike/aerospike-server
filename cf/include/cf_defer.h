@@ -45,6 +45,7 @@
 	DEFER_ATTR(_func)                                                          \
 	__auto_type DEFER_GLUE(_defer_fn_, __LINE__) = &(_x)
 
+// clang-format off
 #ifdef __cplusplus
 # define cf_defer static_assert(0, "cf_defer / define_deferred_memory is C-only")
 #else
@@ -66,13 +67,15 @@
 // Does not work on every other gcc in the godbolt.org selection.
 #  define cf_defer DEFER_COUNTER_(__COUNTER__)
 #  define DEFER_COUNTER_(CNTR) DEFER_EXPAND_(CNTR)
-#  define DEFER_EXPAND_(CNTR) DEFER_FUNC_(DEFER_FUNC_##CNTR, DEFER_VAR_##CNTR)
-#  define DEFER_FUNC_(F, V)                                               \
-	auto void F(int*);                                                    \
-	__attribute__((__cleanup__(F), __deprecated__, __unused__)) int V;    \
-	__attribute__((__always_inline__, __deprecated__, __unused__))        \
-	inline auto void F(__attribute__((__unused__)) int* V)
+#  define DEFER_EXPAND_(CNTR)                                                    \
+	DEFER_FUNC_(DEFER_FUNC_##CNTR, DEFER_VAR_##CNTR, DEFER_ARG_##CNTR)
+#  define DEFER_FUNC_(F, V, A)                                                        \
+	auto void F(int*);                                                              \
+	__attribute__((__cleanup__(F), __deprecated__, __unused__)) int V;              \
+	__attribute__((__always_inline__, __deprecated__, __unused__)) inline auto void \
+	F(__attribute__((__unused__)) int* A)
 # else
 #  error "cf_defer -- compiler not supported"
 # endif
 #endif // __cplusplus
+// clang-format on

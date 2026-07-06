@@ -35,6 +35,7 @@
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 
+#include "enhanced_alloc.h"
 #include "log.h"
 #include "msg.h"
 
@@ -714,19 +715,20 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 	as_index* r = r_ref->r;
 	uint16_t set_id = as_index_get_set_id(r);
 
-	bool bin_name_in_both[n_new_bins];
-	as_bin* changed_bins[n_old_bins + n_new_bins]; // only the 'name' is used
+	define_deferred_array(bin_name_in_both, bool, n_new_bins);
+	define_deferred_array(changed_bins, as_bin*,
+			n_old_bins + n_new_bins); // only the 'name' is used
 	uint32_t n_changed_bins = 0;
 
 	// Initialize before the critical section to make it shorter.
-	memset(bin_name_in_both, 0, sizeof(bin_name_in_both));
-	memset(changed_bins, 0, sizeof(changed_bins));
+	memset(bin_name_in_both, 0, n_new_bins * sizeof(bool));
+	memset(changed_bins, 0, (n_old_bins + n_new_bins) * sizeof(as_bin*));
 
 	SINDEX_GRLOCK();
 
 	// At max we will do both insert & delete for every sindex in the namespace.
 	uint32_t n_sindexes = as_sindex_n_sindexes(ns);
-	as_sindex_bin sbins[2 * n_sindexes];
+	define_deferred_array(sbins, as_sindex_bin, 2 * n_sindexes);
 	uint32_t n_populated = 0;
 	bool record_in_sindex = false;
 
@@ -784,7 +786,7 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 			else if (r->in_sindex == 1 && ! record_in_sindex) {
 				// We only need to see whether this bin is in any sindex...
 
-				as_sindex_bin dummy_sbins[n_sindexes];
+				define_deferred_array(dummy_sbins, as_sindex_bin, n_sindexes);
 
 				uint32_t n = as_sindex_populate_sbins(ns, set_id, b_new,
 						dummy_sbins, AS_SINDEX_OP_INSERT);
@@ -838,8 +840,8 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 		old_new.old_bins = NULL;
 		old_new.n_old_bins = 0;
 
-		as_sindex_bin dummy_sbins[n_sindexes];
-		as_bin* p_new_bins[n_new_bins];
+		define_deferred_array(dummy_sbins, as_sindex_bin, n_sindexes);
+		define_deferred_array(p_new_bins, as_bin*, n_new_bins);
 
 		for (uint32_t b_ix = 0; b_ix < n_new_bins; b_ix++) {
 			p_new_bins[b_ix] = &new_bins[b_ix];
@@ -908,12 +910,14 @@ remove_from_sindex_bins(as_namespace* ns, as_index_ref* r_ref, as_bin* bins,
 	as_index* r = r_ref->r;
 	uint16_t set_id = as_index_get_set_id(r);
 
-	as_bin* changed_bins[n_bins]; // only the name field is used
+	define_deferred_array(changed_bins, as_bin*,
+			n_bins); // only the name field is used
 	uint32_t n_changed_bins = 0;
 
 	SINDEX_GRLOCK();
 
-	as_sindex_bin sbins[as_sindex_n_sindexes(ns)];
+	uint32_t n_sindexes = as_sindex_n_sindexes(ns);
+	define_deferred_array(sbins, as_sindex_bin, n_sindexes);
 	uint32_t n_populated = 0;
 
 	for (uint32_t i = 0; i < n_bins; i++) {

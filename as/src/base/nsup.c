@@ -38,6 +38,7 @@
 
 #include "cf_thread.h"
 #include "dynbuf.h"
+#include "enhanced_alloc.h"
 #include "hardware.h"
 #include "linear_hist.h"
 #include "log.h"
@@ -282,7 +283,8 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 	// reaches cold_start_evict_lock. Avoids per-record contention when many
 	// device threads sweep in parallel at cold start.
 	if (as_faa_uint32(&ns->cold_start_record_add_count, 1) %
-			EVAL_WRITE_STATE_FREQUENCY != 0) {
+					EVAL_WRITE_STATE_FREQUENCY !=
+			0) {
 		return true;
 	}
 
@@ -426,7 +428,7 @@ expire(as_namespace* ns)
 
 	cf_info(AS_NSUP, "{%s} nsup-start: expire-threads %u", ns->name, n_threads);
 
-	cf_tid tids[n_threads];
+	define_deferred_array(tids, cf_tid, n_threads);
 
 	expire_overall_info overall = { .ns = ns, .now = as_record_void_time_get() };
 
@@ -544,7 +546,7 @@ evict(as_namespace* ns)
 	bool sets_not_evicting[AS_SET_MAX_COUNT + 1] = { false };
 	init_sets_not_evicting(ns, sets_not_evicting);
 
-	cf_tid tids[n_threads];
+	define_deferred_array(tids, cf_tid, n_threads);
 
 	evict_overall_info overall = { .ns = ns,
 		.now = now,
@@ -769,9 +771,9 @@ find_evict_void_time(as_namespace* ns, uint32_t now)
 	linear_hist_reset(ns->evict_hist, now, ttl_range, n_buckets);
 
 	uint32_t n_threads = as_load_uint32(&ns->n_nsup_threads);
-	cf_tid tids[n_threads];
+	define_deferred_array(tids, cf_tid, n_threads);
 
-	prep_evict_per_thread_info per_threads[n_threads];
+	define_deferred_array(per_threads, prep_evict_per_thread_info, n_threads);
 	uint32_t pid = 0;
 
 	for (uint32_t i = 0; i < n_threads; i++) {
@@ -1232,9 +1234,9 @@ cold_start_evict(as_namespace* ns)
 	init_sets_not_evicting(ns, sets_not_evicting);
 
 	uint32_t n_cpus = cf_topo_count_cpus();
-	cf_tid tids[n_cpus];
+	define_deferred_array(tids, cf_tid, n_cpus);
 
-	prep_evict_per_thread_info per_threads[n_cpus];
+	define_deferred_array(per_threads, prep_evict_per_thread_info, n_cpus);
 	uint32_t pid = 0;
 
 	for (uint32_t n = 0; n < n_cpus; n++) {

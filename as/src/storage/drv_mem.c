@@ -1242,7 +1242,7 @@ init_synchronous(drv_mems* mems)
 	int n_mems = mems->n_mems;
 	as_namespace* ns = mems->ns;
 
-	drv_header* headers[n_mems];
+	define_deferred_array(headers, drv_header*, n_mems);
 	int first_used = -1;
 
 	// Check all the headers. Pick one as the representative.
@@ -1643,7 +1643,7 @@ load_wblock_queues(drv_mems* mems)
 	cf_info(AS_DRV_MEM, "{%s} loading free & defrag queues", mems->ns->name);
 
 	// Split this task across multiple threads.
-	cf_tid tids[mems->n_mems];
+	define_deferred_array(tids, cf_tid, mems->n_mems);
 
 	for (int i = 0; i < mems->n_mems; i++) {
 		drv_mem* mem = &mems->mems[i];
@@ -1681,7 +1681,7 @@ run_load_queues(void* pv_data)
 	as_namespace* ns = mem->ns;
 	uint32_t lwm_pct = ns->storage_defrag_lwm_pct;
 	uint32_t lwm_size = ns->defrag_lwm_size;
-	defrag_pen pens[lwm_pct];
+	define_deferred_array(pens, defrag_pen, lwm_pct);
 
 	for (uint32_t n = 0; n < lwm_pct; n++) {
 		drv_defrag_pen_init(&pens[n]);

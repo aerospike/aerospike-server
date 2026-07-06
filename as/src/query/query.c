@@ -2430,11 +2430,11 @@ apply_ops_make_response(cf_buf_builder** bb_r, as_storage_rd* rd, cl_msg* msgp,
 		return false;
 	}
 
-	as_msg_op* ops[n_ops];
-	as_bin* response_bins[n_ops];
+	define_deferred_array(ops, as_msg_op*, n_ops);
+	define_deferred_array(response_bins, as_bin*, n_ops);
 	uint32_t n_response_bins = 0;
 
-	as_bin result_bins[n_ops];
+	define_deferred_array(result_bins, as_bin, n_ops);
 	uint32_t n_result_bins = 0;
 
 	while ((op = as_msg_op_iterate(m, op, &i)) != NULL) {

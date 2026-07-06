@@ -35,6 +35,7 @@
 #include "citrusleaf/cf_digest.h"
 
 #include "cf_mutex.h"
+#include "enhanced_alloc.h"
 #include "log.h"
 #include "msg.h"
 #include "node.h"
@@ -198,7 +199,7 @@ repl_write_reset_replicas(rw_request* rw)
 
 	// Initialize or preserve completion status.
 
-	bool complete[n_nodes];
+	define_deferred_array(complete, bool, n_nodes);
 
 	for (uint32_t n = 0; n < n_nodes; n++) {
 		complete[n] = false;

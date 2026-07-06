@@ -178,7 +178,7 @@ int32_t
 cf_ip_net_from_string(const char* string, cf_ip_net* net)
 {
 	size_t len = strlen(string);
-	char net_string[len + 1];
+	define_deferred_array(net_string, char, len + 1);
 
 	strcpy(net_string, string);
 

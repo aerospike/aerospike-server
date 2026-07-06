@@ -1357,7 +1357,7 @@ build_peers_reduce(const void* key, void* data, void* udata)
 		cf_dyn_buf_append_char(db, ',');
 		cf_dyn_buf_append_char(db, '[');
 
-		char buff[strlen(field) + 1];
+		define_deferred_array(buff, char, strlen(field) + 1);
 		char* pref = strip_suff(field, par->strip, buff);
 		cf_detail(AS_SERVICE_LIST, "stripped %s", pref);
 		cf_dyn_buf_append_string(db, pref);

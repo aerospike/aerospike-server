@@ -115,7 +115,8 @@ udf_cask_init(void)
 			continue;
 		}
 
-		char file_path[MAX_USER_PATH_SZ + strlen(entry->d_name) + 1];
+		define_deferred_array(file_path, char,
+				MAX_USER_PATH_SZ + strlen(entry->d_name) + 1);
 
 		sprintf(file_path, "%s/%s", g_config.mod_lua.user_path, entry->d_name);
 
@@ -380,7 +381,7 @@ udf_cask_info_put(as_info_cmd_args* args)
 
 		uint32_t message_len = strlen(err.message);
 		uint32_t enc_message_len = cf_b64_encoded_len(message_len);
-		char enc_message[enc_message_len];
+		define_deferred_array(enc_message, char, enc_message_len);
 
 		cf_b64_encode((const uint8_t*)err.message, message_len, enc_message);
 
@@ -454,7 +455,8 @@ udf_cask_info_remove(as_info_cmd_args* args)
 		return;
 	}
 
-	char file_path[strlen(g_config.mod_lua.user_path) + 1 + filename_len + 1];
+	define_deferred_array(file_path, char,
+			strlen(g_config.mod_lua.user_path) + 1 + filename_len + 1);
 
 	sprintf(file_path, "%s/%s", g_config.mod_lua.user_path, filename);
 
@@ -490,8 +492,7 @@ udf_cask_smd_accept_cb(const cf_vector* items, as_smd_accept_type accept_type)
 		// outside [A-Za-z0-9._-$] or starts with '.' - don't echo it raw.
 		if (! udf_filename_is_valid(item->key)) {
 			cf_warning(AS_UDF,
-					"ignoring UDF SMD item: invalid filename (len %zu)",
-					key_len);
+					"ignoring UDF SMD item: invalid filename (len %zu)", key_len);
 			continue;
 		}
 

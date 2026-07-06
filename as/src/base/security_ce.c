@@ -163,7 +163,7 @@ as_security_transact(as_transaction* tr)
 
 	// Set up a simple response with a single as_sec_msg that has no fields.
 	size_t resp_size = sizeof(as_proto) + sizeof(as_sec_msg);
-	uint8_t resp[resp_size];
+	define_deferred_memory(resp, resp_size);
 
 	// Fill out the as_proto fields.
 	as_proto* p_resp_proto = (as_proto*)resp;

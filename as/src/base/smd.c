@@ -826,7 +826,7 @@ smd_msg_parse(msg* m, smd_op* op)
 
 	if (op->type == SMD_OP_REPORT_ALL_VERS_TO_PR) {
 		uint32_t count = (AS_SMD_NUM_MODULES + NUM_FUTURE_MODULES) * 3;
-		uint64_t versions[count];
+		define_deferred_array(versions, uint64_t, count);
 
 		if (! msg_msgpack_list_get_uint64_array(m, SMD_MSG_VERSION_LIST,
 					versions, &count) ||
@@ -985,8 +985,7 @@ smd_msg_parse_items(msg* m, smd_op* op)
 
 	uint32_t* gen_list = cf_malloc(count * sizeof(uint32_t));
 
-	if (! msg_msgpack_list_get_buf_array_presized(m, SMD_MSG_KEY_LIST,
-			&key_vec)) {
+	if (! msg_msgpack_list_get_buf_array_presized(m, SMD_MSG_KEY_LIST, &key_vec)) {
 		cf_warning(AS_SMD, "msg missing key list");
 		cf_vector_destroy(&key_vec);
 		cf_vector_destroy(&value_vec);
@@ -995,7 +994,7 @@ smd_msg_parse_items(msg* m, smd_op* op)
 	}
 
 	if (! msg_msgpack_list_get_buf_array_presized(m, SMD_MSG_VALUE_LIST,
-			&value_vec)) {
+				&value_vec)) {
 		cf_warning(AS_SMD, "msg missing value list");
 		cf_vector_destroy(&key_vec);
 		cf_vector_destroy(&value_vec);
@@ -1004,7 +1003,8 @@ smd_msg_parse_items(msg* m, smd_op* op)
 	}
 
 	if (! msg_msgpack_list_get_uint32_array(m, SMD_MSG_GEN_LIST, gen_list,
-			&check) && check != count) {
+				&check) &&
+			check != count) {
 		cf_warning(AS_SMD, "msg missing gen list");
 		cf_vector_destroy(&key_vec);
 		cf_vector_destroy(&value_vec);

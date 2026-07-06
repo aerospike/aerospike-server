@@ -1327,7 +1327,7 @@ write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 	rd->ignore_record_on_device = is_replace && ! si_needs_bins &&
 			! as_masking_must_mask(rd->mask_ctx, true);
 
-	as_bin stack_bins[RECORD_MAX_BINS + m->n_ops];
+	define_deferred_array(stack_bins, as_bin, RECORD_MAX_BINS + m->n_ops);
 
 	int result = as_storage_rd_load_bins(rd, stack_bins);
 
@@ -1358,7 +1358,7 @@ write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 	}
 
 	uint32_t n_old_bins = (uint32_t)rd->n_bins;
-	as_bin old_bins[n_old_bins];
+	define_deferred_array(old_bins, as_bin, n_old_bins);
 
 	//------------------------------------------------------
 	// Copy old bins (if any) - which are currently in new
@@ -1506,9 +1506,10 @@ write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
 	as_record* r = rd->r;
 	bool has_read_all_op = (m->info1 & AS_MSG_INFO1_GET_ALL) != 0;
 
-	as_msg_op* ops[m->n_ops];
-	as_bin response_bins[has_read_all_op ? RECORD_MAX_BINS : m->n_ops];
-	as_bin result_bins[m->n_ops];
+	define_deferred_array(ops, as_msg_op*, m->n_ops);
+	define_deferred_array(response_bins, as_bin,
+			has_read_all_op ? RECORD_MAX_BINS : m->n_ops);
+	define_deferred_array(result_bins, as_bin, m->n_ops);
 
 	uint32_t n_response_bins = 0;
 	uint32_t n_result_bins = 0;
@@ -1537,7 +1538,7 @@ write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
 		return 0;
 	}
 
-	as_bin* bins[n_response_bins];
+	define_deferred_array(bins, as_bin*, n_response_bins);
 
 	for (uint32_t i = 0; i < n_response_bins; i++) {
 		as_bin* b = &response_bins[i];

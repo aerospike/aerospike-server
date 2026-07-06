@@ -935,7 +935,7 @@ run_load_queues(void* pv_data)
 	as_namespace* ns = ssd->ns;
 	uint32_t lwm_pct = ns->storage_defrag_lwm_pct;
 	uint32_t lwm_size = ns->defrag_lwm_size;
-	defrag_pen pens[lwm_pct];
+	define_deferred_array(pens, defrag_pen, lwm_pct);
 
 	for (uint32_t n = 0; n < lwm_pct; n++) {
 		drv_defrag_pen_init(&pens[n]);
@@ -985,7 +985,7 @@ ssd_load_wblock_queues(drv_ssds* ssds)
 	cf_info(AS_DRV_SSD, "{%s} loading free & defrag queues", ssds->ns->name);
 
 	// Split this task across multiple threads.
-	cf_tid tids[ssds->n_ssds];
+	define_deferred_array(tids, cf_tid, ssds->n_ssds);
 
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd* ssd = &ssds->ssds[i];
@@ -3250,7 +3250,7 @@ si_startup_do_record(drv_ssds* ssds, drv_ssd* ssd, as_flat_record* flat,
 	// Load bins and particles, load sindex. We are NOT data-in-memory!
 
 	uint16_t n_bins = (uint16_t)opt_meta.n_bins;
-	as_bin bins[n_bins];
+	define_deferred_array(bins, as_bin, n_bins);
 
 	if (as_flat_unpack_bins(ns, p_read, end, n_bins, bins) < 0) {
 		cf_crash(AS_DRV_SSD, "unpack bins failed");
@@ -3308,7 +3308,7 @@ ssd_init_synchronous(drv_ssds* ssds)
 	int n_ssds = ssds->n_ssds;
 	as_namespace* ns = ssds->ns;
 
-	drv_header* headers[n_ssds];
+	define_deferred_array(headers, drv_header*, n_ssds);
 	int first_used = -1;
 
 	// Check all the headers. Pick one as the representative.
@@ -3980,7 +3980,7 @@ as_storage_sindex_build_all_ssd(as_namespace* ns)
 {
 	drv_ssds* ssds = (drv_ssds*)ns->storage_private;
 
-	cf_tid tids[ssds->n_ssds];
+	define_deferred_array(tids, cf_tid, ssds->n_ssds);
 
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		tids[i] = cf_thread_create_joinable(run_si_startup, &ssds->ssds[i]);

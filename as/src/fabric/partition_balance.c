@@ -763,7 +763,7 @@ drop_trees(as_namespace* ns, as_partition* p)
 void
 fill_global_tables()
 {
-	uint64_t hashed_nodes[g_cluster_size];
+	define_deferred_array(hashed_nodes, uint64_t, g_cluster_size);
 
 	for (uint32_t n = 0; n < g_cluster_size; n++) {
 		hashed_nodes[n] =
@@ -844,7 +844,8 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 
 	// The translation array is used to convert global table rows to namespace
 	// rows, if  necessary.
-	int translation[ns_less_than_global ? g_cluster_size : 0];
+	define_deferred_array(translation, int,
+			ns_less_than_global ? g_cluster_size : 0);
 
 	if (ns_less_than_global) {
 		fill_translation(translation, ns);
@@ -853,11 +854,11 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 	uint32_t claims_size = ns->prefer_uniform_balance
 			? ns->replication_factor * g_cluster_size
 			: 0;
-	uint32_t claims[claims_size];
-	uint32_t target_claims[claims_size];
+	define_deferred_array(claims, uint32_t, claims_size);
+	define_deferred_array(target_claims, uint32_t, claims_size);
 
 	if (ns->prefer_uniform_balance) {
-		memset(claims, 0, sizeof(claims));
+		memset(claims, 0, claims_size * sizeof(uint32_t));
 		init_target_claims_ap(ns, translation, target_claims);
 	}
 
@@ -881,8 +882,10 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 			cf_node* ns_node_seq = full_node_seq;
 			sl_ix_t* ns_sl_ix = full_sl_ix;
 
-			cf_node stack_node_seq[ns_not_equal_global ? ns->cluster_size : 0];
-			sl_ix_t stack_sl_ix[ns_not_equal_global ? ns->cluster_size : 0];
+			define_deferred_array(stack_node_seq, cf_node,
+					ns_not_equal_global ? ns->cluster_size : 0);
+			define_deferred_array(stack_sl_ix, sl_ix_t,
+					ns_not_equal_global ? ns->cluster_size : 0);
 
 			// ... but sometimes a namespace is different.
 			if (ns_not_equal_global) {
@@ -943,7 +946,7 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 			int working_master_n = find_working_master_ap(p, ns_sl_ix, ns);
 
 			uint32_t n_dupl = 0;
-			cf_node dupls[ns->cluster_size];
+			define_deferred_array(dupls, cf_node, ns->cluster_size);
 
 			as_partition_version orig_version = p->version;
 
@@ -977,7 +980,8 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 					advance_version_ap(p, ns_sl_ix, ns, self_n,
 							(uint32_t)working_master_n, n_dupl, dupls);
 
-					uint32_t lead_flags[ns->replication_factor];
+					define_deferred_array(lead_flags, uint32_t,
+							ns->replication_factor);
 
 					emig_lead_flags_ap(p, ns_sl_ix, ns, lead_flags);
 
@@ -1203,9 +1207,11 @@ find_duplicates_ap(as_partition* p, const cf_node* ns_node_seq,
 		uint32_t working_master_n, cf_node dupls[])
 {
 	uint32_t n_dupl = 0;
-	as_partition_version parent_dupl_versions[ns->cluster_size];
+	define_deferred_array(parent_dupl_versions, as_partition_version,
+			ns->cluster_size);
 
-	memset(parent_dupl_versions, 0, sizeof(parent_dupl_versions));
+	memset(parent_dupl_versions, 0,
+			ns->cluster_size * sizeof(as_partition_version));
 
 	uint64_t first_ckey = 0;
 	bool different_ckeys = false;
@@ -1363,7 +1369,7 @@ advance_version_ap(as_partition* p, const sl_ix_t* ns_sl_ix, as_namespace* ns,
 		max_n_families = AS_PARTITION_N_FAMILIES;
 	}
 
-	as_partition_version family_versions[max_n_families];
+	define_deferred_array(family_versions, as_partition_version, max_n_families);
 	uint32_t n_families = fill_family_versions(p, ns_sl_ix, ns,
 			working_master_n, n_dupl, dupls, family_versions);
 

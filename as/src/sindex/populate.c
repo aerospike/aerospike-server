@@ -336,7 +336,7 @@ populate(as_sindex* si)
 	populate_info popi = { .ns = ns, .si = si };
 
 	uint32_t n_threads = as_load_uint32(&g_config.sindex_builder_threads);
-	cf_tid tids[n_threads];
+	define_deferred_array(tids, cf_tid, n_threads);
 
 	for (uint32_t i = 0; i < n_threads; i++) {
 		tids[i] = cf_thread_create_joinable(run_populate, &popi);

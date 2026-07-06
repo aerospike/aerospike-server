@@ -36,6 +36,7 @@
 #include "cf_mutex.h"
 #include "cf_thread.h"
 #include "dynbuf.h"
+#include "enhanced_alloc.h"
 #include "log.h"
 
 #include "base/cfg.h"
@@ -300,7 +301,7 @@ as_query_manager_get_all_jobs_info(cf_dyn_buf* db)
 		return;
 	}
 
-	as_query_job* _jobs[n_jobs];
+	define_deferred_array(_jobs, as_query_job*, n_jobs);
 	info_item item = { _jobs };
 
 	cf_queue_reduce_reverse(g_mgr.active_jobs, info_cb, &item);

@@ -36,6 +36,7 @@
 #include "bits.h"
 #include "cf_defer.h"
 #include "dynbuf.h"
+#include "enhanced_alloc.h"
 #include "log.h"
 #include "msgpack_in.h"
 
@@ -3438,7 +3439,7 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 		return false;
 	}
 
-	select_stack_entry stack[n_levels];
+	define_deferred_array(stack, select_stack_entry, n_levels);
 
 	com->ret_code = select_stack_init(stack, &n_levels, state->mv);
 

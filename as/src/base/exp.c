@@ -298,7 +298,7 @@ typedef struct call_cleanup_s {
 } call_cleanup;
 
 #define define_call_cleanup(_name, _count)                                     \
-	as_bin* _name##_bin[_count];                                               \
+	define_deferred_array(_name##_bin, as_bin*, _count);                       \
 	DEFER_ATTR(call_cleanup_fn)                                                \
 	call_cleanup _name = { .bin = _name##_bin, .bin_ix = 0 }
 
@@ -903,11 +903,10 @@ as_exp*
 as_exp_filter_build_base64(const char* buf64, uint32_t buf64_sz)
 {
 	uint32_t buf_sz = cf_b64_decoded_buf_size(buf64_sz);
-	uint8_t* buf = cf_malloc(buf_sz);
+	define_deferred_memory(buf, buf_sz);
 	uint32_t buf_sz_out;
 
 	if (! cf_b64_validate_and_decode(buf64, buf64_sz, buf, &buf_sz_out)) {
-		cf_free(buf);
 		return NULL;
 	}
 
@@ -915,8 +914,6 @@ as_exp_filter_build_base64(const char* buf64, uint32_t buf64_sz)
 			buf_sz_out, buf_sz_out, buf);
 
 	as_exp* exp = build_internal(buf, buf_sz_out, true, NULL);
-
-	cf_free(buf);
 
 	return exp == NULL ? NULL : check_filter_exp(exp);
 }
@@ -947,7 +944,7 @@ bool
 as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 		cf_ll_buf* particles_llb)
 {
-	rt_value vars[exp->max_var_count];
+	define_deferred_array(vars, rt_value, exp->max_var_count);
 	rt_value ret_val;
 
 	runtime rt = {
@@ -1223,7 +1220,7 @@ as_exp_result_has_nonstorage(const as_exp_result* res)
 bool
 as_exp_eval_to_result(const as_exp* exp, const as_exp_ctx* ctx, as_exp_result* res)
 {
-	rt_value vars[exp->max_var_count];
+	define_deferred_array(vars, rt_value, exp->max_var_count);
 	rt_value ret_val;
 
 	runtime rt = {
@@ -1994,9 +1991,8 @@ build_check_cdt(const uint8_t* buf, uint32_t buf_sz)
 	// only reorders/compactifies and can never exceed buf_sz.
 	// Need more options for cdt_untrusted_rewrite() if we want to support
 	// PERSIST_INDEX in exp literals in the future.
-	uint8_t* temp = cf_malloc(buf_sz);
+	define_deferred_memory(temp, buf_sz);
 	uint32_t new_sz = cdt_untrusted_rewrite(temp, buf, buf_sz, false);
-	DEFER_FREE(temp);
 
 	if (new_sz != buf_sz) {
 		cf_warning(AS_EXP, "build_check_cdt - error %u cdt not compactified",
@@ -2119,11 +2115,11 @@ build_cmp_regex(build_args* args)
 	}
 
 	if (regex_str_sz == 0 || regex_str[regex_str_sz - 1] != '\0') {
-		char temp[regex_str_sz + 1];
+		define_deferred_memory(temp, regex_str_sz + 1);
 
 		memcpy(temp, regex_str, regex_str_sz);
 		temp[regex_str_sz] = '\0';
-		rv = regcomp(&op->regex, temp, (int)regex_options);
+		rv = regcomp(&op->regex, (const char*)temp, (int)regex_options);
 	}
 	else {
 		rv = regcomp(&op->regex, (const char*)regex_str, (int)regex_options);
@@ -3060,7 +3056,7 @@ build_let(build_args* args)
 	}
 
 	uint32_t n_vars = args->ele_count / 2;
-	var_entry entries[n_vars];
+	define_deferred_array(entries, var_entry, n_vars);
 	var_scope scope = {
 		.parent = args->current, .n_entries = 0, .entries = entries
 	};
@@ -3665,7 +3661,7 @@ geo_mp_to_op(msgpack_in* mp, op_value_geo* op, const char* debug_str)
 static as_exp_trilean
 match_internal(const as_exp* exp, const as_exp_ctx* ctx)
 {
-	rt_value vars[exp->max_var_count];
+	define_deferred_array(vars, rt_value, exp->max_var_count);
 	rt_value ret_val;
 
 	runtime rt = {
@@ -3819,10 +3815,11 @@ eval_cmp_regex(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	}
 
 	op_cmp_regex* op = (op_cmp_regex*)ob;
-	char* tmp = cf_strndup((const char*)str, str_sz); // TODO - maybe improve this
-	int rv = regexec(&op->regex, tmp, 0, NULL, 0);
+	define_deferred_memory(tmp, str_sz + 1);
 
-	cf_free(tmp);
+	memcpy(tmp, str, str_sz);
+	tmp[str_sz] = '\0';
+	int rv = regexec(&op->regex, (const char*)tmp, 0, NULL, 0);
 
 	rt_value_destroy(ret_val);
 	ret_val->type = RT_TRILEAN;
@@ -4995,7 +4992,7 @@ static void
 eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
 	const op_call* op = (const op_call*)ob;
-	msgpack_vec vecs[op->n_vecs];
+	define_deferred_array(vecs, msgpack_vec, op->n_vecs);
 	msgpack_in_vec mv = { .n_vecs = op->n_vecs + 1, .vecs = vecs };
 
 	vecs[0].buf = op->vecs[0].buf;
@@ -5009,7 +5006,7 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	as_packer pk = { .buffer = buf, .capacity = sizeof(buf) };
 
 	uint32_t param_idx = 0;
-	rt_value param_ret_vals[op->eval_count];
+	define_deferred_array(param_ret_vals, rt_value, op->eval_count);
 	define_call_cleanup(bin_cleanup, op->eval_count);
 	define_rollback_alloc(alloc, NULL, op->eval_count);
 	DEFER_ROLLBACK_ALLOC(alloc);

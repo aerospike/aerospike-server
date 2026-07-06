@@ -34,6 +34,7 @@
 
 #include "aerospike/as_atomic.h"
 
+#include "cf_defer.h"
 #include "log.h"
 
 //==========================================================
@@ -44,6 +45,13 @@ typedef struct cf_rc_header_s {
 	uint32_t rc;
 	uint32_t sz;
 } cf_rc_header;
+
+// Per-thread budget for define_deferred_memory's stack arm. When the
+// next request would push cumulative usage past this, the macro
+// promotes to cf_malloc + cleanup-on-scope-exit instead.
+#define CF_DEFERRED_STACK_BUDGET (4U << 20) // 4 MiB
+
+extern __thread size_t g_tl_deferred_stack_used;
 
 //==========================================================
 // Public API - arena management and stats.
@@ -104,13 +112,13 @@ uint32_t cf_rc_releaseandfree(void* p);
 //
 
 inline static void
-__cf_defer_free_internal(void* p)
+cf_defer_free_internal(void* p)
 {
 	cf_free(*(void**)p);
 }
 
 inline static void
-__cf_defer_atomic_free_assert_internal(void* p)
+cf_defer_atomic_free_assert_internal(void* p)
 {
 	void** pp = *(void***)p;
 	void* local_p = as_fas_ptr(pp, NULL);
@@ -120,7 +128,7 @@ __cf_defer_atomic_free_assert_internal(void* p)
 }
 
 inline static void
-__cf_defer_atomic_free_optional_internal(void* p)
+cf_defer_atomic_free_optional_internal(void* p)
 {
 	void** pp = *(void***)p;
 	void* local_p = as_fas_ptr(pp, NULL);
@@ -132,31 +140,55 @@ __cf_defer_atomic_free_optional_internal(void* p)
 // Public API - defer
 //
 
-#define DEFER_ATTR_FREE __attribute__((cleanup(__cf_defer_free_internal)))
+#define DEFER_ATTR_FREE __attribute__((cleanup(cf_defer_free_internal)))
 
 #define CONCAT_IMPL(a, b) a##b
 #define CONCAT(a, b) CONCAT_IMPL(a, b)
 
-#define DEFER_FREE(__x)                                                            \
-	__attribute__((cleanup(__cf_defer_free_internal))) void* CONCAT(__defer_free_, \
-			__LINE__) = (__x)
+#define DEFER_FREE(_x)                                                               \
+	__attribute__((cleanup(cf_defer_free_internal))) void* cf_defer_var_##__LINE__ = \
+			(_x)
 
-#define DEFER_ATOMIC_FREE(__x)                                                 \
-	__attribute__((cleanup(__cf_defer_atomic_free_assert_internal))) void*     \
-			__defer_free_##__LINE__ = &(__x)
+#define DEFER_ATOMIC_FREE(_x)                                                  \
+	__attribute__((cleanup(cf_defer_atomic_free_assert_internal))) void*       \
+			cf_defer_var_##__LINE__ = &(_x)
 
-#define DEFER_ATOMIC_FREE_OPTIONAL(__x)                                        \
-	__attribute__((cleanup(__cf_defer_atomic_free_optional_internal))) void*   \
-			__defer_free_##__LINE__ = &(__x)
+#define DEFER_ATOMIC_FREE_OPTIONAL(_x)                                         \
+	__attribute__((cleanup(cf_defer_atomic_free_optional_internal))) void*     \
+			cf_defer_var_##__LINE__ = &(_x)
 
-// Define a buffer that is either on the stack(sz <= max_stack) or
-// on the heap(sz > max_stack), depending on the size.
-// Auto free the memory when the scope ends.
-#define define_deferred_memory(__name, __alloc_sz, __max_stack)                \
-	const uint32_t __name##__sz = ((__alloc_sz) > (__max_stack)) ? 1           \
-																 : __alloc_sz; \
-	uint8_t __name##__mem[__name##__sz];                                       \
-	DEFER_ATTR_FREE uint8_t* __name##__alloc =                                 \
-			((__alloc_sz) > (__max_stack)) ? cf_malloc(__alloc_sz) : NULL;     \
-	uint8_t* __name = ((__alloc_sz) > (__max_stack)) ? __name##__alloc         \
-													 : __name##__mem
+// Define a buffer that lives on the stack when there's room within
+// the thread's CF_DEFERRED_STACK_BUDGET (4 MiB), or on the heap
+// otherwise. Heap is auto-freed and the stack accounting decremented
+// when the enclosing scope exits via cf_defer. Requested size is
+// rounded up to a multiple of 8 so the thread-local counter slightly over-
+// estimates rather than under-counts the compiler's actual stack
+// alignment — safer to trip to heap a tiny bit early than to under-
+// account and overflow.
+#define define_deferred_memory(_name, _alloc_sz)                                \
+	const size_t _name##_req_sz_ = ((_alloc_sz) + 7U) & ~(size_t)7U;            \
+	const bool _name##_use_heap_ = g_tl_deferred_stack_used + _name##_req_sz_ > \
+			CF_DEFERRED_STACK_BUDGET;                                           \
+	uint8_t __attribute__((aligned(8)))                                         \
+	_name##_mem_[_name##_use_heap_ ? 1 : _name##_req_sz_];                      \
+	uint8_t* _name = _name##_use_heap_ ? cf_malloc(_name##_req_sz_)             \
+									   : _name##_mem_;                          \
+	if (! _name##_use_heap_) {                                                  \
+		g_tl_deferred_stack_used += _name##_req_sz_;                            \
+	}                                                                           \
+	cf_defer                                                                    \
+	{                                                                           \
+		if (_name##_use_heap_) {                                                \
+			cf_free(_name);                                                     \
+		}                                                                       \
+		else {                                                                  \
+			g_tl_deferred_stack_used -= _name##_req_sz_;                        \
+		}                                                                       \
+	}
+
+// Typed-array sibling of define_deferred_memory. Stages an
+// uint8_t-backed buffer of `_count * sizeof(_type)` bytes through
+// define_deferred_memory and exposes `_name` as a `_type*`.
+#define define_deferred_array(_name, _type, _count)                            \
+	define_deferred_memory(_name##_da_, (size_t)(_count) * sizeof(_type));     \
+	_type* _name = (_type*)_name##_da_

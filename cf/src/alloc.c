@@ -121,6 +121,8 @@ static quarantined* g_quarantined;
 static uint64_t g_n_quarantined = 0;
 
 bool g_alloc_started = false;
+
+__thread size_t g_tl_deferred_stack_used = 0;
 static int32_t g_startup_arena = -1;
 
 static bool g_debug;

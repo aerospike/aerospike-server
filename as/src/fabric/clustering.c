@@ -8130,7 +8130,8 @@ as_clustering_cf_node_array_event(cf_log_level severity, cf_log_context context,
 	nodes_per_line = MAX(1, nodes_per_line);
 
 	// Have a buffer large enough to accomodate the message and nodes per line.
-	char log_buffer[message_length + (nodes_per_line * node_str_len) + 1]; // For the NULL terminator.
+	define_deferred_array(log_buffer, char,
+			message_length + (nodes_per_line * node_str_len) + 1);
 	int output_node_count = 0;
 
 	// Marks the start of the nodeid list in the log line buffer.

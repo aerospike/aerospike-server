@@ -243,7 +243,8 @@ ring_buffer_log_event(as_skew_ring_buffer* ring_buffer, char* prefix,
 {
 	int max_per_line = 25;
 	int max_bytes_per_value = 21; // Include the space as well
-	char log_buffer[(max_per_line * max_bytes_per_value) + 1]; // For the NULL terminator.
+	define_deferred_array(log_buffer, char,
+			(max_per_line * max_bytes_per_value) + 1);
 	char* value_buffer_start = log_buffer;
 
 	if (prefix) {
@@ -506,7 +507,7 @@ skew_monitor_outliers_from_skew_summary(cf_vector* outliers,
 	// Use Median Absolute Deviation(MAD) to detect outliers, in general the
 	// delta distribution would be symmetric and very close to the median.
 	int num_nodes = udata->num_nodes;
-	float deltas[num_nodes];
+	define_deferred_array(deltas, float, num_nodes);
 	for (int i = 0; i < num_nodes; i++) {
 		deltas[i] = udata->skew_summary[i].delta;
 	}
@@ -516,7 +517,7 @@ skew_monitor_outliers_from_skew_summary(cf_vector* outliers,
 	float median = skew_monitor_median(deltas, num_nodes);
 
 	// Compute absolute deviation from median.
-	float abs_dev[num_nodes];
+	define_deferred_array(abs_dev, float, num_nodes);
 	for (int i = 0; i < num_nodes; i++) {
 		abs_dev[i] = fabsf(deltas[i] - median);
 	}

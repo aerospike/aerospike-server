@@ -3987,7 +3987,7 @@ list_append(cdt_op_mem* com, const cdt_payload* uval, bool payload_is_list,
 		return -AS_ERR_PARAMETER;
 	}
 
-	define_deferred_memory(val_mem, rewrite_sz, CDT_MAX_STACK_OBJ_SZ);
+	define_deferred_memory(val_mem, rewrite_sz);
 
 	rewrite_sz = cdt_untrusted_rewrite(val_mem, uval->ptr, uval->sz, false);
 
@@ -4031,7 +4031,7 @@ list_insert(cdt_op_mem* com, int64_t index, const cdt_payload* uval,
 		return -AS_ERR_PARAMETER;
 	}
 
-	define_deferred_memory(val_mem, rewrite_sz, CDT_MAX_STACK_OBJ_SZ);
+	define_deferred_memory(val_mem, rewrite_sz);
 	rewrite_sz = cdt_untrusted_rewrite(val_mem, uval->ptr, uval->sz, false);
 
 	const cdt_payload val = { val_mem, rewrite_sz };
@@ -4071,7 +4071,7 @@ list_set(cdt_op_mem* com, int64_t index, const cdt_payload* uval,
 		return -AS_ERR_PARAMETER;
 	}
 
-	define_deferred_memory(val_mem, rewrite_sz, CDT_MAX_STACK_OBJ_SZ);
+	define_deferred_memory(val_mem, rewrite_sz);
 
 	rewrite_sz = cdt_untrusted_rewrite(val_mem, uval->ptr, uval->sz, false);
 

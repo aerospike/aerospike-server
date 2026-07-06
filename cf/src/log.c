@@ -841,7 +841,7 @@ static void
 log_write(cf_log_context context, cf_log_level level, const char* file_name,
 		int line, const char* format, va_list argp)
 {
-	int fds[g_n_sinks + 1]; // +1 for g_n_sinks == 0 && ! g_sinks_activated
+	int fds[MAX_SINKS + 1];
 	uint32_t n_fds = get_log_fds(context, level, fds);
 
 	if (n_fds == 0) {
@@ -1100,7 +1100,8 @@ syslog_write_sink(cf_log_sink* sink, int sys_level, const char* time,
 {
 	int priority = sink->facility | sys_level;
 	size_t tag_len = strlen(sink->tag);
-	char dgram[1 + 11 + 1 + SYSLOG_TIME_LEN + 1 + tag_len + 2 + buf_sz + 1];
+	define_deferred_array(dgram, char,
+			1 + 11 + 1 + SYSLOG_TIME_LEN + 1 + tag_len + 2 + buf_sz + 1);
 
 	size_t pos = (size_t)sprintf(dgram, "<%d>", priority);
 

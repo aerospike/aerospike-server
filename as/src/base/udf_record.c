@@ -711,7 +711,7 @@ udf_record_bin_names(const as_rec* rec, as_rec_bin_names_callback cb, void* udat
 	uint16_t n_bins = urecord->rd->n_bins;
 	// Note - for now, we think we can't see unused bins (within n_bins) here.
 
-	char bin_names[n_bins * AS_BIN_NAME_MAX_SZ];
+	define_deferred_array(bin_names, char, n_bins* AS_BIN_NAME_MAX_SZ);
 	uint16_t n_live_bins = 0;
 
 	for (uint16_t i = 0; i < n_bins; i++) {
