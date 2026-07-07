@@ -1,0 +1,67 @@
+# Labels open PRs that no longer merge cleanly into their base branch.
+# The action re-evaluates ALL open PRs on every run, so the `push` trigger is
+# what catches "merging PR A silently conflicted PR B": each merge to master
+# re-checks the rest of the queue. `pull_request_target` adds/removes the label
+# promptly as individual PRs are opened or updated. The `schedule` sweep is a
+# backstop in case a `push` run is skipped, and also relabels PRs whose
+# mergeability GitHub recomputed after the fact.
+#
+# The `dirtyLabel` ("has conflicts") must already exist in the repo's labels;
+# the action applies it but does not create it. `removeOnDirtyLabel`
+# ("reviewer approved") is an existing repo label.
+name: label merge conflicts
+
+on:
+  push:
+    branches: [master]
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  schedule:
+    # Hourly backstop sweep of all open PRs (UTC).
+    - cron: "17 * * * *"
+
+# `pull-requests: write` covers both labeling and PR comments (labels/comments
+# go through the issues API, which pull-requests: write grants for PRs).
+permissions:
+  contents: read
+  pull-requests: write
+
+# Serialize ALL runs (push, schedule, and pull_request_target) under one
+# fixed group so no two scans overlap. Each run is a full, idempotent scan of
+# every open PR, and the "already notified" guard is the dirtyLabel itself --
+# so two concurrent scans could each see a PR as newly conflicted and both
+# post commentOnDirty (duplicate notifications). A single fixed group name
+# (not keyed on github.ref, which would split push/schedule from per-PR runs)
+# plus cancel-in-progress: false serializes them: the running scan finishes,
+# the next queues, and by the time it runs the label is already applied, so
+# no duplicate comment is posted.
+concurrency:
+  group: label-merge-conflicts
+  cancel-in-progress: false
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Label PRs with merge conflicts
+        uses: eps1lon/actions-label-merge-conflict@0273be72a0bbd58fcd71d0d6c02c209b50d1e5e1 # v3.1.0
+        with:
+          dirtyLabel: has conflicts
+          # Removed the moment a PR goes conflicted, so a stale "reviewer
+          # approved" can't sit on a PR that no longer merges cleanly.
+          removeOnDirtyLabel: reviewer approved
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          commentOnDirty: >-
+            This PR now has merge conflicts with the base branch (likely
+            because another PR was merged). Please resolve them by merging or
+            rebasing on the latest master.
+          commentOnClean: Merge conflicts resolved -- thanks!
+          # retryMax / retryAfter left at the action defaults (5 x 120s):
+          # GitHub computes mergeability asynchronously and can report
+          # `mergeable: null` for a while on a large repo, so the longer
+          # default window avoids giving up before the state is known.
