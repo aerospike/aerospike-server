@@ -12,14 +12,14 @@ search_dir="${1:?Usage: extract_version.bash <search-dir>}"
 
 deb=$(find "$search_dir" -name '*.deb' -print -quit)
 if [[ -n "$deb" ]]; then
-    dpkg-deb -f "$deb" Version
-    exit 0
+	dpkg-deb -f "$deb" Version
+	exit 0
 fi
 
 rpm=$(find "$search_dir" -name '*.rpm' -print -quit)
 if [[ -n "$rpm" ]]; then
-    rpm -qp --queryformat '%{VERSION}-%{RELEASE}' "$rpm"
-    exit 0
+	rpm -qp --queryformat '%{VERSION}-%{RELEASE}' "$rpm"
+	exit 0
 fi
 
 echo "ERROR: No .deb or .rpm found in '$search_dir'." >&2

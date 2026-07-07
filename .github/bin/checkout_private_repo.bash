@@ -22,10 +22,10 @@ cd "${dest}"
 git fetch --prune origin +refs/heads/*:refs/remotes/origin/*
 
 if [[ -n "${ref}" ]] && git show-ref --verify --quiet "refs/remotes/origin/${ref}"; then
-    git checkout "${ref}"
-    echo "Checked out branch '${ref}'"
+	git checkout "${ref}"
+	echo "Checked out branch '${ref}'"
 else
-    echo "Using default branch 'master'"
+	echo "Using default branch 'master'"
 fi
 
 git submodule sync --recursive

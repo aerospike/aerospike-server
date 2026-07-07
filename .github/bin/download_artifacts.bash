@@ -23,38 +23,38 @@ completed=$((completed + 0))
 
 # Determine expected artifact count
 if [ "$GH_EVENT" = "workflow_dispatch" ]; then
-    expected=$completed
-    if [ "$expected" -le 0 ]; then
-        echo "ERROR: No artifacts found for version ${VERSION}" >&2
-        exit 1
-    fi
+	expected=$completed
+	if [ "$expected" -le 0 ]; then
+		echo "ERROR: No artifacts found for version ${VERSION}" >&2
+		exit 1
+	fi
 else
-    expected=${COUNT:-0}
+	expected=${COUNT:-0}
 fi
 if [ "$expected" -le 0 ]; then
-    echo "ERROR: Expected artifact count is $expected" >&2
-    exit 1
+	echo "ERROR: Expected artifact count is $expected" >&2
+	exit 1
 fi
 
 echo "Expecting $expected artifacts"
 echo "Have $completed / $expected artifacts on S3"
 
 if [ "$completed" -lt "$expected" ]; then
-    echo "Completed $completed / $expected artifacts — failing to retry"
-    exit 1
+	echo "Completed $completed / $expected artifacts — failing to retry"
+	exit 1
 fi
 
 echo "Downloading..."
 cat /tmp/artifact-list.txt | parallel --will-cite -j 0 \
-    "aws s3 cp --no-progress 's3://${S3_BUCKET}/{}' build-artifacts/"
+	"aws s3 cp --no-progress 's3://${S3_BUCKET}/{}' build-artifacts/"
 
 # Count downloaded files
 actual=$(find build-artifacts -type f | grep -E 'deb$|rpm$' | wc -l)
 echo "Downloaded $actual / $expected artifacts"
 
 if [ "$actual" -ne "$expected" ]; then
-    echo "Not all artifacts downloaded — failing this attempt"
-    exit 1
+	echo "Not all artifacts downloaded — failing this attempt"
+	exit 1
 fi
 
 echo "All artifacts downloaded successfully 🎉"
