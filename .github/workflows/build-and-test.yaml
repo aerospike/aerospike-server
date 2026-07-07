@@ -125,11 +125,14 @@ jobs:
           set -euo pipefail
           pkg_dir="$GITHUB_WORKSPACE/aerospike-server/pkg/packages"
 
-          if [[ "${{ matrix.distro }}" == ubuntu* ]]; then
-            sudo dpkg -i "$(find "$pkg_dir" -name '*.deb' -print -quit)"
-          else
-            dnf -y install "$(find "$pkg_dir" -name '*.rpm' -print -quit)"
-          fi
+          case "${{ matrix.distro }}" in
+            ubuntu*)
+              sudo dpkg -i "$(find "$pkg_dir" -name '*.deb' -print -quit)"
+              ;;
+            *)
+              dnf -y install "$(find "$pkg_dir" -name '*.rpm' -print -quit)"
+              ;;
+          esac
 
       - name: Set the feature key env var
         run: |
