@@ -31,8 +31,10 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_hash_math.h"
+#include "citrusleaf/cf_queue.h"
 
 #include "cf_mutex.h"
 #include "log.h"
@@ -197,6 +199,18 @@ struct drv_ssd_s;
 struct drv_mem_s;
 struct drv_pmem_s;
 
+// Typed back-pointer to the per-engine device struct that owns a write buffer.
+// A union of the concrete engine types (not void*) so engine code reads a typed
+// member instead of casting; also passed to drv_wb_get so shared code stays
+// void*-free. All arms are pointers, so it occupies one pointer. NOTE: no
+// discriminant -- callers must use the arm matching the owning engine (via
+// mwb_dev/swb_dev/pwb_dev).
+typedef union drv_dev_u {
+	struct drv_ssd_s* ssd;
+	struct drv_mem_s* mem;
+	struct drv_pmem_s* pmem;
+} drv_dev;
+
 // Common base for ssd_write_buf / mem_write_block / pmem_write_block. Layout
 // is intentionally a strict prefix of every engine's write-buffer struct so
 // shared code can cast safely. Engine-specific fields (e.g., SSD's "buf",
@@ -208,16 +222,9 @@ typedef struct drv_write_buffer_s {
 	uint32_t n_vacated;
 	uint32_t vacated_capacity;
 	vacated_wblock* vacated_wblocks;
-	// Back-pointer to the per-engine device struct that owns this write buffer.
-	// A union of the concrete engine types (not void*) so engine code reads a
-	// typed member instead of casting. All arms are pointers, so the struct
-	// layout is unchanged (one pointer). NOTE: no discriminant -- callers must
-	// still use the arm matching the owning engine (via mwb_dev/swb_dev/pwb_dev).
-	union {
-		struct drv_ssd_s* ssd;
-		struct drv_mem_s* mem;
-		struct drv_pmem_s* pmem;
-	} dev;
+	// Typed back-pointer to the owning device (see drv_dev above). One pointer,
+	// so the struct layout is unchanged.
+	drv_dev dev;
 	uint32_t wblock_id;
 	uint32_t pos;
 } drv_write_buffer;
@@ -225,10 +232,10 @@ typedef struct drv_write_buffer_s {
 // Common base for ssd_wblock_state / mem_wblock_state / pmem_wblock_state.
 // All three engines have identical fields here, so this is a clean unification
 // (a typedef in each engine's header points the engine name at this base; no
-// extension struct is needed for wblock state in Phase 0).
+// extension struct is needed for wblock state).
 typedef struct drv_wblock_state_s {
 	uint32_t inuse_sz; // number of bytes currently used in the wblock
-	cf_mutex LOCK; // transactions, write_worker, and defrag all are interested in wblock_state
+	cf_mutex lock; // transactions, write_worker, and defrag all are interested in wblock_state
 	drv_write_buffer* wb; // pending writes for the wblock, also treated as a cache for reads
 	uint8_t state;
 	bool short_lived; // relevant for enterprise edition only
@@ -273,6 +280,201 @@ uint32_t drv_max_record_size(const struct as_namespace_s* ns,
 
 bool pread_all(int fd, void* buf, size_t size, off_t offset);
 bool pwrite_all(int fd, const void* buf, size_t size, off_t offset);
+
+//
+// Wblock queue helpers - shared across all storage engines. Each engine passes
+// its own queue and wblock-state array, so the algorithm lives in one place.
+// Helpers that log also take the engine's facility, so log routing (AS_DRV_SSD /
+// AS_DRV_MEM / AS_DRV_PMEM) is preserved.
+//
+
+// The per-device wblock allocation state that travels together through the
+// shared write-buffer helpers. Bundled so callers pass one pointer instead of
+// the same four arguments repeated. pristine_wblock_id is a pointer because
+// drv_wb_get advances it via compare-and-swap; the read-only helpers only
+// dereference it.
+// Allocation state only - the fields drv_wb_get reads to hand out a wblock.
+// defrag_wblock_q is deliberately excluded: it is a routing/output queue that
+// write-done pushes to, never a source for allocation.
+typedef struct drv_wblock_pool_s {
+	cf_queue* free_wblock_q;
+	uint32_t* pristine_wblock_id;
+	uint32_t n_wblocks;
+	drv_wblock_state* wblock_state;
+} drv_wblock_pool;
+
+// Build a drv_wblock_pool view from any engine's device struct. One definition
+// works for drv_mem / drv_ssd / drv_pmem alike because all three name these
+// fields identically - it can't be an ordinary function since the device structs
+// are distinct types. Statement-expression + __typeof__ so _dev is evaluated
+// exactly once (safe for DRV_WBLOCK_POOL(next_dev()) etc.).
+#define DRV_WBLOCK_POOL(_dev)                                                  \
+	__extension__({                                                            \
+		__typeof__(_dev) _d = (_dev);                                          \
+		(drv_wblock_pool){                                                     \
+			.free_wblock_q = _d->free_wblock_q,                                \
+			.pristine_wblock_id = &_d->pristine_wblock_id,                     \
+			.n_wblocks = _d->n_wblocks,                                        \
+			.wblock_state = _d->wblock_state,                                  \
+		};                                                                     \
+	})
+
+// Push a wblock onto its device's free queue. Sets the wblock's state to
+// FREE first; safe to call before the queue exists (cold start).
+// static inline (in the header) so it collapses into per-record callers (e.g.
+// PMEM block_free) under -O3 without LTO.
+static inline void
+drv_push_wblock_to_free_q(cf_log_context log_ctx, cf_queue* free_wblock_q,
+		drv_wblock_state* wblock_states, uint32_t n_wblocks, uint32_t wblock_id)
+{
+	// Can get here before queue created, e.g. cold start replacing records.
+	if (free_wblock_q == NULL) {
+		return;
+	}
+
+	cf_assert(wblock_id < n_wblocks, log_ctx,
+			"pushing bad wblock_id %d to free_wblock_q", (int32_t)wblock_id);
+
+	wblock_states[wblock_id].state = WBLOCK_STATE_FREE;
+	cf_queue_push(free_wblock_q, &wblock_id);
+}
+
+// Push a wblock onto the defrag queue and bump the per-device defrag-read
+// counter. No-op until the queue exists.
+// static inline (in the header) - see drv_push_wblock_to_free_q above.
+static inline void
+drv_push_wblock_to_defrag_q(cf_queue* defrag_wblock_q,
+		drv_wblock_state* wblock_states, uint32_t wblock_id,
+		uint64_t* n_defrag_wblock_reads)
+{
+	// null until devices are loaded at startup.
+	if (defrag_wblock_q == NULL) {
+		return;
+	}
+
+	wblock_states[wblock_id].state = WBLOCK_STATE_DEFRAG;
+	cf_queue_push(defrag_wblock_q, &wblock_id);
+	as_incr_uint64(n_defrag_wblock_reads);
+}
+
+// Push a filled wblock onto its device's write/shadow queue to be flushed,
+// bumping the namespace's pending-flush counter. write_q is the engine's
+// concrete queue (swb_write_q / pwb_write_q / mwb_shadow_q).
+void drv_push_wblock_to_write_q(struct as_namespace_s* ns, cf_queue* write_q,
+		const drv_write_buffer* wb);
+
+// Atomically claim the next wblock id from the pristine region. Returns
+// false when the device is out of pristine wblocks.
+bool drv_pop_pristine_wblock_id(uint32_t* pristine_wblock_id,
+		uint32_t n_wblocks, uint32_t* wblock_id);
+
+// Number of wblocks still in the pristine (never-written) region.
+uint32_t drv_num_pristine_wblocks(uint32_t n_wblocks,
+		uint32_t pristine_wblock_id);
+
+// Total free wblocks: free queue + pristine region.
+uint32_t drv_num_free_wblocks(const drv_wblock_pool* pool);
+
+// Available contiguous bytes. Returns full file_size during cold start so
+// eviction-threshold checks are effectively disabled then.
+uint64_t drv_available_size(const drv_wblock_pool* pool, uint64_t file_size);
+
+// Take the earlier of (now + job_interval) and (next). Used by per-engine
+// maintenance loops to schedule the next wakeup.
+uint64_t drv_next_time(uint64_t now, uint64_t job_interval, uint64_t next);
+
+//
+// Wblock summary dump - shared across all storage engines.
+//
+// Each engine's "dump_wb_summary" walks per-device wblock_state arrays and
+// prints a one-line summary per device plus a namespace-level histogram.
+// The walks are byte-identical except for log facility and the per-device
+// array shape; the engine builds a tiny drv_dev_view array on the stack
+// and hands it to drv_dump_wb_summary.
+//
+
+typedef struct drv_dev_view_s {
+	const char* name;
+	uint32_t first_wblock_id;
+	uint32_t n_wblocks;
+	uint32_t pristine_wblock_id;
+	const drv_wblock_state* wblock_state;
+} drv_dev_view;
+
+void drv_dump_wb_summary(cf_log_context log_ctx, const struct as_namespace_s* ns,
+		bool verbose, const drv_dev_view* devs, uint32_t n_devs);
+
+//
+// Write-buffer helpers - shared across storage engines.
+//
+
+// Initial size & growth step of wb->vacated_wblocks - batches the realloc.
+#define DRV_WB_VACATED_CAPACITY_STEP 128
+
+bool drv_wb_add_unique_vacated_wblock(drv_write_buffer* wb,
+		uint32_t src_file_id, uint32_t src_wblock_id);
+
+typedef void (*drv_wb_release_vacated_one_fn)(void* udata, uint32_t file_id,
+		uint32_t wblock_id);
+
+void drv_wb_release_all_vacated_wblocks(drv_write_buffer* wb,
+		drv_wb_release_vacated_one_fn release_one, void* udata);
+
+// static inline (in the header) so it collapses into per-record callers (PMEM
+// block_free / pwb_release) under -O3 without LTO. inuse_sz is passed in rather
+// than re-loaded so per-record callers reuse the value they already hold.
+static inline void
+drv_wb_wblock_write_done(cf_log_context log_ctx, uint32_t wblock_id,
+		uint32_t inuse_sz, cf_queue* free_wblock_q, cf_queue* defrag_wblock_q,
+		drv_wblock_state* wblock_states, uint32_t n_wblocks,
+		uint64_t* n_defrag_wblock_reads, uint32_t defrag_lwm_size,
+		uint64_t* n_wblock_direct_frees)
+{
+	// Derived here rather than passed in so it can't diverge from the element
+	// the queue helpers re-index as wblock_states[wblock_id].
+	drv_wblock_state* ws = &wblock_states[wblock_id];
+
+	if (inuse_sz == 0) {
+		ws->short_lived = false;
+
+		as_incr_uint64(n_wblock_direct_frees);
+		drv_push_wblock_to_free_q(log_ctx, free_wblock_q, wblock_states,
+				n_wblocks, wblock_id);
+	}
+	else if (inuse_sz < defrag_lwm_size) {
+		if (! ws->short_lived) {
+			drv_push_wblock_to_defrag_q(defrag_wblock_q, wblock_states,
+					wblock_id, n_defrag_wblock_reads);
+		}
+		else {
+			ws->state = WBLOCK_STATE_USED;
+		}
+	}
+	else {
+		ws->state = WBLOCK_STATE_USED;
+	}
+}
+
+// Per-engine callbacks for drv_wb_get. Each takes the engine's device via the
+// typed drv_dev union (caller sets the arm matching its engine). When each fires:
+//   create_fn     - REQUIRED. Allocates AND initializes a fresh write buffer for
+//                   this engine. Runs only when the free queue is empty (a reused
+//                   buffer was already reset on release), so it must leave the wb
+//                   in the same state a freshly-acquired buffer expects.
+//   post_claim_fn - REQUIRED. Runs every acquisition, after a wblock id is
+//                   claimed; maps/positions the buffer over that wblock (MEM/PMEM)
+//                   and/or takes the engine's reference on it (SSD). Asserted
+//                   non-NULL: every engine needs it, and omitting it corrupts
+//                   silently (SSD use-after-free / MEM/PMEM stale base_addr)
+//                   rather than failing at acquisition time.
+typedef drv_write_buffer* (*drv_wb_create_fn)(drv_dev dev);
+typedef void (*drv_wb_post_claim_fn)(drv_write_buffer* wb, drv_dev dev,
+		uint32_t wblock_id);
+
+drv_write_buffer* drv_wb_get(cf_log_context log_ctx, const char* dev_name,
+		bool use_reserve, uint32_t reserve_threshold, cf_queue* wb_free_q,
+		const drv_wblock_pool* pool, drv_dev dev, drv_wb_create_fn create_fn,
+		drv_wb_post_claim_fn post_claim_fn);
 
 //
 // Conversions between offsets and rblocks.
