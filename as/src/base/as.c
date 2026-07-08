@@ -93,8 +93,28 @@
 #define AS_SCHEMA_HASH "unknown"
 #endif
 
+// Experimental features that can be enabled by name via the
+// --enabled-experimental-features command-line option. Each bit must be
+// nonzero: parse_experimental_features() uses 0 as its "invalid list" sentinel.
+#define AS_EXP_FEAT_YAML_CONFIG (1u << 0)
+
+// getopt_long value for --enabled-experimental-features. It has no short form,
+// so use a sentinel above the printable-char range instead of a letter.
+#define OPT_ENABLED_EXP_FEATS 1000
+
+// Known experimental features, keyed by name. This is the source the startup
+// error's "valid features" list is generated from, so adding a feature here is
+// enough to keep that diagnostic correct.
+static const struct {
+	const char* name;
+	uint32_t flag;
+} EXP_FEATS[] = {
+	{ "yaml-config", AS_EXP_FEAT_YAML_CONFIG },
+};
+
 // Command line options for the Aerospike server.
-static const struct option CMD_OPTS[] = { { "help", no_argument, NULL, 'h' },
+static const struct option CMD_OPTS[] = {
+	{ "help", no_argument, NULL, 'h' },
 	{ "version", no_argument, NULL, 'v' },
 	{ "config-file", required_argument, NULL, 'f' },
 	{ "schema-file", required_argument, NULL, 's' },
@@ -103,7 +123,10 @@ static const struct option CMD_OPTS[] = { { "help", no_argument, NULL, 'h' },
 	{ "early-verbose", no_argument, NULL, 'e' },
 	{ "cold-start", no_argument, NULL, 'c' },
 	{ "instance", required_argument, NULL, 'n' },
-	{ "experimental", no_argument, NULL, 'x' }, { NULL, 0, NULL, 0 } };
+	{ "enabled-experimental-features", required_argument, NULL,
+			OPT_ENABLED_EXP_FEATS },
+	{ NULL, 0, NULL, 0 },
+};
 
 static const char HELP[] =
 		"\n"
@@ -155,9 +178,11 @@ static const char HELP[] =
 		"machine (not recommended), each instance must be uniquely designated via this\n"
 		"option.\n"
 		"\n"
-		"--experimental"
+		"--enabled-experimental-features <feature>[,<feature>...]"
 		"\n"
-		"Enable experimental features.\n"
+		"Enable specific experimental features by name, as a comma-separated list\n"
+		"(e.g. yaml-config). An unknown feature name causes startup to fail and the\n"
+		"valid feature names to be printed.\n"
 		"\n";
 
 static const char USAGE[] = "\n"
@@ -173,7 +198,7 @@ static const char USAGE[] = "\n"
 							"[--early-verbose] "
 							"[--cold-start] "
 							"[--instance <0-15>] "
-							"[--experimental] \n";
+							"[--enabled-experimental-features <feature,...>] \n";
 
 static const char DEFAULT_CONFIG_FILE[] = "/etc/aerospike/aerospike.conf";
 static const char DEFAULT_SCHEMA_FILE[] =
@@ -198,6 +223,8 @@ bool g_shutdown_started = false;
 // signal.c doesn't have header file.
 extern void as_signal_setup(void);
 
+static uint32_t parse_experimental_features(const char* arg);
+static void experimental_features_str(char* buf, size_t cap);
 static void write_pidfile(char* pidfile);
 static void validate_directory(const char* path, const char* log_tag);
 static void validate_smd_directory(void);
@@ -221,7 +248,7 @@ as_run(int argc, char** argv)
 	bool early_verbose = false;
 	bool cold_start_cmd = false;
 	uint32_t instance = 0;
-	bool experimental = false;
+	uint32_t experimental_features = 0;
 
 	// Parse command line options.
 	while ((opt = getopt_long(argc, argv, "", CMD_OPTS, &opt_i)) != -1) {
@@ -266,9 +293,23 @@ as_run(int argc, char** argv)
 		case 'n':
 			instance = (uint32_t)strtol(optarg, NULL, 0);
 			break;
-		case 'x':
-			experimental = true;
+		case OPT_ENABLED_EXP_FEATS: {
+			// A valid list always sets at least one bit, so 0 means failure
+			// (unknown feature name or effectively empty list).
+			uint32_t features = parse_experimental_features(optarg);
+			if (features == 0) {
+				char valid[256];
+				experimental_features_str(valid, sizeof(valid));
+				// fprintf() since cf_log isn't initialized yet.
+				fprintf(stderr,
+						"invalid --enabled-experimental-features value; valid "
+						"features: %s\n%s\n",
+						valid, USAGE);
+				return 1;
+			}
+			experimental_features |= features;
 			break;
+		}
 		default:
 			// fprintf() since we don't want cf_log's prefix.
 			fprintf(stderr, "%s\n", USAGE);
@@ -290,10 +331,10 @@ as_run(int argc, char** argv)
 	// is a shortcut pointer to the global runtime configuration instance.)
 	as_config* c = NULL;
 
-	if (experimental) {
+	if ((experimental_features & AS_EXP_FEAT_YAML_CONFIG) != 0) {
 		// Verify that the schema file hasn't been modified since installation.
 		verify_schema_file(schema_file);
-		// assume the config is in yaml format in experimental mode
+		// The config is assumed to be in yaml format when yaml-config is enabled.
 		c = as_config_init_yaml(config_file, schema_file);
 	}
 	else {
@@ -520,6 +561,82 @@ as_run(int argc, char** argv)
 //==========================================================
 // Local helpers.
 //
+
+// Format the comma-separated list of all known experimental feature names into
+// buf (e.g. "yaml-config"), so the startup-error diagnostic is built from the
+// single EXP_FEATS source rather than a duplicated literal.
+static void
+experimental_features_str(char* buf, size_t cap)
+{
+	if (cap != 0) {
+		buf[0] = '\0'; // always a valid string, even if the table is empty
+	}
+
+	size_t off = 0;
+
+	for (size_t i = 0; i < sizeof(EXP_FEATS) / sizeof(EXP_FEATS[0]); i++) {
+		int n = snprintf(buf + off, cap - off, "%s%s", i == 0 ? "" : ", ",
+				EXP_FEATS[i].name);
+
+		if (n < 0 || (size_t)n >= cap - off) {
+			break; // truncated - won't happen for the small known set
+		}
+
+		off += (size_t)n;
+	}
+}
+
+// Parse a comma-separated list of experimental feature names into a bit mask.
+// Returns 0 if any token is not a known feature or if the list is effectively
+// empty; a valid list always sets at least one bit, so the caller treats 0 as a
+// startup failure.
+static uint32_t
+parse_experimental_features(const char* arg)
+{
+	uint32_t features = 0;
+	char* dup = cf_strdup(arg); // strtok_r mutates - don't touch optarg/argv
+	char* save = NULL;
+
+	for (char* tok = strtok_r(dup, ",", &save); tok != NULL;
+			tok = strtok_r(NULL, ",", &save)) {
+		// Trim leading & trailing spaces/tabs so "yaml-config, x" works.
+		while (*tok == ' ' || *tok == '\t') {
+			tok++;
+		}
+
+		char* end = tok + strlen(tok);
+
+		while (end > tok && (end[-1] == ' ' || end[-1] == '\t')) {
+			end--;
+		}
+
+		*end = '\0';
+
+		if (*tok == '\0') {
+			continue; // skip empty tokens, e.g. from a trailing comma
+		}
+
+		uint32_t flag = 0;
+
+		for (size_t i = 0; i < sizeof(EXP_FEATS) / sizeof(EXP_FEATS[0]); i++) {
+			if (strcmp(tok, EXP_FEATS[i].name) == 0) {
+				flag = EXP_FEATS[i].flag;
+				break;
+			}
+		}
+
+		if (flag == 0) {
+			cf_free(dup); // unknown feature name
+			return 0;
+		}
+
+		features |= flag;
+	}
+
+	cf_free(dup);
+
+	return features; // 0 here means an empty list - caller treats as failure
+}
 
 static void
 write_pidfile(char* pidfile)

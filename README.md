@@ -143,7 +143,7 @@ validation against a schema file.
 
   To use YAML configuration:
 
-  1. Enable the feature with the `--experimental` flag when starting the server
+  1. Enable the feature with `--enabled-experimental-features yaml-config` when starting the server
   2. Optionally specify a custom schema file with `--schema-file <file>` (default location:
      `/opt/aerospike/schema/aerospike_config_schema.json`)
   3. Supply a YAML based configuration file that adheres to the schema.

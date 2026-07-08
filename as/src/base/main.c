@@ -33,5 +33,8 @@ extern int as_run(int argc, char** argv);
 int
 main(int argc, char** argv)
 {
-	as_run(argc, argv);
+	// Propagate as_run()'s exit status: it returns only on the early
+	// command-line paths (0 for --help/--version, non-zero for a usage error);
+	// a normal server run terminates via _exit() and never returns here.
+	return as_run(argc, argv);
 }
