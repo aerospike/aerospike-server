@@ -36,7 +36,7 @@ jobs:
       RELEASE: ${{ steps.set_env.outputs.release }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: audit
 
@@ -102,7 +102,7 @@ jobs:
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: audit
 
@@ -121,7 +121,7 @@ jobs:
           sleep 1800
 
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37  # v6.1.0
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b  # v6.2.0
         with:
           role-to-assume: ${{ env.AWS_ROLE }}
           role-session-name: aerospike-download-artifacts
@@ -170,7 +170,7 @@ jobs:
 
   sign-artifacts:
     needs: [setup, download-artifacts]
-    uses: aerospike/shared-workflows/.github/workflows/reusable_sign-artifacts.yaml@v3.4.1
+    uses: aerospike/shared-workflows/.github/workflows/reusable_sign-artifacts.yaml@v3.6.0
     with:
       gh-artifact-name: signed-artifacts-${{ needs.setup.outputs.VERSION }}
       gh-unsigned-artifacts: unsigned-artifacts-${{ needs.setup.outputs.VERSION }}
@@ -182,7 +182,7 @@ jobs:
 
   upload-artifacts-to-jfrog:
     needs: [setup, download-artifacts, sign-artifacts]
-    uses: aerospike/shared-workflows/.github/workflows/reusable_deploy-artifacts.yaml@v3.4.1
+    uses: aerospike/shared-workflows/.github/workflows/reusable_deploy-artifacts.yaml@v3.6.0
     with:
       jf-project: database
       jf-build-name: "aerospike-server"
@@ -203,7 +203,7 @@ jobs:
       attestations: write
     needs: [setup, download-artifacts, sign-artifacts, upload-artifacts-to-jfrog, docker-deploy]
     if: always() && needs.upload-artifacts-to-jfrog.result == 'success' && needs.docker-deploy.result == 'success'
-    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.4.1
+    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.6.0
     with:
       jf-project: "database"
       jf-build-names: "aerospike-server:${{ needs.setup.outputs.VERSION }}"
@@ -224,7 +224,7 @@ jobs:
       snyk_summary: ${{ steps.snyk_scan.outputs.summary }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40  # v2.19.0
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
         with:
           egress-policy: audit
 
@@ -326,7 +326,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40  # v2.19.0
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
         with:
           egress-policy: audit
 
@@ -378,7 +378,7 @@ jobs:
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: audit
 
@@ -486,7 +486,7 @@ jobs:
 
       - name: Send Slack message to QE
         continue-on-error: true
-        uses: step-security/slack-github-action@161b08a5bf8cbe9bcdb0ed1386ade4a21fb4c380 # v3.0.1
+        uses: step-security/slack-github-action@16410fbfd088e8034b2d1cda051d29ada4097065 # v3.0.3
         with:
           method: chat.postMessage
           token: ${{ secrets.QE_SLACK_BOT_TOKEN }}
@@ -508,7 +508,7 @@ jobs:
 
       - name: Send Slack message to CORE
         continue-on-error: true
-        uses: step-security/slack-github-action@161b08a5bf8cbe9bcdb0ed1386ade4a21fb4c380 # v3.0.1
+        uses: step-security/slack-github-action@16410fbfd088e8034b2d1cda051d29ada4097065 # v3.0.3
         with:
           method: chat.postMessage
           token: ${{ secrets.DB_SLACK_BOT_TOKEN }}

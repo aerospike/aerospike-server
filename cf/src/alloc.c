@@ -24,6 +24,7 @@
 #define _ISOC11_SOURCE
 
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <jemalloc/internal/jemalloc_internal_defs.h>
 #include <jemalloc/jemalloc.h>
@@ -36,6 +37,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <time.h>
@@ -796,6 +798,28 @@ time_to_file(FILE* fh)
 	fprintf(fh, "---------- %s ----------\n", text);
 }
 
+// Open file for appending, refusing to follow a symbolic link in the final
+// path component (O_NOFOLLOW). This ensures the validated, canonicalized path
+// is the one actually written, even if a symlink was swapped in after
+// validation. Returns NULL on failure with errno set (ELOOP for a symlink).
+static FILE*
+open_append_nofollow(const char* file)
+{
+	int fd = open(file, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0644);
+
+	if (fd < 0) {
+		return NULL;
+	}
+
+	FILE* fh = fdopen(fd, "a");
+
+	if (fh == NULL) {
+		close(fd);
+	}
+
+	return fh;
+}
+
 void
 cf_alloc_log_stats(const char* file, const char* opts)
 {
@@ -804,7 +828,7 @@ cf_alloc_log_stats(const char* file, const char* opts)
 		return;
 	}
 
-	FILE* fh = fopen(file, "a");
+	FILE* fh = open_append_nofollow(file);
 
 	if (fh == NULL) {
 		cf_warning(CF_ALLOC, "failed to open allocation stats file %s: %d (%s)",
@@ -820,7 +844,7 @@ cf_alloc_log_stats(const char* file, const char* opts)
 void
 cf_alloc_log_site_infos(const char* file)
 {
-	FILE* fh = fopen(file, "a");
+	FILE* fh = open_append_nofollow(file);
 
 	if (fh == NULL) {
 		cf_warning(CF_ALLOC, "failed to open site info file %s: %d (%s)", file,

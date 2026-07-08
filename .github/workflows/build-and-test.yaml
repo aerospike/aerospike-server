@@ -31,13 +31,13 @@ jobs:
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: audit
 
       - name: Fetch app token
         id: app-token
-        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ vars.APP_CLIENT_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
@@ -125,11 +125,14 @@ jobs:
           set -euo pipefail
           pkg_dir="$GITHUB_WORKSPACE/aerospike-server/pkg/packages"
 
-          if [[ "${{ matrix.distro }}" == ubuntu* ]]; then
-            sudo dpkg -i "$(find "$pkg_dir" -name '*.deb' -print -quit)"
-          else
-            dnf -y install "$(find "$pkg_dir" -name '*.rpm' -print -quit)"
-          fi
+          case "${{ matrix.distro }}" in
+            ubuntu*)
+              sudo dpkg -i "$(find "$pkg_dir" -name '*.deb' -print -quit)"
+              ;;
+            *)
+              dnf -y install "$(find "$pkg_dir" -name '*.rpm' -print -quit)"
+              ;;
+          esac
 
       - name: Set the feature key env var
         run: |

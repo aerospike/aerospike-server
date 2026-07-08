@@ -596,6 +596,7 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 	if (! as_proto_wrapped_is_valid(proto, msgp_sz)) {
 		cf_warning(AS_PROXY, "bad proto: version %u, type %u, sz %lu [%lu]",
 				proto->version, proto->type, (uint64_t)proto->sz, msgp_sz);
+		cf_free(msgp);
 		error_response(src, tid, AS_ERR_UNKNOWN);
 		return;
 	}
@@ -608,6 +609,7 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 	tr.origin = FROM_PROXY;
 	tr.from.proxy_orig = cf_malloc(sizeof(proxy_origin));
 	tr.from.proxy_orig->node = src;
+	tr.from.proxy_orig->username[0] = '\0'; // proxy msg may omit username
 	tr.from_data.proxy_tid = tid;
 
 	char* username = NULL;
@@ -618,6 +620,7 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 		if (ulen >= sizeof(tr.from.proxy_orig->username)) {
 			cf_warning(AS_PROXY, "proxy username too big");
 			proxy_origin_destroy(tr.from.proxy_orig);
+			cf_free(msgp);
 			error_response(src, tid, AS_ERR_UNKNOWN);
 			return;
 		}
@@ -632,6 +635,7 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 	if (! as_transaction_prepare(&tr, false)) {
 		cf_warning(AS_PROXY, "bad proxy msg");
 		proxy_origin_destroy(tr.from.proxy_orig);
+		cf_free(msgp);
 		error_response(src, tid, AS_ERR_UNKNOWN);
 		return;
 	}

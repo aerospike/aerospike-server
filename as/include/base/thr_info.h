@@ -120,3 +120,7 @@ void sys_mem_info(uint64_t* free_mem_kbytes, uint32_t* free_mem_pct,
 
 // Deprecation warnings:
 void as_info_warn_deprecated(const char* msg);
+
+// Exposed for unit testing:
+bool jem_stats_resolve_file_path(cf_dyn_buf* db, const char* file_str,
+		char* file_path, size_t file_path_sz);

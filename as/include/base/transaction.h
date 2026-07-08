@@ -569,4 +569,4 @@ void as_transaction_init_iops(as_transaction* tr, struct as_namespace_s* ns,
 void as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code);
 void as_transaction_error(as_transaction* tr, struct as_namespace_s* ns,
 		uint32_t error_code);
-void as_multi_rec_transaction_error(as_transaction* tr, uint32_t error_code);
+void as_query_error(as_transaction* tr, uint32_t error_code);
