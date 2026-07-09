@@ -1,0 +1,291 @@
+# Acceptance criteria (issue_comment → /format):
+# - /format on a PR comment triggers this workflow (job filter + strict first-line check).
+# - Only C/C++ files in the PR diff (merge-base(baseRefOid, headRefOid)..headRefOid, matching GitHub's three-dot PR diff) are formatted.
+# - Fixes are committed and pushed to the PR head branch using an App installation token or optional PAT
+#   (not GITHUB_TOKEN), so pushes trigger subsequent CI including pull_request checks.
+# - Success / skip / fork / merge-conflict paths post a PR comment; unexpected failures post a comment with the run URL.
+# - Fork PRs: comment explaining push is not supported from this repo; exit without error.
+# - No-op: no PR C/C++ changes, or clang-format produces no diff → comment, no empty commit.
+#
+# Repo admin setup:
+# - GitHub App on the org/repo with contents:write + pull-requests:write (for gh pr comment).
+# - vars.APP_CLIENT_ID + secrets.APP_PRIVATE_KEY (same pattern as build-and-test).
+# - Optional secrets.FORMAT_BOT_PAT: if set, used for git/gh instead of the App token (e.g. App cannot
+#   be granted write on this repo). Commits use the PAT owner's GitHub identity.
+# - StepSecurity: PR CI that touches secrets requires a reviewer (not the PR author) to add the
+#   `workflows-approved` label while the workflow file differs from master.
+#
+name: clang-format on /format comment
+
+permissions:
+  contents: read
+  pull-requests: write
+
+on:
+  issue_comment:
+    types: [created]
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: clang-format-comment-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  format:
+    if: >
+      github.repository_owner == 'citrusleaf' &&
+      github.event.issue.pull_request &&
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'MEMBER' ||
+       github.event.comment.author_association == 'COLLABORATOR') &&
+      github.event.comment.user.type != 'Bot' &&
+      startsWith(github.event.comment.body, '/format')
+
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Fetch GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Choose credential (PAT overrides App)
+        id: creds
+        env:
+          FORMAT_BOT_PAT: ${{ secrets.FORMAT_BOT_PAT }}
+          APP_INSTALL_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          delim="TOKFMT_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_${GITHUB_SHA}_END"
+          if [[ -n "${FORMAT_BOT_PAT}" ]]; then
+            echo "source=pat" >> "$GITHUB_OUTPUT"
+            tok="$FORMAT_BOT_PAT"
+          else
+            echo "source=app" >> "$GITHUB_OUTPUT"
+            tok="$APP_INSTALL_TOKEN"
+          fi
+          {
+            echo "token<<${delim}"
+            printf '%s' "$tok"
+            echo "${delim}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Validate /format and load PR metadata
+        id: meta
+        env:
+          GH_TOKEN: ${{ steps.creds.outputs.token }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          first_line="$(printf '%s' "$COMMENT_BODY" | head -n1 | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [[ "$first_line" != '/format' ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body \
+              ":information_source: **/format** skipped: the first line of the comment must be exactly \`/format\` (no extra text on that line)."
+            exit 0
+          fi
+
+          json="$(gh pr view "$PR_NUMBER" --repo "$REPO" \
+            --json headRefName,baseRefName,baseRefOid,headRefOid,mergeableState,isCrossRepository)"
+
+          head_ref="$(jq -r '.headRefName' <<<"$json")"
+          base_ref="$(jq -r '.baseRefName' <<<"$json")"
+          base_oid="$(jq -r '.baseRefOid' <<<"$json")"
+          head_oid="$(jq -r '.headRefOid' <<<"$json")"
+          mergeable_state="$(jq -r '.mergeableState' <<<"$json")"
+          cross="$(jq -r '.isCrossRepository' <<<"$json")"
+
+          if [[ "$cross" == "true" ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body \
+              ":information_source: **/format** cannot push to this pull request because it comes from a **fork**. Automated formatting only runs on branches in \`${REPO}\`. Please run \`clang-format\` locally and push, or open a PR from a branch in this repository."
+            exit 0
+          fi
+
+          for _ in 1 2 3 4 5 6; do
+            if [[ "$mergeable_state" != "UNKNOWN" ]]; then
+              break
+            fi
+            sleep 3
+            json="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json mergeableState)"
+            mergeable_state="$(jq -r '.mergeableState' <<<"$json")"
+          done
+
+          mstate_lc="$(printf '%s' "$mergeable_state" | tr '[:upper:]' '[:lower:]')"
+          if [[ "$mstate_lc" == "unknown" ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body \
+              ":warning: **/format** skipped: GitHub could not confirm the merge state after retries (UNKNOWN). Resolve any conflicts or try again in a moment."
+            exit 0
+          fi
+          if [[ "$mstate_lc" == "dirty" ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body \
+              ":warning: **/format** skipped: this pull request **has merge conflicts** with the base branch (\`${base_ref}\`). Resolve conflicts first, then comment **/format** again."
+            exit 0
+          fi
+
+          if [[ "$base_oid" == "null" || -z "$base_oid" || "$head_oid" == "null" || -z "$head_oid" \
+             || "$head_ref" == "null" || -z "$head_ref" || "$base_ref" == "null" || -z "$base_ref" ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body \
+              ":x: **/format** skipped: could not read PR base/head refs or OIDs from GitHub (try again in a moment)."
+            exit 0
+          fi
+
+          {
+            echo "head_ref=$head_ref"
+            echo "base_ref=$base_ref"
+            echo "base_oid=$base_oid"
+            echo "head_oid=$head_oid"
+            echo "run=true"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout PR head
+        if: steps.meta.outputs.run == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ steps.meta.outputs.head_oid }}
+          fetch-depth: 0
+          token: ${{ steps.creds.outputs.token }}
+          persist-credentials: false
+
+      - name: Install clang-format
+        if: steps.meta.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang-format-19 jq
+
+      - name: Format, commit, push
+        if: steps.meta.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ steps.creds.outputs.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          HEAD_REF: ${{ steps.meta.outputs.head_ref }}
+          BASE_REF: ${{ steps.meta.outputs.base_ref }}
+          BASE_OID: ${{ steps.meta.outputs.base_oid }}
+          HEAD_OID: ${{ steps.meta.outputs.head_oid }}
+          CRED_SOURCE: ${{ steps.creds.outputs.source }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+
+          # Configure git to authenticate with the App/PAT token before any fetch.
+          gh auth setup-git
+
+          is_c_like() {
+            case "$1" in
+              *.c|*.h|*.cc|*.cpp|*.hpp|*.cxx|*.inc) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          # Ensure PR base/head commits exist locally.
+          git fetch origin "$BASE_REF"
+          if ! git rev-parse -q --verify "${BASE_OID}^{commit}" >/dev/null 2>&1; then
+            git fetch --no-tags origin "$BASE_OID"
+          fi
+          if ! git rev-parse -q --verify "${HEAD_OID}^{commit}" >/dev/null 2>&1; then
+            git fetch --no-tags origin "$HEAD_OID"
+          fi
+
+          # Use the merge-base so the file set matches GitHub's three-dot PR diff.
+          merge_base="$(git merge-base "$BASE_OID" "$HEAD_OID")"
+          declare -a files=()
+          while IFS= read -r -d '' path; do
+            if is_c_like "$path"; then
+              files+=("$path")
+            fi
+          done < <(git diff --name-only -z --diff-filter=ACMRT "$merge_base" "$HEAD_OID")
+
+          if [[ ${#files[@]} -eq 0 ]]; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body \
+              ":white_check_mark: **/format**: No changed C/C++ sources in this PR (GitHub PR diff ${merge_base:0:7}..${HEAD_OID:0:7}); nothing to format."
+            exit 0
+          fi
+
+          declare -a to_fmt=()
+          for f in "${files[@]}"; do
+            if [[ -f "$f" ]]; then
+              to_fmt+=("$f")
+            fi
+          done
+
+          if [[ ${#to_fmt[@]} -eq 0 ]]; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body \
+              ":warning: **/format**: PR lists C/C++ paths but none exist as files on disk (rename/delete edge case); nothing applied."
+            exit 0
+          fi
+
+          clang-format-19 -style=file -i -- "${to_fmt[@]}"
+
+          if git diff --quiet -- "${to_fmt[@]}"; then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body \
+              ":white_check_mark: **/format**: Working tree already matches \`clang-format-19 -style=file\`; no commit pushed."
+            exit 0
+          fi
+
+          if [[ "${CRED_SOURCE}" == "app" ]]; then
+            user_id="$(gh api "/users/${APP_SLUG}[bot]" --jq .id)"
+            git config user.name "${APP_SLUG}[bot]"
+            git config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+          else
+            pat_user="$(gh api user)"
+            pat_login="$(jq -r .login <<<"$pat_user")"
+            pat_id="$(jq -r .id <<<"$pat_user")"
+            git config user.name "$pat_login"
+            git config user.email "${pat_id}+${pat_login}@users.noreply.github.com"
+          fi
+
+          git add -- "${to_fmt[@]}"
+          git commit -m "style: apply clang-format" -m "Triggered by /format on the pull request."
+
+          git push --force-with-lease="refs/heads/${HEAD_REF}:${HEAD_OID}" \
+            origin "HEAD:refs/heads/${HEAD_REF}"
+
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body \
+            ":sparkles: **/format** pushed a commit to \`${HEAD_REF}\` with \`clang-format-19 -style=file\` on ${#to_fmt[@]} file(s). Pushes use the App installation token (or \`FORMAT_BOT_PAT\`), so **CI will re-run** on the new commit (including pull_request workflows such as clang-format checks). [Run log](${run_url})"
+
+      - name: Comment on workflow failure (after credential setup)
+        if: failure() && steps.creds.conclusion == 'success' && (steps.meta.outputs.run == 'true' || steps.meta.conclusion == 'failure')
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.creds.outputs.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body \
+            ":x: **/format** did not complete successfully (e.g. checkout, clang-format, commit, or push failed). If the branch was updated while the workflow ran, comment **/format** again to retry. See the [workflow run](${run_url}) for details."
+
+      - name: Comment on workflow failure (credential setup)
+        if: failure() && (steps.app-token.conclusion == 'failure' || steps.creds.conclusion == 'failure')
+        continue-on-error: true
+        env:
+          PR_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body \
+            ":x: **/format** did not start: GitHub App token or credential setup failed. See the [workflow run](${run_url}) for details."
