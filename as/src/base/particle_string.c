@@ -167,7 +167,8 @@ static int
 string_append_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		uint32_t value_size, as_particle** pp)
 {
-	as_info_warn_deprecated("top-level string append is deprecated - use the strings operation API (append or concat)");
+	as_info_warn_deprecated(
+			"top-level string append is deprecated - use the strings operation API (append or concat)");
 
 	return blob_append_from_wire(wire_type, wire_value, value_size, pp);
 }
@@ -415,6 +416,10 @@ string_op_allows_bin_create(as_string_op_type op_type)
 	case AS_STRING_OP_CONCAT:
 	case AS_STRING_OP_APPEND:
 	case AS_STRING_OP_PREPEND:
+	case AS_STRING_OP_OVERWRITE:
+	case AS_STRING_OP_REPEAT:
+	case AS_STRING_OP_PAD_START:
+	case AS_STRING_OP_PAD_END:
 		return true;
 	default:
 		return false;
@@ -460,7 +465,7 @@ static const string_op_def string_modify_op_table[] = {
 			string_modify_op_insert, (STRING_FLAGS_CREATE_CAPABLE), 2, 3,
 			string_parse_int1, string_parse_buf, string_parse_flags),
 	STRING_MODIFY_OP_ENTRY(AS_STRING_OP_OVERWRITE, "string_overwrite",
-			string_modify_op_overwrite, (STRING_FLAGS_UPDATE_ONLY), 2, 3,
+			string_modify_op_overwrite, (STRING_FLAGS_CREATE_CAPABLE), 2, 3,
 			string_parse_int1, string_parse_buf, string_parse_flags),
 	STRING_MODIFY_OP_ENTRY(AS_STRING_OP_CONCAT, "string_concatenate",
 			string_modify_op_concatenate, (STRING_FLAGS_CREATE_CAPABLE), 1, 2,
@@ -499,13 +504,13 @@ static const string_op_def string_modify_op_table[] = {
 			string_modify_op_trim_both, (STRING_FLAGS_UPDATE_ONLY), 0, 1,
 			string_parse_flags),
 	STRING_MODIFY_OP_ENTRY(AS_STRING_OP_PAD_START, "string_pad_start",
-			string_modify_op_pad_start, (STRING_FLAGS_UPDATE_ONLY), 2, 3,
+			string_modify_op_pad_start, (STRING_FLAGS_CREATE_CAPABLE), 2, 3,
 			string_parse_int1, string_parse_buf, string_parse_flags),
 	STRING_MODIFY_OP_ENTRY(AS_STRING_OP_PAD_END, "string_pad_end",
-			string_modify_op_pad_end, (STRING_FLAGS_UPDATE_ONLY), 2, 3,
+			string_modify_op_pad_end, (STRING_FLAGS_CREATE_CAPABLE), 2, 3,
 			string_parse_int1, string_parse_buf, string_parse_flags),
 	STRING_MODIFY_OP_ENTRY(AS_STRING_OP_REPEAT, "string_repeat",
-			string_modify_op_repeat, (STRING_FLAGS_UPDATE_ONLY), 1, 2,
+			string_modify_op_repeat, (STRING_FLAGS_CREATE_CAPABLE), 1, 2,
 			string_parse_int1, string_parse_flags),
 	STRING_MODIFY_OP_ENTRY(AS_STRING_OP_REGEX_REPLACE, "string_regex_replace",
 			string_modify_op_regex_replace, (STRING_FLAGS_UPDATE_ONLY), 1, 2,
@@ -1887,8 +1892,11 @@ string_prepare_modify_op(string_state* state, string_op* op)
 
 		return string_modify_set_estimated_size(state, v);
 	}
-	case AS_STRING_OP_OVERWRITE:
-		if (op->int_arg1 < 0 || op->int_arg1 >= (int64_t)state->old_cp_len) {
+	case AS_STRING_OP_OVERWRITE: {
+		int64_t max_idx = state->old_cp_len > 0 ? (int64_t)state->old_cp_len - 1
+												: 0;
+
+		if (op->int_arg1 < 0 || op->int_arg1 > max_idx) {
 			cf_ticker_warning(AS_PARTICLE,
 					"string_prepare_modify_op - "
 					"error %u op %s - invalid overwrite index (%ld)",
@@ -1898,7 +1906,7 @@ string_prepare_modify_op(string_state* state, string_op* op)
 					state->def->name, op->int_arg1, state->old_cp_len);
 			return -AS_ERR_PARAMETER;
 		}
-		// fall through — same allocation bound as concat (payload appended by op).
+	} // fall through — same allocation bound as concat (payload appended by op).
 	case AS_STRING_OP_CONCAT: {
 		uint64_t v;
 

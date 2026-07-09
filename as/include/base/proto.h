@@ -763,7 +763,7 @@ typedef enum {
 } as_string_op_type;
 
 typedef enum {
-	// CREATE_ONLY is valid only on INSERT, CONCAT, APPEND, and PREPEND.
+	// CREATE_ONLY is valid only on INSERT, CONCAT, APPEND, PREPEND, OVERWRITE, REPEAT, PAD_START, and PAD_END.
 	// UPDATE_ONLY is valid on all string modify ops.
 	AS_STRING_FLAG_CREATE_ONLY  = 1 << 0,
 	AS_STRING_FLAG_UPDATE_ONLY  = 1 << 1,
@@ -923,7 +923,7 @@ typedef enum {
 	AS_CDT_OP_LIST_GET_BY_VALUE_INTERVAL            = 25,
 	AS_CDT_OP_LIST_GET_BY_RANK_RANGE                = 26,
 	AS_CDT_OP_LIST_GET_BY_VALUE_REL_RANK_RANGE      = 27,
-	AS_CDT_OP_LIST_JOIN                             = 28,
+	AS_CDT_OP_STRING_LIST_JOIN                      = 28,
 
 	// More modify - remove by.
 	AS_CDT_OP_LIST_REMOVE_BY_INDEX                  = 32,

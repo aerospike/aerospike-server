@@ -338,7 +338,7 @@ static int list_remove_all_by_value_list(cdt_op_mem* com,
 		const cdt_payload* value_list);
 static int list_remove_by_rel_rank_range(cdt_op_mem* com,
 		const cdt_payload* value, int64_t rank, uint64_t count);
-static int list_join(cdt_op_mem* com, const cdt_payload* sep);
+static int string_list_join(cdt_op_mem* com, const cdt_payload* sep);
 
 static uint8_t* list_setup_bin(as_bin* b, rollback_alloc* alloc_buf,
 		uint8_t flags, uint32_t content_sz, uint32_t ele_count,
@@ -2921,7 +2921,8 @@ packed_list_get_remove_by_rel_rank_range(const packed_list* list,
 }
 
 static int
-packed_list_join(const packed_list* list, cdt_op_mem* com, const cdt_payload* sep)
+packed_string_list_join(const packed_list* list, cdt_op_mem* com,
+		const cdt_payload* sep)
 {
 	msgpack_in mp_sep = { .buf = sep->ptr, .buf_sz = sep->sz };
 
@@ -2952,7 +2953,8 @@ packed_list_join(const packed_list* list, cdt_op_mem* com, const cdt_payload* se
 			(uint64_t)(list->ele_count - 1) * (uint64_t)sep_raw_sz;
 
 	if (max_u64 > UINT32_MAX) {
-		cf_ticker_warning(AS_PARTICLE, "packed_list_join() result size overflow");
+		cf_ticker_warning(AS_PARTICLE,
+				"packed_string_list_join() result size overflow");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -2969,7 +2971,7 @@ packed_list_join(const packed_list* list, cdt_op_mem* com, const cdt_payload* se
 		if (msgpack_peek_type(&mp) != MSGPACK_TYPE_STRING) {
 			cf_free(result);
 			cf_ticker_warning(AS_PARTICLE,
-					"packed_list_join() encountered non-string list element at index %u",
+					"packed_string_list_join() encountered non-string list element at index %u",
 					i);
 			return -AS_ERR_PARAMETER;
 		}
@@ -4406,16 +4408,16 @@ list_remove_by_rel_rank_range(cdt_op_mem* com, const cdt_payload* value,
 }
 
 static int
-list_join(cdt_op_mem* com, const cdt_payload* sep)
+string_list_join(cdt_op_mem* com, const cdt_payload* sep)
 {
 	packed_list list;
 
 	if (! packed_list_init_from_com(&list, com)) {
-		cf_ticker_warning(AS_PARTICLE, "list_join() invalid list");
+		cf_ticker_warning(AS_PARTICLE, "string_list_join() invalid list");
 		return -AS_ERR_PARAMETER;
 	}
 
-	return packed_list_join(&list, com, sep);
+	return packed_string_list_join(&list, com, sep);
 }
 
 // Return ptr to packed + ele_start.
@@ -5128,7 +5130,7 @@ cdt_process_state_packed_list_read_optype(cdt_process_state* state,
 				count);
 		break;
 	}
-	case AS_CDT_OP_LIST_JOIN: {
+	case AS_CDT_OP_STRING_LIST_JOIN: {
 		cdt_payload sep = { 0 };
 
 		if (! CDT_OP_TABLE_GET_PARAMS(state, &sep)) {
@@ -5136,7 +5138,7 @@ cdt_process_state_packed_list_read_optype(cdt_process_state* state,
 			return false;
 		}
 
-		ret = list_join(com, &sep);
+		ret = string_list_join(com, &sep);
 		break;
 	}
 	default:

@@ -180,7 +180,7 @@ const cdt_op_table_entry cdt_op_table[] = {
 	CDT_OP_ENTRY(AS_CDT_OP_LIST_SIZE,			AS_OPERATOR_CDT_READ, 0),
 	CDT_OP_ENTRY(AS_CDT_OP_LIST_GET,			AS_OPERATOR_CDT_READ, 0, AS_CDT_PARAM_INDEX),
 	CDT_OP_ENTRY(AS_CDT_OP_LIST_GET_RANGE,		AS_OPERATOR_CDT_READ, 1, AS_CDT_PARAM_INDEX, AS_CDT_PARAM_COUNT),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_JOIN,			AS_OPERATOR_CDT_READ, 1, AS_CDT_PARAM_PAYLOAD),
+	CDT_OP_ENTRY(AS_CDT_OP_STRING_LIST_JOIN,			AS_OPERATOR_CDT_READ, 1, AS_CDT_PARAM_PAYLOAD),
 
 	//--------------------------------------------
 	// GET/REMOVE
@@ -329,7 +329,7 @@ static const char* cdt_exp_display_names[] = {
 		[AS_CDT_OP_LIST_REMOVE_BY_VALUE_INTERVAL] = "list_remove_by_value_range",
 		[AS_CDT_OP_LIST_SET] = "list_set",
 		[AS_CDT_OP_LIST_SORT] = "list_sort",
-		[AS_CDT_OP_LIST_JOIN] = "list_join",
+		[AS_CDT_OP_STRING_LIST_JOIN] = "string_list_join",
 
 		[AS_CDT_OP_LIST_GET_BY_INDEX] = "list_get_by_index",
 		[AS_CDT_OP_LIST_GET_BY_INDEX_RANGE] = "list_get_by_index_range",
