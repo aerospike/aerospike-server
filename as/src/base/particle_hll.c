@@ -415,6 +415,12 @@ static int
 hll_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		uint32_t value_size, as_particle** pp)
 {
+	if (value_size < sizeof(hll_t)) {
+		cf_warning(AS_PARTICLE, "bad hll - error %u value size %u < %zu",
+				AS_ERR_PARAMETER, value_size, sizeof(hll_t));
+		return -AS_ERR_PARAMETER;
+	}
+
 	const hll_t* hll = (const hll_t*)wire_value;
 
 	if (! (hll->flags == 0 &&
