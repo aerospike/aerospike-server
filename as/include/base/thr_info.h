@@ -112,3 +112,7 @@ uint32_t process_cpu(void);
 void sys_cpu_info(uint32_t* user_pct, uint32_t* kernel_pct);
 void sys_mem_info(uint64_t* free_mem_kbytes, uint32_t* free_mem_pct,
 		uint64_t* thp_mem_kbytes);
+
+// Exposed for unit testing:
+bool jem_stats_resolve_file_path(cf_dyn_buf* db, const char* file_str,
+		char* file_path, size_t file_path_sz);

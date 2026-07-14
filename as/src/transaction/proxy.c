@@ -585,6 +585,7 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 	if (! as_proto_wrapped_is_valid(proto, msgp_sz)) {
 		cf_warning(AS_PROXY, "bad proto: version %u, type %u, sz %lu [%lu]",
 				proto->version, proto->type, (uint64_t)proto->sz, msgp_sz);
+		cf_free(msgp);
 		error_response(src, tid, AS_ERR_UNKNOWN);
 		return;
 	}
@@ -603,6 +604,7 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 	// Proxyer has already done byte swapping in as_msg.
 	if (! as_transaction_prepare(&tr, false)) {
 		cf_warning(AS_PROXY, "bad proxy msg");
+		cf_free(msgp);
 		error_response(src, tid, AS_ERR_UNKNOWN);
 		return;
 	}
