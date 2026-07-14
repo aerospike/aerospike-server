@@ -32,6 +32,10 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "aerospike/as_atomic.h"
+
+#include "log.h"
+
 //==========================================================
 // Typedefs & constants.
 //
@@ -94,3 +98,62 @@ uint32_t cf_rc_count(const void* p);
 uint32_t cf_rc_reserve(void* p);
 uint32_t cf_rc_release(void* p);
 uint32_t cf_rc_releaseandfree(void* p);
+
+//==========================================================
+// Private API - defer
+//
+
+inline static void
+__cf_defer_free_internal(void* p)
+{
+	cf_free(*(void**)p);
+}
+
+inline static void
+__cf_defer_atomic_free_assert_internal(void* p)
+{
+	void** pp = *(void***)p;
+	void* local_p = as_fas_ptr(pp, NULL);
+
+	cf_assert(local_p != NULL, CF_MISC, "deferred free pointer is NULL");
+	cf_free(local_p);
+}
+
+inline static void
+__cf_defer_atomic_free_optional_internal(void* p)
+{
+	void** pp = *(void***)p;
+	void* local_p = as_fas_ptr(pp, NULL);
+
+	cf_free(local_p);
+}
+
+//==========================================================
+// Public API - defer
+//
+
+#define DEFER_ATTR_FREE __attribute__((cleanup(__cf_defer_free_internal)))
+
+#define DEFER_FREE(__x)                                                                \
+	__attribute__((cleanup(__cf_defer_free_internal))) void* __defer_free_##__LINE__ = \
+			(__x)
+
+#define DEFER_ATOMIC_FREE(__x)                                                 \
+	__attribute__((cleanup(__cf_defer_atomic_free_assert_internal))) void*     \
+			__defer_free_##__LINE__ = &(__x)
+
+#define DEFER_ATOMIC_FREE_OPTIONAL(__x)                                        \
+	__attribute__((cleanup(__cf_defer_atomic_free_optional_internal))) void*   \
+			__defer_free_##__LINE__ = &(__x)
+
+// Define a buffer that is either on the stack(sz <= max_stack) or
+// on the heap(sz > max_stack), depending on the size.
+// Auto free the memory when the scope ends.
+#define define_deferred_memory(__name, __alloc_sz, __max_stack)                \
+	const uint32_t __name##__sz = ((__alloc_sz) > (__max_stack)) ? 1           \
+																 : __alloc_sz; \
+	uint8_t __name##__mem[__name##__sz];                                       \
+	DEFER_ATTR_FREE uint8_t* __name##__alloc =                                 \
+			((__alloc_sz) > (__max_stack)) ? cf_malloc(__alloc_sz) : NULL;     \
+	uint8_t* __name = ((__alloc_sz) > (__max_stack)) ? __name##__alloc         \
+													 : __name##__mem
