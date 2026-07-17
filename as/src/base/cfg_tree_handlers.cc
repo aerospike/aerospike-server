@@ -196,6 +196,8 @@ static void handle_secret_uds_path(void* target, const FieldDescriptor& desc,
 		const nlohmann::json& value);
 static void handle_tls_refresh_period(void* target, const FieldDescriptor& desc,
 		const nlohmann::json& value);
+static void handle_transaction_max_ms(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
 static void handle_user(void* target, const FieldDescriptor& desc,
 		const nlohmann::json& value);
 
@@ -423,8 +425,7 @@ static void apply_namespace_set(const std::string& name,
 		{"/stay-quiesced", offsetof(as_config, stay_quiesced), apply_bool_field, EnterpriseOnly{}}, // enterprise-only
 		{"/ticker-interval", offsetof(as_config, ticker_interval), apply_uint32_field, UnitType::TIME_DURATION},
 		{"/tls-refresh-period", NO_OFFSET, handle_tls_refresh_period, EnterpriseOnly{}, UnitType::TIME_DURATION}, // enterprise-only
-		// TODO: this needs to be multiplied by 1000000
-		{"/transaction-max-ms", offsetof(as_config, transaction_max_ns), apply_uint64_field, UnitType::SIZE_U64},
+		{"/transaction-max-ms", NO_OFFSET, handle_transaction_max_ms, UnitType::SIZE_U64},
 		{"/transaction-retry-ms", offsetof(as_config, transaction_retry_ms), apply_uint32_field},
 		{"/user", NO_OFFSET, handle_user, Deprecated{"service/user is deprecated."}},
 		{"/work-directory", offsetof(as_config, work_directory), apply_cstring_field},
@@ -1334,6 +1335,30 @@ handle_info_max_ms(void* target, const FieldDescriptor& desc,
 
 	as_config* config = static_cast<as_config*>(target);
 	config->info_max_ns = info_max_ms * 1000000;
+}
+
+static void
+handle_transaction_max_ms(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	uint64_t transaction_max_ms;
+	if (value.is_number_unsigned() || value.is_number_integer()) {
+		// Negative values would sign-cast into a huge nanosecond count.
+		if (! value.is_number_unsigned() && value.get<int64_t>() < 0) {
+			throw config_error("/service/transaction-max-ms",
+					"must be a positive integer");
+		}
+
+		transaction_max_ms = value.get<uint64_t>();
+	}
+	else {
+		throw config_error("/service/transaction-max-ms",
+				"must be a positive integer or an object with 'value' and 'unit' properties");
+	}
+
+	// Stored internally in nanoseconds; the config key is in milliseconds.
+	as_config* config = static_cast<as_config*>(target);
+	config->transaction_max_ns = transaction_max_ms * 1000000;
 }
 
 static void
