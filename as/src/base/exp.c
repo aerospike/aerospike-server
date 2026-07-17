@@ -455,6 +455,10 @@ typedef struct build_args_s {
 	uint32_t max_var_idx;
 	var_scope* current;
 
+	// Count of CDT literals the sizing pass found out of canonical form -
+	// build_canonicalize_cdt() consumes one per literal it retains.
+	uint32_t literal_cleanup;
+
 	build_bin_table bin_table;
 	cf_vector* bins_info_r; // only valid for secondary index expressions
 } build_args;
@@ -462,10 +466,17 @@ typedef struct build_args_s {
 typedef struct build_counts_s {
 	uint32_t total_sz;
 	uint32_t cleanup_count;
+	uint32_t literal_cleanup;
 	uint32_t counter;
 	const uint8_t* end;
 	build_bin_table bin_table;
 } build_counts;
+
+typedef enum {
+	CDT_LITERAL_OK,
+	CDT_LITERAL_NEEDS_SORT,
+	CDT_LITERAL_INVALID
+} cdt_literal_status;
 
 typedef bool (*op_table_build_cb)(build_args* args);
 typedef void (*op_table_eval_cb)(runtime* rt, const op_base_mem* ob,
@@ -523,7 +534,9 @@ static var_entry* build_find_var_entry(build_args* args, const uint8_t* name,
 static uint32_t build_find_bin_idx(const build_bin_table* t, bin_name128 name128);
 static bool build_get_or_add_bin_entry(build_bin_table* t,
 		const bin_name_entry* n);
-static bool build_check_cdt(const uint8_t* buf, uint32_t buf_sz);
+static cdt_literal_status build_check_cdt_literal(const uint8_t* buf,
+		uint32_t buf_sz);
+static bool build_canonicalize_cdt(build_args* args, op_value_blob* op);
 static bool build_default(build_args* args);
 static bool build_meta_default(build_args* args);
 static bool build_compare(build_args* args);
@@ -1428,6 +1441,13 @@ as_exp_destroy(as_exp* exp)
 		case EXP_CMP_REGEX:
 			regfree(&((op_cmp_regex*)ob)->regex);
 			break;
+		case VOP_VALUE_LIST:
+		case VOP_VALUE_MSGPACK:
+			// A canonicalized CDT literal retained by
+			// build_canonicalize_cdt() - literals that arrived canonical
+			// alias the wire and are never on this stack.
+			cf_free((void*)((op_value_blob*)ob)->value);
+			break;
 		default:
 			break;
 		}
@@ -1488,6 +1508,10 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 		return NULL;
 	}
 
+	// CDT literals found out of canonical form get sorted into retained
+	// allocations at build - reserve a cleanup slot for each.
+	bc.cleanup_count += bc.literal_cleanup;
+
 	bc.total_sz = (bc.total_sz + 7) & ~7; // align to 8 bytes
 
 	uint32_t cleanup_offset = bc.total_sz;
@@ -1505,6 +1529,7 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 
 	build_args args = {
 		.exp = cf_calloc(1, sizeof(as_exp) + bc.total_sz),
+		.literal_cleanup = bc.literal_cleanup,
 		.bins_info_r = bins_info_r,
 	};
 
@@ -1544,6 +1569,11 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 	cf_assert(args.exp->cleanup_stack_ix <= bc.cleanup_count, AS_EXP,
 			"cleanup_stack_ix (%u) not equal to cleanup_count (%u)",
 			args.exp->cleanup_stack_ix, bc.cleanup_count);
+	// Every literal the sizing pass counted as needing canonicalization must
+	// have been consumed by build_canonicalize_cdt() - a remainder means the
+	// passes disagreed and an unsorted literal may have aliased through.
+	cf_assert(args.literal_cleanup == 0, AS_EXP,
+			"literal_cleanup (%u) not consumed", args.literal_cleanup);
 
 	memcpy(rt_bins->table, bc.bin_table.table,
 			bc.bin_table.n_bins * sizeof(bin_name_entry));
@@ -1711,11 +1741,31 @@ build_count_sz(msgpack_in* mp, build_counts* bc)
 					return false;
 				}
 			}
-			else if (msgpack_sz(mp) == 0) {
-				cf_warning(AS_EXP,
-						"build_count_sz - invalid instruction at offset %u",
-						mp->offset);
-				return false;
+			else {
+				const uint8_t* ele_start = mp->buf + mp->offset;
+				uint32_t ele_sz = msgpack_sz(mp);
+
+				if (ele_sz == 0) {
+					cf_warning(AS_EXP,
+							"build_count_sz - invalid instruction at offset %u",
+							mp->offset);
+					return false;
+				}
+
+				// Map literals: validate now, and count any needing
+				// canonicalization so a cleanup slot gets reserved for
+				// build_canonicalize_cdt().
+				if (type == MSGPACK_TYPE_MAP) {
+					switch (build_check_cdt_literal(ele_start, ele_sz)) {
+					case CDT_LITERAL_INVALID:
+						return false;
+					case CDT_LITERAL_NEEDS_SORT:
+						bc->literal_cleanup++;
+						break;
+					default:
+						break;
+					}
+				}
 			}
 		}
 		else {
@@ -1784,6 +1834,32 @@ build_count_sz(msgpack_in* mp, build_counts* bc)
 						"build_count_sz - invalid bin name at offset %u",
 						mp->offset);
 				return false;
+			}
+
+			break;
+		}
+		case EXP_QUOTE: {
+			// Quoted list literal: validate now, and count it if it needs
+			// canonicalization so a cleanup slot gets reserved for
+			// build_canonicalize_cdt().
+			const uint8_t* q_start = mp->buf + mp->offset;
+			uint32_t q_sz = msgpack_sz(mp);
+
+			if (q_sz == 0) {
+				cf_warning(AS_EXP,
+						"build_count_sz - invalid instruction at offset %u",
+						mp->offset);
+				return false;
+			}
+
+			switch (build_check_cdt_literal(q_start, q_sz)) {
+			case CDT_LITERAL_INVALID:
+				return false;
+			case CDT_LITERAL_NEEDS_SORT:
+				bc->literal_cleanup++;
+				break;
+			default:
+				break;
 			}
 
 			break;
@@ -1984,8 +2060,13 @@ build_get_or_add_bin_entry(build_bin_table* t, const bin_name_entry* n)
 	return true;
 }
 
-static bool
-build_check_cdt(const uint8_t* buf, uint32_t buf_sz)
+// Sizing-pass validation of a CDT literal (quoted list or bare map). Corrupt
+// or non-compact input is invalid. A compact literal whose map keys arrive
+// unsorted is legal client input (e.g. a language-level unordered map) -
+// report NEEDS_SORT so build_internal() reserves a cleanup slot and
+// build_canonicalize_cdt() sorts it into an exp-owned copy at build.
+static cdt_literal_status
+build_check_cdt_literal(const uint8_t* buf, uint32_t buf_sz)
 {
 	// has_toplvl false strips any top-level persist-index flag, so the rewrite
 	// only reorders/compactifies and can never exceed buf_sz.
@@ -1994,18 +2075,53 @@ build_check_cdt(const uint8_t* buf, uint32_t buf_sz)
 	define_deferred_memory(temp, buf_sz);
 	uint32_t new_sz = cdt_untrusted_rewrite(temp, buf, buf_sz, false);
 
-	if (new_sz != buf_sz) {
-		cf_warning(AS_EXP, "build_check_cdt - error %u cdt not compactified",
+	if (new_sz == 0) {
+		cf_warning(AS_EXP, "build_check_cdt_literal - error %u invalid cdt",
 				AS_ERR_PARAMETER);
-		return false;
+		return CDT_LITERAL_INVALID;
 	}
 
-	if (memcmp(buf, temp, buf_sz) != 0) {
+	if (new_sz != buf_sz) {
 		cf_warning(AS_EXP,
-				"build_check_cdt - error %u cdt not ordered as expected",
+				"build_check_cdt_literal - error %u cdt not compactified",
 				AS_ERR_PARAMETER);
-		return false;
+		return CDT_LITERAL_INVALID;
 	}
+
+	return memcmp(buf, temp, buf_sz) == 0 ? CDT_LITERAL_OK
+										  : CDT_LITERAL_NEEDS_SORT;
+}
+
+// Build-pass companion to build_check_cdt_literal(). The sizing pass counted
+// the literals needing canonicalization into literal_cleanup and
+// build_internal() reserved a cleanup slot for each, so a zero count means
+// every literal already aliases canonical source bytes.
+// The two passes must agree, which relies on the source bytes being immutable
+// between them - guaranteed because nothing writes parse-source bytes after
+// demarshal. Do not "optimize" this into an in-place rewrite: batch repeat
+// sub-transactions share one msgp, so writing the source races sibling
+// sub-transactions' reads.
+static bool
+build_canonicalize_cdt(build_args* args, op_value_blob* op)
+{
+	if (args->literal_cleanup == 0) {
+		return true;
+	}
+
+	uint8_t* mem = cf_malloc(op->value_sz);
+
+	cdt_untrusted_rewrite(mem, op->value, op->value_sz, false);
+
+	if (memcmp(mem, op->value, op->value_sz) == 0) {
+		cf_free(mem); // already canonical - keep aliasing the source
+		return true;
+	}
+
+	// Retain the canonicalized copy - the op owns it and as_exp_destroy()
+	// frees it via the cleanup stack.
+	op->value = mem;
+	args->exp->cleanup_stack[args->exp->cleanup_stack_ix++] = op;
+	args->literal_cleanup--;
 
 	return true;
 }
@@ -3150,11 +3266,11 @@ build_quote(build_args* args)
 		return false;
 	}
 
-	if (! build_check_cdt(op->value, op->value_sz)) {
+	op->base.code = VOP_VALUE_LIST;
+
+	if (! build_canonicalize_cdt(args, op)) {
 		return false;
 	}
-
-	op->base.code = VOP_VALUE_LIST;
 
 	return true;
 }
@@ -3420,7 +3536,7 @@ build_value_msgpack(build_args* args)
 	}
 
 	if (type == MSGPACK_TYPE_MAP) {
-		if (! build_check_cdt(op->value, op->value_sz)) {
+		if (! build_canonicalize_cdt(args, op)) {
 			return false;
 		}
 
