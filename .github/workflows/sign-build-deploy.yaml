@@ -41,7 +41,7 @@ jobs:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -96,7 +96,7 @@ jobs:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           fetch-depth: 0
 
@@ -110,7 +110,7 @@ jobs:
           sleep 1800
 
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b  # v6.2.0
+        uses: aws-actions/configure-aws-credentials@254c19bd240aabef8777f48595e9d2d7b972184b  # v6.2.1
         with:
           role-to-assume: ${{ env.AWS_ROLE }}
           role-session-name: aerospike-download-artifacts
@@ -159,7 +159,7 @@ jobs:
 
   sign-artifacts:
     needs: [setup, download-artifacts]
-    uses: aerospike/shared-workflows/.github/workflows/reusable_sign-artifacts.yaml@v3.6.0
+    uses: aerospike/shared-workflows/.github/workflows/reusable_sign-artifacts.yaml@v3.8.0
     with:
       gh-artifact-name: signed-artifacts-${{ needs.setup.outputs.VERSION }}
       gh-unsigned-artifacts: unsigned-artifacts-${{ needs.setup.outputs.VERSION }}
@@ -171,7 +171,7 @@ jobs:
 
   upload-artifacts-to-jfrog:
     needs: [setup, download-artifacts, sign-artifacts]
-    uses: aerospike/shared-workflows/.github/workflows/reusable_deploy-artifacts.yaml@v3.6.0
+    uses: aerospike/shared-workflows/.github/workflows/reusable_deploy-artifacts.yaml@v3.8.0
     with:
       jf-project: database
       jf-build-name: "aerospike-server"
@@ -192,7 +192,7 @@ jobs:
       attestations: write
     needs: [setup, download-artifacts, sign-artifacts, upload-artifacts-to-jfrog, docker-deploy]
     if: always() && needs.upload-artifacts-to-jfrog.result == 'success' && needs.docker-deploy.result == 'success'
-    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.6.0
+    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.8.0
     with:
       jf-project: "database"
       jf-build-names: "aerospike-server:${{ needs.setup.outputs.VERSION }}"
@@ -218,7 +218,7 @@ jobs:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -241,14 +241,14 @@ jobs:
           oidc-audience: database-gh-citrusleaf
 
       - name: Docker login to Artifactory
-        uses: step-security/docker-login-action@870af644803bf9f204aed474adbad2958fec048b # v4.1.0
+        uses: step-security/docker-login-action@164e21d7e52229904128e2f946001cb88278c33d # v4.2.0
         with:
           registry: artifact.aerospike.io
           username: ${{ steps.jf.outputs.oidc-user }}
           password: ${{ steps.jf.outputs.oidc-token }}
 
       - name: Checkout aerospike-server.docker repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           repository: aerospike/aerospike-server.docker
           path: pkg/docker
@@ -256,10 +256,10 @@ jobs:
           fetch-depth: 1
 
       - name: Set up QEMU
-        uses: step-security/setup-qemu-action@109c6ed9f089be1a250c75fd6a534e30df44e030 # v4.0.0
+        uses: step-security/setup-qemu-action@fe44c529aab16157fc475f4991a7f926aa9a02a2 # v4.1.0
 
       - name: Set up Docker Buildx
-        uses: step-security/setup-buildx-action@f931205d68723ad9589fd2a7e2ece238bf9de341 # v4.0.0
+        uses: step-security/setup-buildx-action@6997872a55d77391e51b87609556578131f44402 # v4.1.0
 
       - name: Get current timestamp
         id: timestamp
@@ -372,7 +372,7 @@ jobs:
           egress-policy: audit
 
       - name: Checkout (for changelog)
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           fetch-tags: true
