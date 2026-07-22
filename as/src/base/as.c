@@ -93,23 +93,23 @@
 #define AS_SCHEMA_HASH "unknown"
 #endif
 
-// Experimental features that can be enabled by name via the
-// --enabled-experimental-features command-line option. Each bit must be
-// nonzero: parse_experimental_features() uses 0 as its "invalid list" sentinel.
-#define AS_EXP_FEAT_YAML_CONFIG (1u << 0)
+// Preview features that can be enabled by name via the --preview command-line
+// option. Each bit must be nonzero: parse_preview_features() uses 0 as its
+// "invalid list" sentinel.
+#define AS_PREVIEW_FEAT_YAML_CONFIG (1u << 0)
 
-// getopt_long value for --enabled-experimental-features. It has no short form,
-// so use a sentinel above the printable-char range instead of a letter.
-#define OPT_ENABLED_EXP_FEATS 1000
+// getopt_long value for --preview. It has no short form, so use a sentinel
+// above the printable-char range instead of a letter.
+#define OPT_PREVIEW 1000
 
-// Known experimental features, keyed by name. This is the source the startup
+// Known preview features, keyed by name. This is the source the startup
 // error's "valid features" list is generated from, so adding a feature here is
 // enough to keep that diagnostic correct.
 static const struct {
 	const char* name;
 	uint32_t flag;
-} EXP_FEATS[] = {
-	{ "yaml-config", AS_EXP_FEAT_YAML_CONFIG },
+} PREVIEW_FEATS[] = {
+	{ "yaml-config", AS_PREVIEW_FEAT_YAML_CONFIG },
 };
 
 // Command line options for the Aerospike server.
@@ -123,8 +123,7 @@ static const struct option CMD_OPTS[] = {
 	{ "early-verbose", no_argument, NULL, 'e' },
 	{ "cold-start", no_argument, NULL, 'c' },
 	{ "instance", required_argument, NULL, 'n' },
-	{ "enabled-experimental-features", required_argument, NULL,
-			OPT_ENABLED_EXP_FEATS },
+	{ "preview", required_argument, NULL, OPT_PREVIEW },
 	{ NULL, 0, NULL, 0 },
 };
 
@@ -178,9 +177,9 @@ static const char HELP[] =
 		"machine (not recommended), each instance must be uniquely designated via this\n"
 		"option.\n"
 		"\n"
-		"--enabled-experimental-features <feature>[,<feature>...]"
+		"--preview <feature>[,<feature>...]"
 		"\n"
-		"Enable specific experimental features by name, as a comma-separated list\n"
+		"Enable specific preview features by name, as a comma-separated list\n"
 		"(e.g. yaml-config). An unknown feature name causes startup to fail and the\n"
 		"valid feature names to be printed.\n"
 		"\n";
@@ -198,7 +197,7 @@ static const char USAGE[] = "\n"
 							"[--early-verbose] "
 							"[--cold-start] "
 							"[--instance <0-15>] "
-							"[--enabled-experimental-features <feature,...>] \n";
+							"[--preview <feature,...>] \n";
 
 static const char DEFAULT_CONFIG_FILE[] = "/etc/aerospike/aerospike.conf";
 static const char DEFAULT_SCHEMA_FILE[] =
@@ -223,8 +222,8 @@ bool g_shutdown_started = false;
 // signal.c doesn't have header file.
 extern void as_signal_setup(void);
 
-static uint32_t parse_experimental_features(const char* arg);
-static void experimental_features_str(char* buf, size_t cap);
+static uint32_t parse_preview_features(const char* arg);
+static void preview_features_str(char* buf, size_t cap);
 static void write_pidfile(char* pidfile);
 static void validate_directory(const char* path, const char* log_tag);
 static void validate_smd_directory(void);
@@ -248,7 +247,7 @@ as_run(int argc, char** argv)
 	bool early_verbose = false;
 	bool cold_start_cmd = false;
 	uint32_t instance = 0;
-	uint32_t experimental_features = 0;
+	uint32_t preview_features = 0;
 
 	// Parse command line options.
 	while ((opt = getopt_long(argc, argv, "", CMD_OPTS, &opt_i)) != -1) {
@@ -293,21 +292,20 @@ as_run(int argc, char** argv)
 		case 'n':
 			instance = (uint32_t)strtol(optarg, NULL, 0);
 			break;
-		case OPT_ENABLED_EXP_FEATS: {
+		case OPT_PREVIEW: {
 			// A valid list always sets at least one bit, so 0 means failure
 			// (unknown feature name or effectively empty list).
-			uint32_t features = parse_experimental_features(optarg);
+			uint32_t features = parse_preview_features(optarg);
 			if (features == 0) {
 				char valid[256];
-				experimental_features_str(valid, sizeof(valid));
+				preview_features_str(valid, sizeof(valid));
 				// fprintf() since cf_log isn't initialized yet.
 				fprintf(stderr,
-						"invalid --enabled-experimental-features value; valid "
-						"features: %s\n%s\n",
+						"invalid --preview value; valid features: %s\n%s\n",
 						valid, USAGE);
 				return 1;
 			}
-			experimental_features |= features;
+			preview_features |= features;
 			break;
 		}
 		default:
@@ -331,7 +329,7 @@ as_run(int argc, char** argv)
 	// is a shortcut pointer to the global runtime configuration instance.)
 	as_config* c = NULL;
 
-	if ((experimental_features & AS_EXP_FEAT_YAML_CONFIG) != 0) {
+	if ((preview_features & AS_PREVIEW_FEAT_YAML_CONFIG) != 0) {
 		// Verify that the schema file hasn't been modified since installation.
 		verify_schema_file(schema_file);
 		// The config is assumed to be in yaml format when yaml-config is enabled.
@@ -562,11 +560,11 @@ as_run(int argc, char** argv)
 // Local helpers.
 //
 
-// Format the comma-separated list of all known experimental feature names into
+// Format the comma-separated list of all known preview feature names into
 // buf (e.g. "yaml-config"), so the startup-error diagnostic is built from the
-// single EXP_FEATS source rather than a duplicated literal.
+// single PREVIEW_FEATS source rather than a duplicated literal.
 static void
-experimental_features_str(char* buf, size_t cap)
+preview_features_str(char* buf, size_t cap)
 {
 	if (cap != 0) {
 		buf[0] = '\0'; // always a valid string, even if the table is empty
@@ -574,9 +572,9 @@ experimental_features_str(char* buf, size_t cap)
 
 	size_t off = 0;
 
-	for (size_t i = 0; i < sizeof(EXP_FEATS) / sizeof(EXP_FEATS[0]); i++) {
+	for (size_t i = 0; i < sizeof(PREVIEW_FEATS) / sizeof(PREVIEW_FEATS[0]); i++) {
 		int n = snprintf(buf + off, cap - off, "%s%s", i == 0 ? "" : ", ",
-				EXP_FEATS[i].name);
+				PREVIEW_FEATS[i].name);
 
 		if (n < 0 || (size_t)n >= cap - off) {
 			break; // truncated - won't happen for the small known set
@@ -586,12 +584,12 @@ experimental_features_str(char* buf, size_t cap)
 	}
 }
 
-// Parse a comma-separated list of experimental feature names into a bit mask.
+// Parse a comma-separated list of preview feature names into a bit mask.
 // Returns 0 if any token is not a known feature or if the list is effectively
 // empty; a valid list always sets at least one bit, so the caller treats 0 as a
 // startup failure.
 static uint32_t
-parse_experimental_features(const char* arg)
+parse_preview_features(const char* arg)
 {
 	uint32_t features = 0;
 	char* dup = cf_strdup(arg); // strtok_r mutates - don't touch optarg/argv
@@ -618,9 +616,10 @@ parse_experimental_features(const char* arg)
 
 		uint32_t flag = 0;
 
-		for (size_t i = 0; i < sizeof(EXP_FEATS) / sizeof(EXP_FEATS[0]); i++) {
-			if (strcmp(tok, EXP_FEATS[i].name) == 0) {
-				flag = EXP_FEATS[i].flag;
+		for (size_t i = 0; i < sizeof(PREVIEW_FEATS) / sizeof(PREVIEW_FEATS[0]);
+				i++) {
+			if (strcmp(tok, PREVIEW_FEATS[i].name) == 0) {
+				flag = PREVIEW_FEATS[i].flag;
 				break;
 			}
 		}

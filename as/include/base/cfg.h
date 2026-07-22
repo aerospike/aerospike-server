@@ -232,7 +232,7 @@ typedef struct as_config_s {
 //
 
 as_config* as_config_init_yaml(const char* config_file,
-		const char* schema_file); // experimental
+		const char* schema_file); // preview
 as_config* as_config_init(const char* config_file);
 void as_config_post_process(as_config* c, const char* config_file);
 

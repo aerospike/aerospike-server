@@ -138,12 +138,12 @@ example configuration files, `aerospike.conf`, and the Solid State Drive
 as a system daemon.
 
 - **YAML format**: Aerospike supports YAML-based configuration with JSON schema validation
-as an experimental feature. This format provides structured configuration with automatic
+as a preview feature. This format provides structured configuration with automatic
 validation against a schema file.
 
   To use YAML configuration:
 
-  1. Enable the feature with `--enabled-experimental-features yaml-config` when starting the server
+  1. Enable the feature with `--preview yaml-config` when starting the server
   2. Optionally specify a custom schema file with `--schema-file <file>` (default location:
      `/opt/aerospike/schema/aerospike_config_schema.json`)
   3. Supply a YAML based configuration file that adheres to the schema.
@@ -158,8 +158,8 @@ validation against a schema file.
 ### Convert and update YAML for the server
 
 The `asconfig` tool currently outputs an older yaml config format, which is not the same as the
-experimental YAML format the server validates. To move from a traditional `.conf` file
-to the server’s experimental YAML config:
+preview YAML format the server validates. To move from a traditional `.conf` file
+to the server’s preview YAML config:
 
 1. Convert your `.conf` file with `asconfig`.
 2. Update the generated YAML to match the server’s schema. For the authoritative format,
@@ -183,14 +183,14 @@ to the server’s experimental YAML config:
 #### Example: array → map conversion
 
 ```yaml
-# asconfig output (not valid for the server’s experimental YAML)
+# asconfig output (not valid for the server’s preview YAML)
 namespaces:
   - name: test
     replication-factor: 2
 ```
 
 ```yaml
-# server experimental YAML format
+# server preview YAML format
 namespaces:
   test:
     replication-factor: 2
@@ -204,7 +204,7 @@ namespaces:
 YAML configuration as output by asconfig.
 
 ```yaml
-# asconfig output (not valid for the server’s experimental YAML)
+# asconfig output (not valid for the server’s preview YAML)
 service:
   cluster-name: my-cluster
   pidfile: /var/run/aerospike/asd.pid
@@ -239,7 +239,7 @@ namespaces:
 The configuration after aligning it with the database schema.
 
 ```yaml
-# server experimental YAML format
+# server preview YAML format
 service:
   cluster-name: my-cluster
   pidfile: /var/run/aerospike/asd.pid
@@ -277,7 +277,7 @@ namespaces:
 Logging section as output by asconfig.
 
 ```yaml
-# asconfig output (not valid for the server’s experimental YAML)
+# asconfig output (not valid for the server’s preview YAML)
 logging:
   - name: console
     any: info
@@ -288,7 +288,7 @@ logging:
 Logging section after aligning it with the database schema.
 
 ```yaml
-# server experimental YAML format
+# server preview YAML format
 logging:
   - type: console
     contexts:
@@ -310,11 +310,11 @@ logging contexts and the allowed syslog facilities.
 
 #### Example: unit-aware values
 
-The database's experimental yaml configuration format allows certain
+The database's preview yaml configuration format allows certain
 configs to use values with units.
 
 ```yaml
-# server experimental YAML unit-enabled fields
+# server preview YAML unit-enabled fields
 namespaces:
   test:
     storage-engine:
