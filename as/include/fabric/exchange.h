@@ -56,8 +56,13 @@
  * 14 - 6.1.0.37 & 6.3.0.25 & 6.4.0.20 & 7.0.0.12 & 7.1.0.3 - for AER-6750
  *      (SC quiesce + exact half cluster availability bug).
  * 15 - 7.2.0 - for AER-6749 (AP quiesce + effective-replication-factor change).
+ * 16 - SERVER-209 - for the selective FULL_FROM_PR broadcast optimization:
+ *      an NPR below this id doesn't understand the lightweight cv_key-only
+ *      stand-in message and would treat its empty payload as an authoritative
+ *      full replace, wiping already-converged local SMD. smd_mixed_cluster()
+ *      must see a real id bump to gate the optimization away from such nodes.
  */
-#define AS_EXCHANGE_COMPATIBILITY_ID 15
+#define AS_EXCHANGE_COMPATIBILITY_ID 16
 
 /**
  * Number of quantum intervals in orphan state after which client transactions

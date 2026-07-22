@@ -25,11 +25,13 @@
 //
 
 #include <cf_mutex.h>
+#include <errno.h>
 #include <linux/futex.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <sys/syscall.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "aerospike/as_arch.h"
@@ -181,6 +183,20 @@ cf_condition_wait(cf_condition* c, cf_mutex* m)
 	cf_mutex_unlock(m);
 	sys_futex(&c->seq, FUTEX_WAIT_PRIVATE, seq);
 	cf_mutex_lock(m);
+}
+
+bool
+cf_condition_wait_timeout(cf_condition* c, cf_mutex* m, uint32_t timeout_ms)
+{
+	uint32_t seq = c->seq;
+	struct timespec ts = { .tv_sec = timeout_ms / 1000,
+		.tv_nsec = (long)(timeout_ms % 1000) * 1000000 };
+
+	cf_mutex_unlock(m);
+	int rv = syscall(SYS_futex, &c->seq, FUTEX_WAIT_PRIVATE, seq, &ts, NULL, 0);
+	cf_mutex_lock(m);
+
+	return ! (rv == -1 && errno == ETIMEDOUT);
 }
 
 void

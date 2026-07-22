@@ -61,4 +61,6 @@ void cf_mutex_lock_spin(cf_mutex* m);
 void cf_mutex_unlock_spin(cf_mutex* m);
 
 void cf_condition_wait(cf_condition* c, cf_mutex* m);
+// Returns false on timeout, true if (possibly spuriously) woken before it.
+bool cf_condition_wait_timeout(cf_condition* c, cf_mutex* m, uint32_t timeout_ms);
 void cf_condition_signal(cf_condition* c);

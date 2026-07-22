@@ -60,6 +60,7 @@
 #include "base/datamodel.h"
 #include "base/proto.h"
 #include "base/security.h"
+#include "base/smd.h"
 #include "base/stats.h"
 #include "base/thr_info.h"
 #include "base/thr_tsvc.h"
@@ -496,6 +497,8 @@ static void*
 run_accept(void* udata)
 {
 	(void)udata;
+
+	as_smd_wait_ready();
 
 	cf_poll poll;
 	cf_poll_create(&poll);

@@ -33,6 +33,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_hash_math.h"
 #include "citrusleaf/cf_queue.h"
@@ -88,6 +89,12 @@ typedef enum {
 
 	SMD_MSG_COMMITTED_CL_KEY,
 
+	// Marks a FULL_FROM_PR as a cv_key/cv_tid advance only - receiver keeps
+	// its (already current) items. Absent on a genuine full replace. Old nodes
+	// skip unknown field ids on parse, but must never receive a message that
+	// relies on this field - see smd_mixed_cluster() gating at the senders.
+	SMD_MSG_CV_KEY_ONLY,
+
 	NUM_SMD_FIELDS
 } smd_msg_fields;
 
@@ -118,7 +125,9 @@ static const msg_template smd_mt[] = {
 		{ SMD_MSG_SINGLE_GENERATION, M_FT_UINT32 },
 		{ SMD_MSG_SINGLE_TIMESTAMP, M_FT_UINT64 },
 
-		{ SMD_MSG_COMMITTED_CL_KEY, M_FT_UINT64 }
+		{ SMD_MSG_COMMITTED_CL_KEY, M_FT_UINT64 },
+
+		{ SMD_MSG_CV_KEY_ONLY, M_FT_UINT32 }
 };
 
 COMPILER_ASSERT(sizeof(smd_mt) / sizeof(msg_template) == NUM_SMD_FIELDS);
@@ -208,15 +217,29 @@ typedef struct smd_hash_ele_s {
 	uint32_t value;
 } smd_hash_ele;
 
-#define N_HASH_ROWS 256
+#define SMD_HASH_INLINE_ROWS 256
+#define SMD_HASH_BIG_ROWS 262144 // 2^18 - used once a module grows large
+#define SMD_HASH_BIG_ROWS_THRESHOLD (SMD_HASH_INLINE_ROWS * 4)
+
+// Hash table rows must be a power of two (see smd_hash_get_row_i()).
+COMPILER_ASSERT((SMD_HASH_INLINE_ROWS & (SMD_HASH_INLINE_ROWS - 1)) == 0);
+COMPILER_ASSERT((SMD_HASH_BIG_ROWS & (SMD_HASH_BIG_ROWS - 1)) == 0);
 
 typedef struct smd_hash_s {
-	smd_hash_ele table[N_HASH_ROWS];
+	smd_hash_ele table[SMD_HASH_INLINE_ROWS]; // always present, zero heap
+	smd_hash_ele* big_table; // NULL: use table[] with n_rows rows
+	uint32_t n_rows;
 } smd_hash;
 
 typedef struct smd_module_s {
 	as_smd_id id;
 	const char* name;
+
+	// Committed version key/tid - the merge-protocol token identifying the
+	// content this node last merge-committed to. Moves ONLY at a real merge
+	// commit (op_full_to_pr, op_set_from_pr) - never on a clean cluster
+	// change or a fail-open inference. This is a pure content-lineage token,
+	// not a settle signal - see settle_confirmed below.
 	uint64_t cv_key;
 	uint64_t cv_tid;
 
@@ -239,6 +262,15 @@ typedef struct smd_module_s {
 
 	smd_state state;
 
+	// For NPR settle confirmation - true once this node has received an
+	// authoritative signal (a full, a cv_key-only confirm, a set, or - in a
+	// mixed cluster - fail-open inference) that the principal has spoken for
+	// the current cluster key. This is the ONLY settle signal; cv_key is a
+	// pure merge-protocol token and must never be used to infer settledness
+	// (see smd_all_modules_settled_locked()).
+	bool settle_confirmed;
+	uint64_t fail_open_confirm_at_ms;
+
 	// For set ack/nack.
 	cf_node set_src;
 	uint64_t set_key;
@@ -260,6 +292,7 @@ typedef struct smd_op_s {
 	uint64_t committed_key;
 
 	uint64_t tid;
+	bool cv_key_only; // FULL_FROM_PR only - see SMD_MSG_CV_KEY_ONLY
 
 	cf_vector items;
 
@@ -320,6 +353,11 @@ static const char smd_empty_value[] = "";
 
 static smd g_smd = { .lock = CF_MUTEX_INIT };
 
+// Monotonic latch — set once when all in-use modules first reach settled state.
+static bool g_smd_initial_sync_done = false;
+static cf_mutex g_smd_sync_lock = CF_MUTEX_INIT;
+static cf_condition g_smd_sync_cond = CF_CONDITION_INIT;
+
 // In alpha order.
 static smd_module g_module_table[] = { [AS_SMD_MODULE_EVICT] = { .name = "evict" },
 	[AS_SMD_MODULE_ROSTER] = { .name = "roster" },
@@ -335,6 +373,13 @@ COMPILER_ASSERT(sizeof(g_module_table) / sizeof(smd_module) == AS_SMD_NUM_MODULE
 //==========================================================
 // Forward declarations.
 //
+
+// SMD initial sync.
+static bool smd_all_modules_settled_locked(void);
+static void smd_maybe_set_initial_sync_done(void);
+static bool smd_mixed_cluster(void);
+static void npr_try_mixed_fail_open_confirm(void);
+static int npr_mixed_fail_open_wait_ms(void);
 
 // Callbacks.
 static int smd_msg_recv_cb(cf_node node_id, msg* m, void* udata);
@@ -375,7 +420,8 @@ static int pending_set_q_reduce_cb(void* ptr, void* udata);
 
 // Fabric msg send/reply.
 static void send_set_from_pr(smd_module* module, const as_smd_item* item);
-static void send_full_from_pr(smd_module* module);
+static void send_full_from_pr(smd_module* module, uint32_t full_source_ix);
+static msg* pr_make_cv_key_only_msg(smd_module* module);
 static void send_report_all_ver_to_pr(void);
 static void send_report_ver_to_pr(smd_module* module);
 static void send_ack_to_pr(smd_op* op);
@@ -409,9 +455,10 @@ static void module_set_default_items(smd_module* module,
 // Hash.
 static void smd_hash_init(smd_hash* h);
 static void smd_hash_clear(smd_hash* h);
+static void smd_hash_grow_for(smd_hash* h, uint32_t n_items);
 static void smd_hash_put(smd_hash* h, const char* key, uint32_t value);
 static bool smd_hash_get(const smd_hash* h, const char* key, uint32_t* value);
-static uint32_t smd_hash_get_row_i(const char* key);
+static uint32_t smd_hash_get_row_i(const smd_hash* h, const char* key);
 
 // as_smd_item.
 static as_smd_item* smd_item_create_copy(const char* key, const char* value,
@@ -739,10 +786,228 @@ as_smd_get_info(cf_dyn_buf* db)
 		cf_dyn_buf_append_char(db, ',');
 		cf_dyn_buf_append_string(db, "state=");
 		cf_dyn_buf_append_string(db, state_str[module->state]);
+		cf_dyn_buf_append_char(db, ',');
+		cf_dyn_buf_append_string(db, "settled=");
+		// Same predicate as smd_all_modules_settled_locked()'s per-module check
+		// - settle_confirmed (not cv_key) is the settle signal for a NPR.
+		cf_dyn_buf_append_string(db,
+				module->state == STATE_PR ||
+								(module->state == STATE_NPR &&
+										module->settle_confirmed)
+						? "true"
+						: "false");
 		cf_dyn_buf_append_char(db, ';');
 	}
 
 	smd_unlock();
+}
+
+// Info shares this listening port with client transactions, so a node that
+// never settles couldn't be diagnosed via asinfo either - a stuck wait would
+// otherwise block silently forever with a single log line at the start. Cap
+// each wait in slices and log a ticker on every slice that times out, so the
+// node stays diagnosable from logs alone.
+#define SMD_WAIT_READY_TICKER_MS 10000
+
+void
+as_smd_wait_ready(void)
+{
+	if (as_load_bool_acq(&g_smd_initial_sync_done)) {
+		return;
+	}
+
+	cf_info(AS_SMD, "waiting for initial SMD sync");
+
+	uint64_t start_us = cf_getus();
+
+	while (! as_load_bool_acq(&g_smd_initial_sync_done)) {
+		cf_mutex_lock(&g_smd_sync_lock);
+
+		if (! as_load_bool_acq(&g_smd_initial_sync_done)) {
+			cf_condition_wait_timeout(&g_smd_sync_cond, &g_smd_sync_lock,
+					SMD_WAIT_READY_TICKER_MS);
+		}
+
+		cf_mutex_unlock(&g_smd_sync_lock);
+
+		if (! as_load_bool_acq(&g_smd_initial_sync_done)) {
+			cf_warning(AS_SMD,
+					"still waiting for initial SMD sync - elapsed %lu us",
+					cf_getus() - start_us);
+		}
+	}
+
+	cf_info(AS_SMD, "initial SMD sync done - elapsed %lu us",
+			cf_getus() - start_us);
+}
+
+bool
+as_smd_settled_for_migration(void)
+{
+	return as_load_bool_acq(&g_smd_initial_sync_done);
+}
+
+//==========================================================
+// Local helpers - SMD initial sync.
+//
+
+static bool
+smd_all_modules_settled_locked(void)
+{
+	// Before the first cluster-changed event, every module sits zero-init at
+	// STATE_PR (0) and g_smd.node_count is 0 - which would otherwise read as
+	// a vacuously-settled single-node cluster and latch the gate at boot,
+	// before this node has joined anything. node_count is set exactly once
+	// per cluster-changed event and is never 0 afterward (even a one-node
+	// cluster reports node_count 1), so this is a precise "have we ever
+	// processed a real cluster view" guard.
+	if (g_smd.node_count == 0) {
+		return false;
+	}
+
+	for (uint32_t i = 0; i < AS_SMD_NUM_MODULES; i++) {
+		smd_module* module = smd_get_module((as_smd_id)i);
+
+		if (! module->in_use) {
+			continue;
+		}
+
+		// POLICY: this gate requires every in-use module to settle, including
+		// leaving STATE_MERGING. A module that older peers lack (e.g. a module
+		// added in a newer release) never leaves STATE_MERGING in a mixed
+		// cluster - those peers drop its REQ_VER_FROM_PR for an unknown module
+		// id and never report - which would wedge the whole node's client
+		// service, converting a historically-tolerated degradation (that one
+		// module doesn't sync until the cluster is homogeneous) into an outage.
+		// So any new SMD module that older builds lack MUST gate its inclusion
+		// here on as_exchange_min_compatibility_id() < <the compat id it ships
+		// in>. All current modules predate this gate, so none need it yet.
+
+		if (module->state == STATE_PR) {
+			continue;
+		}
+
+		// settle_confirmed is the sole settle signal for a NPR - NOT cv_key,
+		// which is a pure merge-protocol token (see the comment on cv_key's
+		// declaration). Requiring cv_key == g_smd.cl_key here as well would
+		// force cv_key to advance on every clean cluster change purely so this
+		// check would pass - which is exactly the design mistake that produced
+		// the restart-wedge, merge-storm, and crash-window divergence bugs
+		// fixed in this round; see the PR discussion for the full analysis.
+		if (module->state == STATE_NPR && module->settle_confirmed) {
+			continue;
+		}
+
+		return false;
+	}
+
+	return true;
+}
+
+// A pre-SERVER-209 principal never sends anything on the clean merge path
+// (it only speaks up when a NPR is dirty), so a NPR can't tell "cluster is
+// clean" apart from "principal hasn't gotten to me yet" from protocol
+// traffic alone under an old principal. Gate the extra confirmation this
+// implies on cluster compatibility so a rolling upgrade can't wedge waiting
+// for a signal an old principal will never send.
+static bool
+smd_mixed_cluster(void)
+{
+	// 16 is the compat id in which the SERVER-209 clean-path protocol (cv_key
+	// advance + cv_key-only FULL_FROM_PR) shipped - a hard literal, per the
+	// tree's convention (record.c < 11, partition_balance.c < 15), not the
+	// AS_EXCHANGE_COMPATIBILITY_ID macro. Using the macro would re-flag the
+	// cluster as "mixed" on every future unrelated bump (e.g. 16+17), needlessly
+	// disabling the cv_key-only fast path during upgrades that all understand it.
+	return as_exchange_min_compatibility_id() < 16;
+}
+
+// Fail-open inference for NPRs in a mixed cluster: if a report to an old
+// principal hasn't drawn a FULL_FROM_PR within one principal retry interval,
+// infer the module was clean (an old principal would have already responded
+// if it had anything - dirty or full - to send) and mark it settle_confirmed.
+// This ONLY sets the settle-confirm flag - it must never touch cv_key, which
+// stays at its last real merge-commit value (see cv_key's declaration); an
+// old principal never advances its own cv_key on the clean path either, so
+// leaving it untouched here keeps this node's reported key matching what an
+// old principal expects on every subsequent cluster change. A later, delayed
+// FULL_FROM_PR still applies normally and simply re-confirms.
+static void
+npr_try_mixed_fail_open_confirm(void)
+{
+	if (smd_is_pr() || ! smd_mixed_cluster()) {
+		return;
+	}
+
+	uint64_t now_ms = cf_getms();
+
+	for (uint32_t i = 0; i < AS_SMD_NUM_MODULES; i++) {
+		smd_module* module = smd_get_module((as_smd_id)i);
+
+		if (! module->in_use || module->state != STATE_NPR ||
+				module->fail_open_confirm_at_ms == 0 ||
+				module->fail_open_confirm_at_ms > now_ms) {
+			continue;
+		}
+
+		cf_detail(AS_SMD, "{%s} mixed cluster fail-open settle confirm",
+				module->name);
+
+		module->settle_confirmed = true;
+		module->fail_open_confirm_at_ms = 0;
+	}
+
+	smd_maybe_set_initial_sync_done();
+}
+
+static int
+npr_mixed_fail_open_wait_ms(void)
+{
+	if (smd_is_pr() || ! smd_mixed_cluster()) {
+		return INT_MAX;
+	}
+
+	uint64_t next_ms = UINT64_MAX;
+	uint64_t now_ms = cf_getms();
+
+	for (uint32_t i = 0; i < AS_SMD_NUM_MODULES; i++) {
+		smd_module* module = smd_get_module((as_smd_id)i);
+
+		if (! module->in_use || module->state != STATE_NPR ||
+				module->fail_open_confirm_at_ms == 0) {
+			continue;
+		}
+
+		if (module->fail_open_confirm_at_ms <= now_ms) {
+			return 0;
+		}
+
+		if (module->fail_open_confirm_at_ms < next_ms) {
+			next_ms = module->fail_open_confirm_at_ms;
+		}
+	}
+
+	return next_ms == UINT64_MAX ? INT_MAX : (int)(next_ms - now_ms);
+}
+
+static void
+smd_maybe_set_initial_sync_done(void)
+{
+	// Called under g_smd.lock.
+	if (as_load_bool_acq(&g_smd_initial_sync_done)) {
+		return;
+	}
+
+	if (! smd_all_modules_settled_locked()) {
+		return;
+	}
+
+	cf_info(AS_SMD, "initial SMD sync done for cluster key %lx", g_smd.cl_key);
+
+	cf_mutex_lock(&g_smd_sync_lock);
+	as_store_bool_rls(&g_smd_initial_sync_done, true);
+	cf_condition_signal(&g_smd_sync_cond);
+	cf_mutex_unlock(&g_smd_sync_lock);
 }
 
 //==========================================================
@@ -910,6 +1175,13 @@ smd_msg_parse(msg* m, smd_op* op)
 			cf_warning(AS_SMD, "msg missing tid");
 			return false;
 		}
+		{
+			uint32_t cv_key_only = 0;
+
+			// Optional - absent on a genuine full replace.
+			msg_get_uint32(m, SMD_MSG_CV_KEY_ONLY, &cv_key_only);
+			op->cv_key_only = cv_key_only != 0;
+		}
 		return smd_msg_parse_items(m, op);
 	case SMD_OP_REQ_FULL_FROM_PR:
 		return true;
@@ -1074,6 +1346,24 @@ run_smd(void* udata)
 				else {
 					cf_queue_push(&g_smd.pending_set_q, &pending_op);
 				}
+			}
+		}
+		else {
+			// npr_try_mixed_fail_open_confirm() writes the module's settle
+			// fields, and as_smd_get_info() reads module state under
+			// g_smd.lock - so this must hold the lock too, like every other
+			// module-state mutation. (pr_try_retransmit() above is lock-free
+			// but read-only.)
+			smd_lock();
+
+			npr_try_mixed_fail_open_confirm();
+
+			int npr_wait_ms = npr_mixed_fail_open_wait_ms();
+
+			smd_unlock();
+
+			if (npr_wait_ms < wait_ms) {
+				wait_ms = npr_wait_ms;
 			}
 		}
 
@@ -1288,6 +1578,7 @@ op_cluster_changed(smd_op* op)
 			item_vec_destroy(&module->merge);
 			item_vec_init(&module->merge, 16);
 			smd_hash_clear(&module->merge_h);
+			smd_hash_grow_for(&module->merge_h, cf_vector_size(&module->db));
 
 			OP_DETAIL("move to state %s", state_str[STATE_MERGING]);
 
@@ -1297,13 +1588,30 @@ op_cluster_changed(smd_op* op)
 			OP_DETAIL("move to state %s", state_str[STATE_NPR]);
 
 			module->state = STATE_NPR;
+			module->settle_confirmed = false;
+			module->fail_open_confirm_at_ms = 0;
 		}
 	}
+
+	// Single-node cluster: all modules just moved to STATE_PR — latch done.
+	smd_maybe_set_initial_sync_done();
 
 	if (! smd_is_pr()) {
 		usleep(REPORT_VER_DELAY_US); // allow principal time to advance
 
 		send_report_all_ver_to_pr();
+
+		if (smd_mixed_cluster()) {
+			uint64_t advance_at_ms = cf_getms() + SMD_RETRY_MS;
+
+			for (uint32_t i = 0; i < AS_SMD_NUM_MODULES; i++) {
+				smd_module* module = smd_get_module((as_smd_id)i);
+
+				if (module->in_use && module->state == STATE_NPR) {
+					module->fail_open_confirm_at_ms = advance_at_ms;
+				}
+			}
+		}
 
 		smd_op* pending_op;
 
@@ -1470,22 +1778,14 @@ op_report_ver_to_pr(smd_op* op)
 	}
 	// else - got all versions or is dirty.
 
-	bool npr_is_dirty[AS_CLUSTER_SZ] = { false };
-	bool npr_has_dirty = false;
-
 	if (! pr_is_dirty) {
 		for (uint32_t i = 1; i < g_smd.node_count; i++) {
 			uint64_t tid = module->merge_tids[i];
 
-			if (tid < module->cv_tid) {
-				npr_is_dirty[i] = true;
-				npr_has_dirty = true;
-			}
-			else if (tid > module->cv_tid) {
+			if (tid > module->cv_tid) {
 				pr_is_dirty = true;
 				break;
 			}
-			// else - both still clean.
 		}
 	}
 
@@ -1508,37 +1808,63 @@ op_report_ver_to_pr(smd_op* op)
 		return;
 	}
 
-	if (! npr_has_dirty) {
-		OP_DETAIL("move to state %s", state_str[STATE_PR]);
-
-		module->state = STATE_PR;
-		return;
-	}
+	// cv_key deliberately does NOT advance here - it only ever moves at a real
+	// merge commit (op_full_to_pr, op_set_from_pr), matching the pre-SERVER-209
+	// invariant that committed keys only change on merges. Settle confirmation
+	// for NPRs is carried entirely by settle_confirmed (set when the cv_key-only
+	// confirm below, or a real full, is received) - see smd_all_modules_settled_locked().
+	// Advancing cv_key here instead was tried and reverted: it forced every
+	// restart after a clean change to full-merge (a restarted node reports the
+	// pre-departure key, which no longer matches), and needed its own sidecar
+	// persistence with its own crash-window divergence hazard.
 
 	OP_DETAIL("move to state %s", state_str[STATE_CLEAN]);
 
 	module->state = STATE_CLEAN;
 
-	msg* full = as_fabric_msg_get(M_TYPE_SMD);
-
-	msg_set_uint32(full, SMD_MSG_OP, SMD_OP_FULL_FROM_PR);
-	module_fill_msg(module, full);
-
-	module->retry_msg_count = 0;
-	module->retry_msgs[0] = NULL;
+	// Only NPRs that reported a stale tid actually need the (possibly large)
+	// payload - others already match cv_tid and just need the lightweight
+	// cv_key-only confirm below so they can mark settle_confirmed.
+	// A pre-SERVER-209 NPR doesn't understand that empty message - it just
+	// sees an empty payload with a new committed_key and replaces (wipes)
+	// its local db - so in a mixed cluster fall back to sending the real
+	// payload to every NPR, never the lightweight stand-in.
+	bool mixed = smd_mixed_cluster();
+	bool need_full = mixed;
 
 	for (uint32_t i = 1; i < g_smd.node_count; i++) {
-		if (! npr_is_dirty[i]) {
-			module->retry_msgs[i] = NULL;
-		}
-		else {
-			msg_incr_ref(full);
-			module->retry_msgs[i] = full;
-			module->retry_msg_count++;
+		if (module->merge_tids[i] < module->cv_tid) {
+			need_full = true;
+			break;
 		}
 	}
 
-	as_fabric_msg_put(full);
+	msg* full = NULL;
+
+	if (need_full) {
+		full = as_fabric_msg_get(M_TYPE_SMD);
+		msg_set_uint32(full, SMD_MSG_OP, SMD_OP_FULL_FROM_PR);
+		module_fill_msg(module, full);
+	}
+
+	module->retry_msgs[0] = NULL;
+
+	for (uint32_t i = 1; i < g_smd.node_count; i++) {
+		if (mixed || module->merge_tids[i] < module->cv_tid) {
+			msg_incr_ref(full);
+			module->retry_msgs[i] = full;
+		}
+		else {
+			module->retry_msgs[i] = pr_make_cv_key_only_msg(module);
+		}
+	}
+
+	if (full != NULL) {
+		as_fabric_msg_put(full);
+	}
+
+	module->retry_msg_count = g_smd.node_count - 1;
+	module->retry_next_ms = 0;
 
 	pr_send_msgs(module);
 }
@@ -1552,12 +1878,37 @@ op_full_to_pr(smd_op* op)
 
 	smd_module* module = op->module;
 
+	// Only safe to skip resending the merged result back to this NPR below
+	// if its payload became the *entire* new db (PR had nothing of its own
+	// to contribute, and it's the only NPR so no other contributor's items
+	// are missing from what it sent) - otherwise this NPR's payload was
+	// incomplete relative to the merged result and it still needs the full
+	// replay. The cv_key-only message it gets instead carries the explicit
+	// SMD_MSG_CV_KEY_ONLY marker, so the NPR keeps its items even though
+	// this path resets cv_tid out from under its accumulated value.
+	bool safe_to_skip_source = cf_vector_size(&module->db) == 0 &&
+			g_smd.node_count == 2;
+
+	// Sizing at cluster-changed used the local db size alone, which misses
+	// large incoming payloads, e.g. when this PR started with an empty db.
+	// Cheap no-op if already grown; rehashes any earlier contributions.
+	smd_hash_grow_for(&module->merge_h,
+			cf_vector_size(&module->merge) + cf_vector_size(&op->items));
+
 	module_merge_list(module, &op->items);
 
 	if (module->retry_msg_count != 0) {
 		OP_DETAIL("pending replies %u", module->retry_msg_count);
 		return;
 	}
+
+	// db_h is only grown by module_regen_key2index(), which isn't called on
+	// this path - grow it for the upcoming db size now, or a fresh-join db
+	// (starts at 0) stays stuck at inline row count while every merge item
+	// gets appended one by one, degenerating into O(n) chains per lookup.
+	// db_h may already hold this PR's own keys - growth rehashes them.
+	smd_hash_grow_for(&module->db_h,
+			cf_vector_size(&module->db) + cf_vector_size(&module->merge));
 
 	for (uint32_t i = 0; i < cf_vector_size(&module->merge); i++) {
 		as_smd_item* new_item = item_vec_get(&module->merge, i);
@@ -1581,7 +1932,9 @@ op_full_to_pr(smd_op* op)
 	module->cv_key = g_smd.cl_key;
 
 	module_commit_to_disk(module);
-	send_full_from_pr(module);
+
+	send_full_from_pr(module,
+			safe_to_skip_source ? op->node_index : AS_CLUSTER_SZ);
 
 	OP_DETAIL("n-items %u - move to state %s", cf_vector_size(&module->merge),
 			state_str[STATE_CLEAN]);
@@ -1620,6 +1973,7 @@ op_ack_to_pr(smd_op* op)
 	OP_DETAIL("move to state %s", state_str[STATE_PR]);
 
 	module->state = STATE_PR;
+	smd_maybe_set_initial_sync_done();
 }
 
 static void
@@ -1644,9 +1998,16 @@ op_set_from_pr(smd_op* op)
 	module->cv_key = g_smd.cl_key;
 	module->cv_tid = op->tid;
 
+	// A set landing here is authoritative content from the principal for the
+	// current cluster key - as good a settle signal as a full or a cv_key-only
+	// confirm (see smd_all_modules_settled_locked()).
+	module->settle_confirmed = true;
+	module->fail_open_confirm_at_ms = 0;
+
 	module_set_npr(module, item_vec_get(&op->items, 0));
 	item_vec_disown_items(&op->items);
 
+	smd_maybe_set_initial_sync_done();
 	send_ack_to_pr(op); // last, so item is accepted before originator acks app
 }
 
@@ -1678,14 +2039,49 @@ op_full_from_pr(smd_op* op)
 
 	send_ack_to_pr(op);
 
+	// Any reply from the principal - real or old-code default-zero - confirms
+	// this NPR is no longer waiting on a signal an old principal never sends.
+	module->settle_confirmed = true;
+	module->fail_open_confirm_at_ms = 0;
+
 	if (op->committed_key == module->cv_key && op->tid == module->cv_tid) {
-		return; // normal on retransmits
+		smd_maybe_set_initial_sync_done(); // already applied, still check settle
+		return;
 	}
 
 	module->cv_key = op->committed_key;
 	module->cv_tid = op->tid;
 
+	// Principal is advancing cv_key/cv_tid only - this NPR's data is already
+	// current (clean path: its reported tid matched, or merge path: its own
+	// payload seeded the entire merged db). The explicit marker tells this
+	// apart from a genuinely-empty full replace - a tid comparison can't,
+	// since the merge path resets cv_tid while this NPR's accumulated cv_tid
+	// is arbitrary.
+	if (op->cv_key_only) {
+		OP_DETAIL("cv_key-only full-from-pr");
+
+		// Content is unchanged - cv_key/cv_tid just moved to match the
+		// principal's (e.g. this NPR joined mid-stream and hadn't merged
+		// yet). Nothing to persist beyond the ordinary in-memory update -
+		// module_commit_to_disk() is what makes cv_key/cv_tid durable, at
+		// the next real content change; cv_key never advances independently
+		// of content, so there is no separate value to persist here.
+		smd_maybe_set_initial_sync_done();
+		return;
+	}
+
 	OP_DETAIL("replacing all");
+
+	// An empty payload with no cv_key-only marker is an authoritative empty full
+	// that wipes local items and commits the empty db to disk. That is the
+	// intended contract, but it is also the signature of every mis-gating bug in
+	// this area (the old tid heuristic, the compat-id gap) - so make it loud.
+	if (cf_vector_size(&op->items) == 0 && cf_vector_size(&module->db) != 0) {
+		cf_warning(AS_SMD,
+				"{%s} replacing %u items with empty full from principal",
+				module->name, cf_vector_size(&module->db));
+	}
 
 	cf_vector merge_list;
 	item_vec_init(&merge_list, cf_vector_size(&op->items));
@@ -1716,6 +2112,7 @@ op_full_from_pr(smd_op* op)
 	module_regen_key2index(module);
 
 	module_commit_to_disk(module);
+	smd_maybe_set_initial_sync_done();
 }
 
 static void
@@ -1726,6 +2123,14 @@ op_req_full_from_pr(smd_op* op)
 	if (module->state != STATE_NPR) {
 		return;
 	}
+
+	// Receiving REQ_FULL_FROM_PR is positive evidence the principal has a dirty
+	// merge in flight - it collects fulls from every NPR, merges, and only then
+	// sends FULL_FROM_PR, which can exceed the fail-open interval for the large
+	// modules this stack targets. Cancel the mixed-cluster fail-open timer so it
+	// can't fire mid-merge and settle this node on pre-merge metadata; the
+	// upcoming FULL_FROM_PR is the authoritative signal and re-confirms settle.
+	module->fail_open_confirm_at_ms = 0;
 
 	OP_DETAIL("sending all");
 
@@ -1831,14 +2236,52 @@ send_set_from_pr(smd_module* module, const as_smd_item* item)
 }
 
 static void
-send_full_from_pr(smd_module* module)
+send_full_from_pr(smd_module* module, uint32_t full_source_ix)
 {
-	msg* m = as_fabric_msg_get(M_TYPE_SMD);
+	// Only build the (potentially large) full payload if at least one NPR
+	// besides the contributing source actually needs it - e.g. the 2-node
+	// case where the sole NPR *is* full_source_ix only needs a cv_key-only
+	// advance, so serializing the full db here would be wasted work. In a
+	// mixed cluster always build and send it: a pre-SERVER-209 NPR doesn't
+	// understand the lightweight cv_key-only stand-in and would wipe its
+	// local db on receiving an empty payload with a new committed_key.
+	bool mixed = smd_mixed_cluster();
+	bool need_full = mixed;
 
-	msg_set_uint32(m, SMD_MSG_OP, SMD_OP_FULL_FROM_PR);
-	module_fill_msg(module, m);
+	for (uint32_t i = 1; i < g_smd.node_count; i++) {
+		if (i != full_source_ix) {
+			need_full = true;
+			break;
+		}
+	}
 
-	pr_set_retry_msg(module, m);
+	msg* full = NULL;
+
+	if (need_full) {
+		full = as_fabric_msg_get(M_TYPE_SMD);
+		msg_set_uint32(full, SMD_MSG_OP, SMD_OP_FULL_FROM_PR);
+		module_fill_msg(module, full);
+	}
+
+	module->retry_msgs[0] = NULL;
+
+	for (uint32_t i = 1; i < g_smd.node_count; i++) {
+		if (! mixed && i == full_source_ix) {
+			module->retry_msgs[i] = pr_make_cv_key_only_msg(module);
+		}
+		else {
+			msg_incr_ref(full);
+			module->retry_msgs[i] = full;
+		}
+	}
+
+	if (full != NULL) {
+		as_fabric_msg_put(full);
+	}
+
+	module->retry_msg_count = g_smd.node_count - 1;
+	module->retry_next_ms = 0;
+
 	pr_send_msgs(module);
 }
 
@@ -2055,7 +2498,12 @@ pr_mark_reply(smd_op* op, smd_state state)
 static void
 pr_clear_retry_msgs(smd_module* module)
 {
-	for (uint32_t i = 1; i < g_smd.node_count; i++) {
+	// Iterate the whole array, not just g_smd.node_count: op_cluster_changed
+	// updates node_count to the new (possibly smaller) count before calling
+	// here, so on a cluster shrink the slots between the new and old counts
+	// would otherwise never be put - leaking a full-payload msg ref per lost
+	// node while the principal sits in STATE_CLEAN.
+	for (uint32_t i = 1; i < AS_CLUSTER_SZ; i++) {
 		if (module->retry_msgs[i] != NULL) {
 			as_fabric_msg_put(module->retry_msgs[i]);
 			module->retry_msgs[i] = NULL;
@@ -2114,6 +2562,7 @@ static void
 module_regen_key2index(smd_module* module)
 {
 	smd_hash_clear(&module->db_h);
+	smd_hash_grow_for(&module->db_h, cf_vector_size(&module->db));
 
 	for (uint32_t i = 0; i < cf_vector_size(&module->db); i++) {
 		const char* key = item_vec_get_const(&module->db, i)->key;
@@ -2177,6 +2626,39 @@ module_fill_msg(smd_module* module, msg* m)
 	cf_vector_destroy(&key_vec);
 	cf_vector_destroy(&val_vec);
 	cf_free(gen_list);
+}
+
+// Lightweight FULL_FROM_PR with no items - lets an NPR that already has
+// current data advance cv_key/cv_tid without replaying the whole payload.
+static msg*
+pr_make_cv_key_only_msg(smd_module* module)
+{
+	msg* m = as_fabric_msg_get(M_TYPE_SMD);
+
+	msg_set_uint32(m, SMD_MSG_OP, SMD_OP_FULL_FROM_PR);
+	msg_set_uint64(m, SMD_MSG_CLUSTER_KEY, g_smd.cl_key);
+	msg_set_uint32(m, SMD_MSG_MODULE_ID, module->id);
+	msg_set_uint64(m, SMD_MSG_COMMITTED_CL_KEY, module->cv_key);
+	msg_set_uint64(m, SMD_MSG_TID, module->cv_tid);
+	msg_set_uint32(m, SMD_MSG_CV_KEY_ONLY, 1);
+
+	cf_vector key_vec;
+	cf_vector val_vec;
+
+	cf_vector_init(&key_vec, sizeof(msg_buf_ele), 0, 0);
+	cf_vector_init(&val_vec, sizeof(msg_buf_ele), 0, 0);
+
+	// Defensive - the receiver's parse path returns before reading the value/
+	// ts/gen fields once it sees the zero-count key list.
+	msg_set_uint64_array_size(m, SMD_MSG_TS_ARRAY, 0);
+	msg_msgpack_list_set_buf(m, SMD_MSG_KEY_LIST, &key_vec);
+	msg_msgpack_list_set_buf(m, SMD_MSG_VALUE_LIST, &val_vec);
+	msg_msgpack_list_set_uint32(m, SMD_MSG_GEN_LIST, NULL, 0);
+
+	cf_vector_destroy(&key_vec);
+	cf_vector_destroy(&val_vec);
+
+	return m;
 }
 
 static void
@@ -2421,6 +2903,7 @@ module_restore_from_disk(smd_module* module)
 	}
 
 	json_decref(j_file);
+
 	module_regen_key2index(module);
 }
 
@@ -2521,22 +3004,82 @@ module_set_default_items(smd_module* module, const cf_vector* default_items)
 // Local helpers - hash.
 //
 
+static inline smd_hash_ele*
+smd_hash_rows(const smd_hash* h)
+{
+	return h->big_table != NULL ? h->big_table : (smd_hash_ele*)h->table;
+}
+
 static void
 smd_hash_init(smd_hash* h)
 {
 	memset((void*)h->table, 0, sizeof(h->table));
+	h->big_table = NULL;
+	h->n_rows = SMD_HASH_INLINE_ROWS;
 }
 
 static void
 smd_hash_clear(smd_hash* h)
 {
-	for (uint32_t i = 0; i < N_HASH_ROWS; i++) {
-		smd_hash_ele* e = h->table[i].next;
+	smd_hash_ele* rows = smd_hash_rows(h);
+
+	for (uint32_t i = 0; i < h->n_rows; i++) {
+		smd_hash_ele* e = rows[i].next;
 
 		while (e != NULL) {
 			smd_hash_ele* t = e->next;
 			cf_free(e);
 			e = t;
+		}
+	}
+
+	if (h->big_table != NULL) {
+		cf_free(h->big_table);
+		h->big_table = NULL;
+	}
+
+	memset((void*)h->table, 0, sizeof(h->table));
+	h->n_rows = SMD_HASH_INLINE_ROWS;
+}
+
+// Call with the final (or upper-bound) item count before a bulk-populate pass
+// (e.g. replacing a module's whole db) - keeps large modules' lookups from
+// degenerating into long per-row chains under the fixed inline row count.
+// Safe on a populated hash - existing entries are rehashed into the big
+// table (row placement depends on n_rows, so they can't just be copied).
+static void
+smd_hash_grow_for(smd_hash* h, uint32_t n_items)
+{
+	if (h->big_table != NULL || n_items <= SMD_HASH_BIG_ROWS_THRESHOLD) {
+		return;
+	}
+
+	h->big_table =
+			(smd_hash_ele*)cf_calloc(SMD_HASH_BIG_ROWS, sizeof(smd_hash_ele));
+	h->n_rows = SMD_HASH_BIG_ROWS;
+	// From here smd_hash_put() targets big_table.
+
+	// Big table was just installed, so any existing entries live in the
+	// inline table. Keys are borrowed pointers - re-insert them and free
+	// only the heap-allocated chain nodes.
+	for (uint32_t i = 0; i < SMD_HASH_INLINE_ROWS; i++) {
+		smd_hash_ele* e_head = &h->table[i];
+
+		if (e_head->key == NULL) {
+			continue;
+		}
+
+		smd_hash_put(h, e_head->key, e_head->value);
+
+		smd_hash_ele* e = e_head->next;
+
+		while (e != NULL) {
+			smd_hash_ele* e_next = e->next;
+
+			smd_hash_put(h, e->key, e->value);
+			cf_free(e);
+
+			e = e_next;
 		}
 	}
 
@@ -2546,7 +3089,7 @@ smd_hash_clear(smd_hash* h)
 static void
 smd_hash_put(smd_hash* h, const char* key, uint32_t value)
 {
-	smd_hash_ele* e_head = &h->table[smd_hash_get_row_i(key)];
+	smd_hash_ele* e_head = &smd_hash_rows(h)[smd_hash_get_row_i(h, key)];
 
 	// Nobody in row yet so just set that first element
 	if (e_head->key == NULL) {
@@ -2570,7 +3113,7 @@ smd_hash_put(smd_hash* h, const char* key, uint32_t value)
 static bool
 smd_hash_get(const smd_hash* h, const char* key, uint32_t* value)
 {
-	const smd_hash_ele* e = &h->table[smd_hash_get_row_i(key)];
+	const smd_hash_ele* e = &smd_hash_rows(h)[smd_hash_get_row_i(h, key)];
 
 	if (e->key == NULL) {
 		return false;
@@ -2592,9 +3135,9 @@ smd_hash_get(const smd_hash* h, const char* key, uint32_t* value)
 }
 
 static uint32_t
-smd_hash_get_row_i(const char* key)
+smd_hash_get_row_i(const smd_hash* h, const char* key)
 {
-	return cf_wyhash32((const uint8_t*)key, strlen(key)) % N_HASH_ROWS;
+	return cf_wyhash32((const uint8_t*)key, strlen(key)) & (h->n_rows - 1);
 }
 
 //==========================================================

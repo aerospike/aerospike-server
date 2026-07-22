@@ -81,6 +81,12 @@ void as_smd_module_load(as_smd_id id, as_smd_accept_fn accept_cb,
 		as_smd_conflict_fn conflict_cb, const cf_vector* default_items);
 void as_smd_start(void);
 void as_smd_shutdown(void);
+// Blocks until the one-time initial-SMD-sync latch fires. Single-waiter API -
+// cf_condition_signal() wakes exactly one blocked thread, and today's sole
+// caller is run_accept(). A second concurrent waiter would need a broadcast
+// variant.
+void as_smd_wait_ready(void);
+bool as_smd_settled_for_migration(void);
 // timeout 0 is default timeout in msec.
 void as_smd_set(as_smd_id id, const char* key, const char* value,
 		as_smd_set_fn set_cb, void* udata, uint64_t timeout);

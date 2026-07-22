@@ -45,6 +45,7 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/set_index.h"
+#include "base/smd.h"
 #include "fabric/exchange.h"
 #include "fabric/hb.h"
 #include "fabric/migrate.h"
@@ -448,6 +449,14 @@ as_partition_immigrate_start(as_namespace* ns, uint32_t pid,
 	if (! g_allow_migrations || orig_cluster_key != as_exchange_cluster_key() ||
 			immigrate_yield()) {
 		cf_debug(AS_PARTITION, "{%s:%u} immigrate_start - cluster key mismatch",
+				ns->name, pid);
+		cf_mutex_unlock(&p->lock);
+		return AS_MIGRATE_AGAIN;
+	}
+
+	if (! as_smd_settled_for_migration()) {
+		cf_debug(AS_PARTITION,
+				"{%s:%u} immigrate_start - SMD not yet settled, deferring",
 				ns->name, pid);
 		cf_mutex_unlock(&p->lock);
 		return AS_MIGRATE_AGAIN;
