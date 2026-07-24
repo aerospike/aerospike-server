@@ -309,7 +309,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y parallel
 
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b  # v6.2.0
+        uses: aws-actions/configure-aws-credentials@254c19bd240aabef8777f48595e9d2d7b972184b  # v6.2.1
         with:
           role-to-assume: ${{ env.AWS_ROLE }}
           role-session-name: aerospike-download-artifacts
@@ -358,7 +358,7 @@ jobs:
       PACKAGE_VERSION: ${{ steps.pkg_version.outputs.package_version }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: audit
 
@@ -376,7 +376,7 @@ jobs:
   sign-artifacts:
     needs: [setup, artifacts-ready]
     if: always() && needs.artifacts-ready.result == 'success'
-    uses: aerospike/shared-workflows/.github/workflows/reusable_sign-artifacts.yaml@v3.6.0
+    uses: aerospike/shared-workflows/.github/workflows/reusable_sign-artifacts.yaml@v3.8.0
     with:
       gh-artifact-name: signed-artifacts-${{ needs.setup.outputs.VERSION }}      
       gh-unsigned-artifacts: unsigned-artifacts-${{ needs.setup.outputs.VERSION }}      
@@ -389,7 +389,7 @@ jobs:
   upload-artifacts-to-jfrog:
     needs: [setup, sign-artifacts]
     if: always() && needs.sign-artifacts.result == 'success'
-    uses: aerospike/shared-workflows/.github/workflows/reusable_deploy-artifacts.yaml@v3.6.0
+    uses: aerospike/shared-workflows/.github/workflows/reusable_deploy-artifacts.yaml@v3.8.0
     with:
       jf-project: database
       jf-build-name: "aerospike-server"
@@ -410,7 +410,7 @@ jobs:
       attestations: write
     needs: [setup, sign-artifacts, upload-artifacts-to-jfrog, docker-deploy]
     if: always() && needs.upload-artifacts-to-jfrog.result == 'success' && needs.docker-deploy.result == 'success'
-    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.6.0
+    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.8.0
     with:
       jf-project: "database"
       jf-build-names: "aerospike-server:${{ needs.setup.outputs.VERSION }}"
@@ -474,7 +474,7 @@ jobs:
           fetch-depth: 1
 
       - name: Set up QEMU
-        uses: step-security/setup-qemu-action@109c6ed9f089be1a250c75fd6a534e30df44e030 # v4.0.0
+        uses: step-security/setup-qemu-action@fe44c529aab16157fc475f4991a7f926aa9a02a2 # v4.1.0
 
       - name: Set up Docker Buildx
         uses: step-security/setup-buildx-action@f931205d68723ad9589fd2a7e2ece238bf9de341 # v4.0.0
