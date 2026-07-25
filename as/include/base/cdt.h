@@ -32,8 +32,8 @@
 #include "dynbuf.h"
 #include "msgpack_in.h"
 
+#include "base/cdt_wire.h"
 #include "base/datamodel.h"
-#include "base/proto.h"
 
 //==========================================================
 // Typedefs & constants.
@@ -599,6 +599,7 @@ void cdt_idx_mask_print(const uint64_t* mask, uint32_t ele_count,
 
 // list
 bool list_buf_check_and_order(uint8_t* buf, uint32_t buf_sz);
+bool list_buf_check_ordered(const uint8_t* buf, uint32_t buf_sz);
 bool list_buf_fill_offidx(uint8_t* buf, uint32_t buf_sz, offset_index* offidx);
 bool list_buf_init_allidx(const uint8_t* buf, uint32_t buf_sz,
 		offset_index* offidx, order_index* ordidx, rollback_alloc* alloc,
@@ -635,6 +636,7 @@ bool map_buf_adjust_ordidx(uint8_t* buf, uint32_t buf_sz, const uint8_t* old,
 		uint32_t old_sz);
 bool map_buf_get_all_k_or_v(const uint8_t* buf, uint32_t buf_sz,
 		cdt_result_data* rd);
+bool map_buf_sort_in_place(uint8_t* buf, uint32_t buf_sz);
 
 uint32_t map_calc_ext_content_sz(uint8_t flags, uint32_t ele_count,
 		uint32_t content_sz);

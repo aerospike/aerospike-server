@@ -41,12 +41,12 @@
 
 #include "base/batch.h"
 #include "base/datamodel.h"
-#include "base/exp.h"
 #include "base/index.h"
 #include "base/masking.h"
 #include "base/mrt_monitor.h"
 #include "base/proto.h"
 #include "base/transaction.h"
+#include "exp/exp.h"
 #include "fabric/fabric.h"
 #include "sindex/sindex.h"
 #include "storage/storage.h"

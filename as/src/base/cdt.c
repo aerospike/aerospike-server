@@ -41,10 +41,10 @@
 #include "msgpack_in.h"
 
 #include "base/cfg.h"
-#include "base/exp.h"
 #include "base/particle.h"
 #include "base/proto.h"
 #include "base/thr_info.h"
+#include "exp/exp.h"
 
 //==========================================================
 // Typedefs & constants.
@@ -57,14 +57,18 @@
 	[op].name = #op, [op].args = (const as_cdt_paramtype[]){ VA_REST(__VA_ARGS__, 0) }, \
 	[op].count = VA_NARGS(__VA_ARGS__) - 1, [op].opt_args = VA_FIRST(__VA_ARGS__)
 
-typedef enum {
-	SELECT_TREE = 0,
-	SELECT_LEAF_LIST = 1,
-	SELECT_LEAF_MAP_KEY = 2,
-	SELECT_LEAF_MAP_KEY_VALUE = 3,
-	SELECT_APPLY = 4,
-	SELECT_NO_FAIL = 0x10 // interpret UNK -> FALSE
-} select_flags;
+// Wire-format constants now live in cdt_wire.h; alias the local names
+// for readability.
+#define SELECT_TREE AS_CDT_SELECT_TREE
+#define SELECT_LEAF_LIST AS_CDT_SELECT_LEAF_LIST
+#define SELECT_LEAF_MAP_KEY AS_CDT_SELECT_LEAF_MAP_KEY
+#define SELECT_LEAF_MAP_KEY_VALUE AS_CDT_SELECT_LEAF_MAP_KEY_VALUE
+#define SELECT_APPLY AS_CDT_SELECT_APPLY
+#define SELECT_COUNT AS_CDT_SELECT_COUNT
+#define SELECT_EXISTS AS_CDT_SELECT_EXISTS
+#define SELECT_NO_FAIL AS_CDT_SELECT_NO_FAIL
+#define SELECT_RTYPE_MASK AS_CDT_SELECT_RTYPE_MASK
+#define SELECT_FLAG_MASK AS_CDT_SELECT_FLAG_MASK
 
 typedef struct {
 	union {
@@ -75,6 +79,7 @@ typedef struct {
 
 	as_exp* and_exp;
 	bool has_and; // already folded AND into entry
+	bool inverted; // negate the LIST/INTERVAL match result
 	uint32_t hdr_offset;
 	uint32_t ele_count;
 	uint32_t ctx_type;
@@ -141,6 +146,7 @@ typedef struct select_ctx_s {
 	uint8_t toplvl_type;
 
 	int ret_code;
+	bool early_exit; // SELECT_EXISTS: first leaf-level match short-circuits
 } select_ctx;
 
 // clang-format off
@@ -274,6 +280,10 @@ const cdt_op_table_entry cdt_op_table[] = {
 	CDT_OP_ENTRY(AS_CDT_OP_MAP_GET_BY_KEY_REL_INDEX_RANGE,	AS_OPERATOR_MAP_READ, 1, AS_CDT_PARAM_INDEX, AS_CDT_PARAM_PAYLOAD, AS_CDT_PARAM_INDEX, AS_CDT_PARAM_COUNT),
 	CDT_OP_ENTRY(AS_CDT_OP_MAP_GET_BY_VALUE_REL_RANK_RANGE,	AS_OPERATOR_MAP_READ, 1, AS_CDT_PARAM_INDEX, AS_CDT_PARAM_PAYLOAD, AS_CDT_PARAM_INDEX, AS_CDT_PARAM_COUNT),
 
+	//--------------------------------------------
+	// Polymorphic ops (list or map at the navigated position).
+
+	CDT_OP_ENTRY(AS_CDT_OP_SIZE,				AS_OPERATOR_CDT_READ, 0),
 };
 // clang-format on
 
@@ -372,17 +382,32 @@ static const char* cdt_exp_display_names[] = {
 		[AS_CDT_OP_MAP_GET_BY_VALUE_REL_RANK_RANGE] = "map_get_by_rel_rank_range",
 		[AS_CDT_OP_MAP_SIZE] = "map_size",
 
+		[AS_CDT_OP_SIZE] = "size",
+
 		[AS_CDT_OP_SELECT] = "select",
 };
 
 static const size_t n_cdt_exp_display_names = sizeof(cdt_exp_display_names) / sizeof(char*);
 
+// Indexed by select return type (low nibble). Every defined value is named
+// so the diagnostic path never hits a NULL gap, including the reserved
+// placeholders that the validation switch currently rejects.
 static const char* cdt_select_type_display_names[] = {
-	[SELECT_TREE] = "tree",
-	[SELECT_LEAF_LIST] = "leaf_list",
-	[SELECT_LEAF_MAP_KEY] = "leaf_map_key",
-	[SELECT_LEAF_MAP_KEY_VALUE] = "leaf_map_key_value",
-	[SELECT_APPLY] = "apply",
+	[AS_CDT_SELECT_TREE] = "tree",
+	[AS_CDT_SELECT_LEAF_LIST] = "leaf_list",
+	[AS_CDT_SELECT_LEAF_MAP_KEY] = "leaf_map_key",
+	[AS_CDT_SELECT_LEAF_MAP_KEY_VALUE] = "leaf_map_key_value",
+	[AS_CDT_SELECT_APPLY] = "apply",
+	[AS_CDT_SELECT_RECUR_FIND] = "recur_find",
+	[AS_CDT_SELECT_INDEX] = "index",
+	[AS_CDT_SELECT_REVINDEX] = "revindex",
+	[AS_CDT_SELECT_RANK] = "rank",
+	[AS_CDT_SELECT_REVRANK] = "revrank",
+	[AS_CDT_SELECT_COUNT] = "count",
+	[AS_CDT_SELECT_EXISTS] = "exists",
+	[AS_CDT_SELECT_UNORDERED_MAP] = "unordered_map",
+	[AS_CDT_SELECT_ORDERED_MAP] = "ordered_map",
+	[AS_CDT_SELECT_KEY_VALUE_MAP] = "key_value_map",
 };
 // clang-format on
 
@@ -1883,6 +1908,143 @@ cdt_select_adjust_hdr1(select_ctx* sel, uint32_t offset, uint32_t ele_count,
 	}
 }
 
+// Reserve a zeroed idx mask and set the bits at the count32 ordidx positions
+// [start32, start32 + count32).
+// pre: ordidx is populated for ele_count elements -- this reads it, it does
+//      not sort.
+static uint64_t*
+build_ordidx_mask(rollback_alloc* alloc, const order_index* ordidx,
+		uint32_t ele_count, uint32_t start32, uint32_t count32)
+{
+	uint32_t mask_sz = cdt_idx_mask_count(ele_count) * sizeof(uint64_t);
+	uint64_t* mask = (uint64_t*)rollback_alloc_reserve(alloc, mask_sz);
+
+	memset(mask, 0, mask_sz);
+	cdt_idx_mask_set_by_ordidx(mask, ordidx, start32, count32, false);
+
+	return mask;
+}
+
+// Decode an interval sub-context's [a] or [a, b] bound payloads from val.
+// post: sets a, and b when list_count == 2; on a malformed interval list sets
+//       sel->ret_code and returns false.
+static bool
+decode_interval_bounds(const cdt_payload* val, uint32_t level, cdt_payload* a,
+		cdt_payload* b, select_ctx* sel)
+{
+	msgpack_in mp_iv = { .buf = val->ptr, .buf_sz = val->sz };
+	uint32_t list_count;
+
+	if (! msgpack_get_list_ele_count(&mp_iv, &list_count) || list_count == 0 ||
+			list_count > 2) {
+		cf_warning(AS_PARTICLE, "cdt select(%u) invalid interval list", level);
+		sel->ret_code = -AS_ERR_PARAMETER;
+		return false;
+	}
+
+	a->ptr = mp_iv.buf + mp_iv.offset;
+	a->sz = msgpack_sz(&mp_iv);
+
+	if (a->sz == 0) {
+		sel->ret_code = -AS_ERR_UNKNOWN;
+		return false;
+	}
+
+	if (list_count == 2) {
+		b->ptr = mp_iv.buf + mp_iv.offset;
+		b->sz = msgpack_sz(&mp_iv);
+
+		if (b->sz == 0) {
+			sel->ret_code = -AS_ERR_UNKNOWN;
+			return false;
+		}
+	}
+
+	return true;
+}
+
+// Decode a range sub-context's [index] or [index, count] payload from val into
+// a positional [start32, start32 + count32) window.
+// post: an out-of-range window clamps to empty (start32 = count32 = 0); on
+//       malformed input sets sel->ret_code and returns false.
+static bool
+decode_range_args(const cdt_payload* val, uint32_t ele_count, uint32_t level,
+		uint32_t* start32, uint32_t* count32, select_ctx* sel)
+{
+	msgpack_in mp = { .buf = val->ptr, .buf_sz = val->sz };
+	uint32_t list_count;
+
+	if (! msgpack_get_list_ele_count(&mp, &list_count) || list_count == 0 ||
+			list_count > 2) {
+		cf_warning(AS_PARTICLE, "cdt select(%u) invalid range list", level);
+		sel->ret_code = -AS_ERR_PARAMETER;
+		return false;
+	}
+
+	int64_t index_in;
+
+	if (! msgpack_get_int64(&mp, &index_in)) {
+		sel->ret_code = -AS_ERR_PARAMETER;
+		return false;
+	}
+
+	int64_t count_in = (int64_t)ele_count;
+
+	if (list_count == 2 && ! msgpack_get_int64(&mp, &count_in)) {
+		sel->ret_code = -AS_ERR_PARAMETER;
+		return false;
+	}
+
+	if (! calc_index_count(index_in, (uint64_t)count_in, ele_count, start32,
+				count32, false)) {
+		*start32 = 0;
+		*count32 = 0;
+	}
+
+	return true;
+}
+
+// Decode a rel-range sub-context's [pivot, rel] or [pivot, rel, count] payload
+// from val, where rel is the relative rank/index.
+// post: sets pivot and rel; count defaults to ele_count when the third element
+//       is absent; on malformed input sets sel->ret_code and returns false.
+static bool
+decode_rel_args(const cdt_payload* val, uint32_t ele_count, uint32_t level,
+		cdt_payload* pivot, int64_t* rel, int64_t* count_in, select_ctx* sel)
+{
+	msgpack_in mp = { .buf = val->ptr, .buf_sz = val->sz };
+	uint32_t list_count;
+
+	if (! msgpack_get_list_ele_count(&mp, &list_count) || list_count < 2 ||
+			list_count > 3) {
+		cf_warning(AS_PARTICLE, "cdt select(%u) invalid rel_range list", level);
+		sel->ret_code = -AS_ERR_PARAMETER;
+		return false;
+	}
+
+	pivot->ptr = mp.buf + mp.offset;
+	pivot->sz = msgpack_sz(&mp);
+
+	if (pivot->sz == 0) {
+		sel->ret_code = -AS_ERR_PARAMETER;
+		return false;
+	}
+
+	if (! msgpack_get_int64(&mp, rel)) {
+		sel->ret_code = -AS_ERR_PARAMETER;
+		return false;
+	}
+
+	*count_in = (int64_t)ele_count;
+
+	if (list_count == 3 && ! msgpack_get_int64(&mp, count_in)) {
+		sel->ret_code = -AS_ERR_PARAMETER;
+		return false;
+	}
+
+	return true;
+}
+
 static bool
 cdt_select_modify(select_ctx* sel, uint32_t off, uint32_t key_sz, uint32_t sz)
 {
@@ -1933,11 +2095,43 @@ cdt_select_modify(select_ctx* sel, uint32_t off, uint32_t key_sz, uint32_t sz)
 	return true;
 }
 
+// Under SELECT_NO_FAIL, an all_children-style wildcard can iterate a
+// container whose siblings have mixed CDT types (one map, one list).
+// The next ctx pair has a fixed CDT-type prefix (LIST or MAP), so any
+// child whose msgpack type doesn't match would hit -AS_ERR_PARAMETER
+// in cdt_select_list / cdt_select_map and fail the whole op. Returns
+// true if the child can be recursed into.
+static bool
+next_ctx_matches_value(uint32_t next_ctx_type, msgpack_type vt)
+{
+	uint32_t mask = next_ctx_type & AS_CDT_CTX_CDT_TYPE_MASK;
+
+	if (mask == AS_CDT_CTX_LIST) {
+		return vt == MSGPACK_TYPE_LIST;
+	}
+
+	if (mask == AS_CDT_CTX_MAP) {
+		return vt == MSGPACK_TYPE_MAP;
+	}
+
+	return true;
+}
+
 static bool
 include_map_entry(select_ctx* sel, select_stack_entry* entry, uint32_t level,
 		msgpack_in** vars_bi_table)
 {
 	bool is_leaflvl = (level + 1 == sel->n_levels);
+
+	if (sel->type == SELECT_EXISTS && is_leaflvl) {
+		// First leaf-level match short-circuits the entire walk. Skip the
+		// packing / recurse path; cdt_process_state_select reads
+		// sel->early_exit to set the result bool. Return false to unwind
+		// the recursion — the dispatch distinguishes this from an error
+		// by checking sel->early_exit alongside sel->ret_code.
+		sel->early_exit = true;
+		return false;
+	}
 
 	if (sel->type == SELECT_TREE || is_leaflvl) {
 		entry->ele_count++;
@@ -1950,6 +2144,21 @@ include_map_entry(select_ctx* sel, select_stack_entry* entry, uint32_t level,
 	uint32_t key_sz = mp_value->offset - mp_key->offset;
 
 	if (! is_leaflvl && msgpack_peek_is_cdt(&sel->mp_in)) {
+		if ((sel->flags & SELECT_NO_FAIL) != 0 &&
+				! next_ctx_matches_value(sel->stack[level + 1].ctx_type,
+						msgpack_peek_type(&sel->mp_in))) {
+			if (msgpack_sz(&sel->mp_in) == 0) {
+				sel->ret_code = -AS_ERR_UNKNOWN;
+				return false;
+			}
+
+			if (sel->type == SELECT_TREE || is_leaflvl) {
+				entry->ele_count--;
+			}
+
+			return true;
+		}
+
 		if (sel->type == SELECT_TREE) {
 			as_pack_append(&sel->out, key, key_sz);
 		}
@@ -1960,7 +2169,9 @@ include_map_entry(select_ctx* sel, select_stack_entry* entry, uint32_t level,
 		}
 	}
 	else {
-		if ((sel->type & SELECT_LEAF_MAP_KEY) != 0 && is_leaflvl) {
+		if ((sel->type == SELECT_LEAF_MAP_KEY ||
+					sel->type == SELECT_LEAF_MAP_KEY_VALUE) &&
+				is_leaflvl) {
 			as_pack_append(&sel->out, key, key_sz);
 		}
 
@@ -1973,7 +2184,9 @@ include_map_entry(select_ctx* sel, select_stack_entry* entry, uint32_t level,
 			return false;
 		}
 
-		if ((sel->type & SELECT_LEAF_LIST) != 0 && is_leaflvl) {
+		if ((sel->type == SELECT_LEAF_LIST ||
+					sel->type == SELECT_LEAF_MAP_KEY_VALUE) &&
+				is_leaflvl) {
 			as_pack_append(&sel->out, key + key_sz, value_sz); // value
 		}
 
@@ -2001,11 +2214,32 @@ include_list_entry(select_ctx* sel, select_stack_entry* entry, uint32_t level,
 {
 	bool is_leaflvl = (level + 1 == sel->n_levels);
 
+	if (sel->type == SELECT_EXISTS && is_leaflvl) {
+		// See include_map_entry for the early-exit contract.
+		sel->early_exit = true;
+		return false;
+	}
+
 	if (sel->type == SELECT_TREE || is_leaflvl) {
 		entry->ele_count++;
 	}
 
 	if (! is_leaflvl && msgpack_peek_is_cdt(&sel->mp_in)) {
+		if ((sel->flags & SELECT_NO_FAIL) != 0 &&
+				! next_ctx_matches_value(sel->stack[level + 1].ctx_type,
+						msgpack_peek_type(&sel->mp_in))) {
+			if (msgpack_sz(&sel->mp_in) == 0) {
+				sel->ret_code = -AS_ERR_UNKNOWN;
+				return false;
+			}
+
+			if (sel->type == SELECT_TREE || is_leaflvl) {
+				entry->ele_count--;
+			}
+
+			return true;
+		}
+
 		// NOTE: error details already set by cdt_select_level.
 		if (! cdt_select_level(sel, level + 1)) {
 			return false;
@@ -2043,9 +2277,13 @@ include_list_entry(select_ctx* sel, select_stack_entry* entry, uint32_t level,
 				}
 			}
 			else {
-				cf_assert((sel->type & SELECT_LEAF_MAP_KEY) == 0, AS_PARTICLE,
-						"SELECT_LEAF_MAP_KEY not allowed");
-				as_pack_append(&sel->out, out, out_sz);
+				cf_assert(sel->type != SELECT_LEAF_MAP_KEY &&
+								sel->type != SELECT_LEAF_MAP_KEY_VALUE,
+						AS_PARTICLE, "SELECT_LEAF_MAP_KEY not allowed");
+
+				if (sel->type != SELECT_COUNT) {
+					as_pack_append(&sel->out, out, out_sz);
+				}
 			}
 		}
 	}
@@ -2092,7 +2330,9 @@ cdt_select_list(select_ctx* sel, uint32_t level)
 		return true;
 	}
 
-	if (is_leaflvl && (sel->type & SELECT_LEAF_MAP_KEY) != 0) {
+	if (is_leaflvl &&
+			(sel->type == SELECT_LEAF_MAP_KEY ||
+					sel->type == SELECT_LEAF_MAP_KEY_VALUE)) {
 		if ((sel->flags & SELECT_NO_FAIL) == 0) {
 			as_error_details_set_fmt(AS_SUB_NONE,
 					"cdt select: map key select on list at level %u", level);
@@ -2357,6 +2597,199 @@ cdt_select_list(select_ctx* sel, uint32_t level)
 		}
 	}
 	else {
+		define_rollback_alloc(alloc, NULL, 2);
+		DEFER_ROLLBACK_ALLOC(alloc);
+
+		struct {
+			offset_index offidx;
+			order_index ordidx;
+			msgpack_in mp;
+			uint32_t rank;
+			uint32_t ele_count;
+		} vl; // for AS_CDT_CTX_VALUE_LIST
+
+		if (by_type == AS_CDT_CTX_VALUE_LIST) {
+			uint8_t flags;
+
+			if (! list_buf_init_allidx(entry->value.ptr, entry->value.sz,
+						&vl.offidx, &vl.ordidx, alloc, &flags)) {
+				cf_detail(AS_PARTICLE, "cdt_select_list(%u) invalid value list",
+						level);
+				sel->ret_code = -AS_ERR_PARAMETER;
+				return false;
+			}
+
+			if (! list_full_offset_index_fill_all(&vl.offidx)) {
+				cf_warning(AS_PARTICLE,
+						"cdt_select_list(%u) invalid value list", level);
+				sel->ret_code = -AS_ERR_PARAMETER;
+				return false;
+			}
+
+			if (list_flags_is_ordered(flags)) {
+				order_index_init_values(&vl.ordidx);
+
+				if (! order_index_check_order(&vl.ordidx, &vl.offidx)) {
+					cf_warning(AS_PARTICLE,
+							"cdt_select_list(%u) value list not ordered", level);
+					sel->ret_code = -AS_ERR_PARAMETER;
+					return false;
+				}
+			}
+			else {
+				list_order_index_sort(&vl.ordidx, &vl.offidx,
+						AS_CDT_SORT_ASCENDING);
+			}
+
+			vl.mp = (msgpack_in){ .buf = vl.offidx.contents,
+				.buf_sz = vl.offidx.content_sz };
+
+			vl.rank = 0;
+			vl.ele_count = vl.offidx._.ele_count;
+		}
+
+		struct {
+			cdt_payload a, b;
+		} iv = { 0 };
+
+		if (by_type == AS_CDT_CTX_VALUE_INTERVAL) {
+			if (! decode_interval_bounds(&entry->value, level, &iv.a, &iv.b, sel)) {
+				return false;
+			}
+		}
+
+		struct {
+			uint32_t s;
+			uint32_t e;
+		} ir = { 0 };
+
+		if (by_type == AS_CDT_CTX_INDEX_RANGE) {
+			uint32_t start32;
+			uint32_t count32;
+
+			if (! decode_range_args(&entry->value, ele_count, level, &start32,
+						&count32, sel)) {
+				return false;
+			}
+
+			ir.s = start32;
+			ir.e = start32 + count32;
+		}
+
+		struct {
+			uint32_t s;
+			uint32_t e;
+			uint64_t* mask; // non-NULL when value-sort was performed
+		} rr = { 0 };
+
+		if (by_type == AS_CDT_CTX_RANK_RANGE) {
+			uint32_t start32;
+			uint32_t count32;
+
+			if (! decode_range_args(&entry->value, ele_count, level, &start32,
+						&count32, sel)) {
+				return false;
+			}
+
+			rr.s = start32;
+			rr.e = start32 + count32;
+
+			if (! list_flags_is_ordered(ext.type) && count32 > 0) {
+				// Unordered list: stored insertion-order, must sort by
+				// value to find rank-range members.
+				uint32_t saved_off = sel->mp_in.offset;
+				offset_index offidx;
+
+				offset_index_ensure_from_ext_mp(&offidx, ele_count, &ext,
+						&sel->mp_in, false, alloc);
+
+				define_order_index(ordidx, ele_count);
+
+				order_index_udata udata = {
+					.offidx = &offidx,
+					.ordidx = &ordidx,
+					.skip_key = false // list -- elements are values
+				};
+
+				order_index_sort(&udata);
+
+				rr.mask = build_ordidx_mask(alloc, &ordidx, ele_count, start32,
+						count32);
+
+				sel->mp_in.offset = saved_off;
+			}
+		}
+
+		struct {
+			uint32_t s;
+			uint32_t e;
+			uint64_t* mask;
+		} vrr = { 0 };
+
+		if (by_type == AS_CDT_CTX_VALUE_REL_RANK_RANGE) {
+			cdt_payload pivot;
+			int64_t rank_in;
+			int64_t count_in;
+
+			if (! decode_rel_args(&entry->value, ele_count, level, &pivot,
+						&rank_in, &count_in, sel)) {
+				return false;
+			}
+
+			uint32_t saved_off = sel->mp_in.offset;
+			offset_index offidx;
+
+			offset_index_ensure_from_ext_mp(&offidx, ele_count, &ext,
+					&sel->mp_in, false, alloc);
+
+			define_order_index(ordidx, ele_count);
+
+			bool need_mask = ! list_flags_is_ordered(ext.type);
+
+			if (need_mask) {
+				order_index_udata udata = {
+					.offidx = &offidx, .ordidx = &ordidx, .skip_key = false
+				};
+
+				order_index_sort(&udata);
+			}
+			else {
+				order_index_init_values(&ordidx);
+			}
+
+			order_index_find find = {
+				.start = 0, .count = ele_count, .target = ele_count + 1
+			};
+
+			order_index_find_rank_by_value(&ordidx, &pivot, &offidx, &find,
+					false);
+
+			int64_t adj_rank;
+			uint64_t adj_count;
+
+			calc_rel_index_count(rank_in, (uint64_t)count_in,
+					(uint32_t)find.result, &adj_rank, &adj_count);
+
+			uint32_t start32;
+			uint32_t count32;
+
+			if (! calc_index_count(adj_rank, adj_count, ele_count, &start32,
+						&count32, false)) {
+				start32 = 0;
+				count32 = 0;
+			}
+
+			vrr.s = start32;
+			vrr.e = start32 + count32;
+
+			if (need_mask && count32 > 0) {
+				vrr.mask = build_ordidx_mask(alloc, &ordidx, ele_count, start32,
+						count32);
+			}
+
+			sel->mp_in.offset = saved_off;
+		}
+
 		for (uint32_t i = 0; i < ele_count; i++) {
 			as_exp_trilean tri;
 			uint32_t off_start = sel->mp_in.offset;
@@ -2398,8 +2831,105 @@ cdt_select_list(select_ctx* sel, uint32_t level)
 					break;
 				}
 			}
+			else if (by_type == AS_CDT_CTX_VALUE_LIST) {
+				if (! list_flags_is_ordered(ext.type)) {
+					order_index_find find = { .count = vl.ele_count,
+						.target = vl.ele_count + 1 };
+
+					cdt_payload value = { .ptr = mp_value.buf + mp_value.offset,
+						.sz = mp_value.buf_sz - mp_value.offset };
+
+					order_index_find_rank_by_value(&vl.ordidx, &value,
+							&vl.offidx, &find, false);
+
+					tri = find.found ? AS_EXP_TRUE : AS_EXP_FALSE;
+				}
+				else {
+					tri = AS_EXP_FALSE;
+
+					while (vl.rank < vl.ele_count) {
+						uint32_t idx = order_index_get(&vl.ordidx, vl.rank);
+						uint32_t off = offset_index_get_const(&vl.offidx, idx);
+
+						vl.mp.offset = off;
+
+						msgpack_cmp_type cmp =
+								msgpack_cmp_peek(&mp_value, &vl.mp);
+
+						if (cmp == MSGPACK_CMP_EQUAL) {
+							vl.rank++;
+							tri = AS_EXP_TRUE;
+							break;
+						}
+						else if (cmp == MSGPACK_CMP_ERROR ||
+								cmp == MSGPACK_CMP_END) {
+							sel->ret_code = -AS_ERR_UNKNOWN;
+							return false;
+						}
+						else if (cmp == MSGPACK_CMP_GREATER) {
+							vl.rank++;
+						}
+						else {
+							break;
+						}
+					}
+				}
+			}
+			else if (by_type == AS_CDT_CTX_VALUE_INTERVAL) {
+				tri = AS_EXP_TRUE;
+
+				msgpack_in mp_a = { .buf = iv.a.ptr, .buf_sz = iv.a.sz };
+				msgpack_cmp_type cmp_a = msgpack_cmp_peek(&mp_value, &mp_a);
+
+				if (cmp_a == MSGPACK_CMP_ERROR || cmp_a == MSGPACK_CMP_END) {
+					sel->ret_code = -AS_ERR_UNKNOWN;
+					return false;
+				}
+
+				if (cmp_a == MSGPACK_CMP_LESS) {
+					tri = AS_EXP_FALSE;
+				}
+				else if (iv.b.ptr != NULL) {
+					msgpack_in mp_b = { .buf = iv.b.ptr, .buf_sz = iv.b.sz };
+					msgpack_cmp_type cmp_b = msgpack_cmp_peek(&mp_value, &mp_b);
+
+					if (cmp_b == MSGPACK_CMP_ERROR || cmp_b == MSGPACK_CMP_END) {
+						sel->ret_code = -AS_ERR_UNKNOWN;
+						return false;
+					}
+
+					if (cmp_b != MSGPACK_CMP_LESS) {
+						tri = AS_EXP_FALSE;
+					}
+				}
+			}
+			else if (by_type == AS_CDT_CTX_INDEX_RANGE) {
+				tri = (i >= ir.s && i < ir.e) ? AS_EXP_TRUE : AS_EXP_FALSE;
+			}
+			else if (by_type == AS_CDT_CTX_RANK_RANGE) {
+				if (rr.mask != NULL) {
+					tri = cdt_idx_mask_is_set(rr.mask, i) ? AS_EXP_TRUE
+														  : AS_EXP_FALSE;
+				}
+				else {
+					tri = (i >= rr.s && i < rr.e) ? AS_EXP_TRUE : AS_EXP_FALSE;
+				}
+			}
+			else if (by_type == AS_CDT_CTX_VALUE_REL_RANK_RANGE) {
+				if (vrr.mask != NULL) {
+					tri = cdt_idx_mask_is_set(vrr.mask, i) ? AS_EXP_TRUE
+														   : AS_EXP_FALSE;
+				}
+				else {
+					tri = (i >= vrr.s && i < vrr.e) ? AS_EXP_TRUE : AS_EXP_FALSE;
+				}
+			}
 			else {
 				tri = AS_EXP_UNK;
+			}
+
+			if (entry->inverted && tri != AS_EXP_UNK) {
+				tri = (tri == AS_EXP_TRUE) ? AS_EXP_FALSE : AS_EXP_TRUE;
 			}
 
 			if (tri == AS_EXP_TRUE && entry->and_exp != NULL) {
@@ -2427,7 +2957,8 @@ cdt_select_list(select_ctx* sel, uint32_t level)
 			}
 
 			if (tri == AS_EXP_TRUE && is_leaflvl &&
-					(sel->type & SELECT_LEAF_MAP_KEY) != 0) {
+					(sel->type == SELECT_LEAF_MAP_KEY ||
+							sel->type == SELECT_LEAF_MAP_KEY_VALUE)) {
 				if ((sel->flags & SELECT_NO_FAIL) == 0) {
 					cf_debug(AS_PARTICLE,
 							"cdt_select_list(%u) SELECT_LEAF_MAP_KEY not allowed type 0x%x",
@@ -2680,7 +3211,7 @@ cdt_select_map(select_ctx* sel, uint32_t level)
 	}
 	else {
 		bool found_all = false;
-		define_rollback_alloc(alloc, NULL, 1);
+		define_rollback_alloc(alloc, NULL, 2);
 		DEFER_ROLLBACK_ALLOC(alloc);
 
 		struct {
@@ -2692,48 +3223,280 @@ cdt_select_map(select_ctx* sel, uint32_t level)
 			uint32_t ele_count;
 			bool check_order;
 			bool unordered;
-		} kl; // for AS_CDT_CTX_KEY_LIST
+		} vl; // for AS_CDT_CTX_KEY_LIST / AS_CDT_CTX_VALUE_LIST
 
-		if (by_type == AS_CDT_CTX_KEY_LIST) {
+		if (by_type == AS_CDT_CTX_KEY_LIST || by_type == AS_CDT_CTX_VALUE_LIST) {
 			uint8_t flags;
 
 			if (! list_buf_init_allidx(entry->value.ptr, entry->value.sz,
-						&kl.offidx, &kl.ordidx, alloc, &flags)) {
-				cf_detail(AS_PARTICLE, "cdt_select_map(%u) invalid key list",
-						level);
+						&vl.offidx, &vl.ordidx, alloc, &flags)) {
+				cf_detail(AS_PARTICLE, "cdt_select_map(%u) invalid list", level);
 				sel->ret_code = -AS_ERR_PARAMETER;
 				return false;
 			}
 
-			if (! list_full_offset_index_fill_all(&kl.offidx)) {
-				cf_warning(AS_PARTICLE, "cdt_select_map(%u) invalid key list",
-						level);
+			if (! list_full_offset_index_fill_all(&vl.offidx)) {
+				cf_warning(AS_PARTICLE, "cdt_select_map(%u) invalid list", level);
 				sel->ret_code = -AS_ERR_PARAMETER;
 				return false;
 			}
 
 			if (list_flags_is_ordered(flags)) {
-				order_index_init_values(&kl.ordidx);
+				order_index_init_values(&vl.ordidx);
 
-				if (! order_index_check_order(&kl.ordidx, &kl.offidx)) {
+				if (! order_index_check_order(&vl.ordidx, &vl.offidx)) {
 					cf_warning(AS_PARTICLE,
-							"cdt_select_map(%u) key list not ordered", level);
+							"cdt_select_map(%u) list not ordered", level);
 					sel->ret_code = -AS_ERR_PARAMETER;
 					return false;
 				}
 			}
 			else {
-				list_order_index_sort(&kl.ordidx, &kl.offidx,
+				list_order_index_sort(&vl.ordidx, &vl.offidx,
 						AS_CDT_SORT_ASCENDING);
 			}
 
-			kl.mp = (msgpack_in){ .buf = kl.offidx.contents,
-				.buf_sz = kl.offidx.content_sz };
+			vl.mp = (msgpack_in){ .buf = vl.offidx.contents,
+				.buf_sz = vl.offidx.content_sz };
 
-			kl.rank = 0;
-			kl.ele_count = kl.offidx._.ele_count;
-			kl.check_order = ! map_flags_is_ordered(ext.type);
-			kl.unordered = false; // optimistic assumption
+			vl.rank = 0;
+			vl.ele_count = vl.offidx._.ele_count;
+
+			if (by_type == AS_CDT_CTX_KEY_LIST) {
+				vl.check_order = ! map_flags_is_ordered(ext.type);
+				vl.unordered = false; // optimistic assumption
+			}
+			else {
+				// Map ordering is by key, not value -- no rank-walk shortcut.
+				vl.check_order = false;
+				vl.unordered = true;
+			}
+		}
+
+		struct {
+			cdt_payload a, b; // bounds; b.ptr == NULL means open upper
+		} iv = { 0 };
+
+		if (by_type == AS_CDT_CTX_KEY_INTERVAL ||
+				by_type == AS_CDT_CTX_VALUE_INTERVAL) {
+			if (! decode_interval_bounds(&entry->value, level, &iv.a, &iv.b, sel)) {
+				return false;
+			}
+		}
+
+		struct {
+			uint32_t s; // first physical index in window (sorted maps)
+			uint32_t e; // exclusive end (sorted maps)
+			uint64_t* mask; // non-NULL when sort was needed
+		} ir = { 0 };
+
+		if (by_type == AS_CDT_CTX_INDEX_RANGE) {
+			uint32_t start32;
+			uint32_t count32;
+
+			if (! decode_range_args(&entry->value, ele_count, level, &start32,
+						&count32, sel)) {
+				return false;
+			}
+
+			ir.s = start32;
+			ir.e = start32 + count32;
+
+			// Only legacy data may be unsorted, so check before paying the sort
+			// cost.
+			if (! map_flags_is_ordered(ext.type) && count32 > 0) {
+				uint32_t saved_off = sel->mp_in.offset;
+				offset_index offidx;
+
+				offset_index_ensure_from_ext_mp(&offidx, ele_count, &ext,
+						&sel->mp_in, true, alloc);
+
+				define_order_index(ordidx, ele_count);
+				order_index_init_values(&ordidx);
+
+				if (! order_index_check_order(&ordidx, &offidx)) {
+					order_index_udata udata = {
+						.offidx = &offidx, .ordidx = &ordidx, .skip_key = false
+					};
+
+					order_index_sort(&udata);
+
+					ir.mask = build_ordidx_mask(alloc, &ordidx, ele_count,
+							start32, count32);
+				}
+
+				sel->mp_in.offset = saved_off;
+			}
+		}
+
+		struct {
+			uint64_t* mask; // non-NULL when value-sort was performed
+		} rr = { 0 };
+
+		if (by_type == AS_CDT_CTX_RANK_RANGE) {
+			uint32_t start32;
+			uint32_t count32;
+
+			if (! decode_range_args(&entry->value, ele_count, level, &start32,
+						&count32, sel)) {
+				return false;
+			}
+
+			if (count32 > 0) {
+				// Maps are key-ordered (or insertion-order in legacy
+				// data), never value-ordered -- always sort by value.
+				uint32_t saved_off = sel->mp_in.offset;
+				offset_index offidx;
+
+				offset_index_ensure_from_ext_mp(&offidx, ele_count, &ext,
+						&sel->mp_in, true, alloc);
+
+				define_order_index(ordidx, ele_count);
+
+				order_index_udata udata = {
+					.offidx = &offidx,
+					.ordidx = &ordidx,
+					.skip_key = true // sort by value, skip the key
+				};
+
+				order_index_sort(&udata);
+
+				rr.mask = build_ordidx_mask(alloc, &ordidx, ele_count, start32,
+						count32);
+
+				sel->mp_in.offset = saved_off;
+			}
+		}
+
+		struct {
+			uint32_t s;
+			uint32_t e;
+			uint64_t* mask; // non-NULL when full key-sort was needed
+		} krir = { 0 };
+
+		if (by_type == AS_CDT_CTX_KEY_REL_INDEX_RANGE) {
+			cdt_payload pivot;
+			int64_t index_in;
+			int64_t count_in;
+
+			if (! decode_rel_args(&entry->value, ele_count, level, &pivot,
+						&index_in, &count_in, sel)) {
+				return false;
+			}
+
+			uint32_t saved_off = sel->mp_in.offset;
+			offset_index offidx;
+
+			offset_index_ensure_from_ext_mp(&offidx, ele_count, &ext,
+					&sel->mp_in, true, alloc);
+
+			define_order_index(ordidx, ele_count);
+			order_index_init_values(&ordidx);
+
+			bool need_mask = false;
+
+			if (! map_flags_is_ordered(ext.type)) {
+				if (! order_index_check_order(&ordidx, &offidx)) {
+					order_index_udata udata = {
+						.offidx = &offidx, .ordidx = &ordidx, .skip_key = false
+					};
+
+					order_index_sort(&udata);
+					need_mask = true;
+				}
+			}
+
+			order_index_find find = {
+				.start = 0, .count = ele_count, .target = ele_count + 1
+			};
+
+			order_index_find_rank_by_value(&ordidx, &pivot, &offidx, &find,
+					false);
+
+			int64_t adj_idx;
+			uint64_t adj_count;
+
+			calc_rel_index_count(index_in, (uint64_t)count_in,
+					(uint32_t)find.result, &adj_idx, &adj_count);
+
+			uint32_t start32;
+			uint32_t count32;
+
+			if (! calc_index_count(adj_idx, adj_count, ele_count, &start32,
+						&count32, false)) {
+				start32 = 0;
+				count32 = 0;
+			}
+
+			krir.s = start32;
+			krir.e = start32 + count32;
+
+			if (need_mask && count32 > 0) {
+				krir.mask = build_ordidx_mask(alloc, &ordidx, ele_count,
+						start32, count32);
+			}
+
+			sel->mp_in.offset = saved_off;
+		}
+
+		struct {
+			uint64_t* mask; // non-NULL when value-sort was performed
+		} vrr = { 0 };
+
+		if (by_type == AS_CDT_CTX_VALUE_REL_RANK_RANGE) {
+			cdt_payload pivot;
+			int64_t rank_in;
+			int64_t count_in;
+
+			if (! decode_rel_args(&entry->value, ele_count, level, &pivot,
+						&rank_in, &count_in, sel)) {
+				return false;
+			}
+
+			uint32_t saved_off = sel->mp_in.offset;
+			offset_index offidx;
+
+			offset_index_ensure_from_ext_mp(&offidx, ele_count, &ext,
+					&sel->mp_in, true, alloc);
+
+			define_order_index(ordidx, ele_count);
+
+			// Maps are never value-sorted -- always sort by value.
+			order_index_udata udata = {
+				.offidx = &offidx,
+				.ordidx = &ordidx,
+				.skip_key = true // sort by value, skip the key
+			};
+
+			order_index_sort(&udata);
+
+			order_index_find find = {
+				.start = 0, .count = ele_count, .target = ele_count + 1
+			};
+
+			order_index_find_rank_by_value(&ordidx, &pivot, &offidx, &find, true);
+
+			int64_t adj_rank;
+			uint64_t adj_count;
+
+			calc_rel_index_count(rank_in, (uint64_t)count_in,
+					(uint32_t)find.result, &adj_rank, &adj_count);
+
+			uint32_t start32;
+			uint32_t count32;
+
+			if (! calc_index_count(adj_rank, adj_count, ele_count, &start32,
+						&count32, false)) {
+				start32 = 0;
+				count32 = 0;
+			}
+
+			if (count32 > 0) {
+				vrr.mask = build_ordidx_mask(alloc, &ordidx, ele_count, start32,
+						count32);
+			}
+
+			sel->mp_in.offset = saved_off;
 		}
 
 		for (uint32_t i = 0; i < ele_count; i++) {
@@ -2803,35 +3566,35 @@ cdt_select_map(select_ctx* sel, uint32_t level)
 			else if (by_type == AS_CDT_CTX_KEY_LIST) {
 				tri = AS_EXP_FALSE;
 
-				if (kl.check_order) {
-					kl.mp_key = mp_key;
+				if (vl.check_order) {
+					vl.mp_key = mp_key;
 				}
 
-				if (kl.unordered) {
-					order_index_find find = { .count = kl.ele_count,
-						.target = kl.ele_count + 1 };
+				if (vl.unordered) {
+					order_index_find find = { .count = vl.ele_count,
+						.target = vl.ele_count + 1 };
 
 					cdt_payload value = { .ptr = mp_key.buf + mp_key.offset,
 						.sz = mp_key.buf_sz - mp_key.offset };
 
-					order_index_find_rank_by_value(&kl.ordidx, &value,
-							&kl.offidx, &find, false);
+					order_index_find_rank_by_value(&vl.ordidx, &value,
+							&vl.offidx, &find, false);
 
 					if (find.found) {
 						tri = AS_EXP_TRUE;
 					}
 				}
 
-				while (kl.rank < kl.ele_count) {
-					uint32_t idx = order_index_get(&kl.ordidx, kl.rank);
-					uint32_t off = offset_index_get_const(&kl.offidx, idx);
+				while (vl.rank < vl.ele_count) {
+					uint32_t idx = order_index_get(&vl.ordidx, vl.rank);
+					uint32_t off = offset_index_get_const(&vl.offidx, idx);
 
-					kl.mp.offset = off;
+					vl.mp.offset = off;
 
-					msgpack_cmp_type cmp = msgpack_cmp_peek(&mp_key, &kl.mp);
+					msgpack_cmp_type cmp = msgpack_cmp_peek(&mp_key, &vl.mp);
 
 					if (cmp == MSGPACK_CMP_EQUAL) {
-						kl.rank++;
+						vl.rank++;
 						tri = AS_EXP_TRUE;
 						break;
 					}
@@ -2840,15 +3603,101 @@ cdt_select_map(select_ctx* sel, uint32_t level)
 						return false;
 					}
 					else if (cmp == MSGPACK_CMP_GREATER) {
-						kl.rank++;
+						vl.rank++;
 					}
 					else {
 						break;
 					}
 				}
 			}
+			else if (by_type == AS_CDT_CTX_VALUE_LIST) {
+				mp_value.offset = value_off;
+
+				order_index_find find = { .count = vl.ele_count,
+					.target = vl.ele_count + 1 };
+
+				cdt_payload value = { .ptr = mp_value.buf + mp_value.offset,
+					.sz = mp_value.buf_sz - mp_value.offset };
+
+				order_index_find_rank_by_value(&vl.ordidx, &value, &vl.offidx,
+						&find, false);
+
+				tri = find.found ? AS_EXP_TRUE : AS_EXP_FALSE;
+			}
+			else if (by_type == AS_CDT_CTX_KEY_INTERVAL ||
+					by_type == AS_CDT_CTX_VALUE_INTERVAL) {
+				msgpack_in* mp_x;
+
+				if (by_type == AS_CDT_CTX_KEY_INTERVAL) {
+					mp_x = &mp_key;
+				}
+				else {
+					mp_value.offset = value_off;
+					mp_x = &mp_value;
+				}
+
+				tri = AS_EXP_TRUE;
+
+				msgpack_in mp_a = { .buf = iv.a.ptr, .buf_sz = iv.a.sz };
+				msgpack_cmp_type cmp_a = msgpack_cmp_peek(mp_x, &mp_a);
+
+				if (cmp_a == MSGPACK_CMP_ERROR || cmp_a == MSGPACK_CMP_END) {
+					sel->ret_code = -AS_ERR_UNKNOWN;
+					return false;
+				}
+
+				if (cmp_a == MSGPACK_CMP_LESS) {
+					tri = AS_EXP_FALSE;
+				}
+				else if (iv.b.ptr != NULL) {
+					msgpack_in mp_b = { .buf = iv.b.ptr, .buf_sz = iv.b.sz };
+					msgpack_cmp_type cmp_b = msgpack_cmp_peek(mp_x, &mp_b);
+
+					if (cmp_b == MSGPACK_CMP_ERROR || cmp_b == MSGPACK_CMP_END) {
+						sel->ret_code = -AS_ERR_UNKNOWN;
+						return false;
+					}
+
+					if (cmp_b != MSGPACK_CMP_LESS) {
+						tri = AS_EXP_FALSE;
+					}
+				}
+			}
+			else if (by_type == AS_CDT_CTX_INDEX_RANGE) {
+				if (ir.mask != NULL) {
+					tri = cdt_idx_mask_is_set(ir.mask, i) ? AS_EXP_TRUE
+														  : AS_EXP_FALSE;
+				}
+				else {
+					tri = (i >= ir.s && i < ir.e) ? AS_EXP_TRUE : AS_EXP_FALSE;
+				}
+			}
+			else if (by_type == AS_CDT_CTX_RANK_RANGE) {
+				tri = (rr.mask != NULL && cdt_idx_mask_is_set(rr.mask, i))
+						? AS_EXP_TRUE
+						: AS_EXP_FALSE;
+			}
+			else if (by_type == AS_CDT_CTX_KEY_REL_INDEX_RANGE) {
+				if (krir.mask != NULL) {
+					tri = cdt_idx_mask_is_set(krir.mask, i) ? AS_EXP_TRUE
+															: AS_EXP_FALSE;
+				}
+				else {
+					tri = (i >= krir.s && i < krir.e) ? AS_EXP_TRUE
+													  : AS_EXP_FALSE;
+				}
+			}
+			else if (by_type == AS_CDT_CTX_VALUE_REL_RANK_RANGE) {
+				tri = (vrr.mask != NULL && cdt_idx_mask_is_set(vrr.mask, i))
+						? AS_EXP_TRUE
+						: AS_EXP_FALSE;
+			}
 			else {
 				tri = AS_EXP_UNK;
+			}
+
+			if (entry->inverted && tri != AS_EXP_UNK) {
+				tri = (tri == AS_EXP_TRUE) ? AS_EXP_FALSE : AS_EXP_TRUE;
 			}
 
 			if (tri == AS_EXP_TRUE && entry->and_exp != NULL) {
@@ -2892,13 +3741,13 @@ cdt_select_map(select_ctx* sel, uint32_t level)
 				return false;
 			}
 
-			if (by_type == AS_CDT_CTX_KEY_LIST && kl.check_order &&
+			if (by_type == AS_CDT_CTX_KEY_LIST && vl.check_order &&
 					i < ele_count - 1 &&
-					msgpack_cmp_peek(&kl.mp_key, &sel->mp_in) !=
+					msgpack_cmp_peek(&vl.mp_key, &sel->mp_in) !=
 							MSGPACK_CMP_LESS) {
-				kl.rank = kl.ele_count;
-				kl.check_order = false;
-				kl.unordered = true;
+				vl.rank = vl.ele_count;
+				vl.check_order = false;
+				vl.unordered = true;
 			}
 		}
 	}
@@ -3196,6 +4045,11 @@ cdt_select_select(select_ctx* sel)
 		cdt_select_adjust_hdr1(sel, 0, leaf_ele_count, false);
 	}
 
+	// For SELECT_COUNT the caller reads the leaf count off
+	// sel->stack[n_levels-1].ele_count and sets the result as an
+	// integer-bin directly (the inner-loop leaf branches don't pack
+	// into sel->out because they're keyed on SELECT_LEAF_* equality).
+
 	return true;
 }
 
@@ -3268,11 +4122,38 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 		}
 		else {
 			stack[i] = (select_stack_entry){ .ctx_type = (uint32_t)ctx_type };
+
+			if ((ctx_type & AS_CDT_CTX_INVERTED) != 0) {
+				uint8_t base = ctx_type & AS_CDT_CTX_BASE_MASK;
+
+				if (base != AS_CDT_CTX_KEY_LIST && base != AS_CDT_CTX_VALUE_LIST &&
+						base != AS_CDT_CTX_KEY_INTERVAL &&
+						base != AS_CDT_CTX_VALUE_INTERVAL &&
+						base != AS_CDT_CTX_INDEX_RANGE &&
+						base != AS_CDT_CTX_RANK_RANGE &&
+						base != AS_CDT_CTX_KEY_REL_INDEX_RANGE &&
+						base != AS_CDT_CTX_VALUE_REL_RANK_RANGE) {
+					cf_warning(AS_PARTICLE,
+							"cdt_select_stack_init() INVERTED only on LIST/INTERVAL/RANGE ctx at pair %u",
+							j);
+					ret = -AS_ERR_PARAMETER;
+					break;
+				}
+
+				stack[i].inverted = true;
+			}
 		}
 
 		uint32_t buf_sz;
 		const uint8_t* buf;
 		int64_t index;
+
+		// KEY/VALUE and EXP context elements are consumed as one contiguous
+		// region (a ptr view / a non-owning as_exp), which holds only while a
+		// select blob stays contiguous. The cf_asserts below enforce that.
+		const uint8_t* ctx_vec_end = mv->idx < mv->n_vecs
+				? mv->vecs[mv->idx].buf + mv->vecs[mv->idx].buf_sz
+				: NULL;
 
 		switch (ctx_type & 0x0f) {
 		case AS_CDT_CTX_INDEX:
@@ -3291,6 +4172,13 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 		case AS_CDT_CTX_KEY:
 		case AS_CDT_CTX_VALUE:
 		case AS_CDT_CTX_KEY_LIST:
+		case AS_CDT_CTX_VALUE_LIST:
+		case AS_CDT_CTX_KEY_INTERVAL:
+		case AS_CDT_CTX_VALUE_INTERVAL:
+		case AS_CDT_CTX_INDEX_RANGE:
+		case AS_CDT_CTX_RANK_RANGE:
+		case AS_CDT_CTX_KEY_REL_INDEX_RANGE:
+		case AS_CDT_CTX_VALUE_REL_RANK_RANGE:
 			buf = msgpack_get_ele_vec(mv, &buf_sz);
 
 			if (buf == NULL) {
@@ -3302,6 +4190,8 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 				break;
 			}
 
+			cf_assert(buf + buf_sz <= ctx_vec_end, AS_PARTICLE,
+					"select context element straddles a vec boundary");
 			stack[i].value.ptr = buf;
 			stack[i].value.sz = buf_sz;
 			break;
@@ -3317,6 +4207,9 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 				ret = -AS_ERR_PARAMETER;
 				break;
 			}
+
+			cf_assert(buf + buf_sz <= ctx_vec_end, AS_PARTICLE,
+					"select context expression straddles a vec boundary");
 
 			as_exp** exp = is_and ? &stack[i].and_exp : &stack[i].exp;
 			msgpack_type type = msgpack_buf_peek_type(buf, buf_sz);
@@ -3463,7 +4356,7 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 		return false;
 	}
 
-	uint16_t type = flags_i64 & 0xF;
+	uint16_t type = flags_i64 & SELECT_RTYPE_MASK;
 
 	switch (type) {
 	case SELECT_TREE:
@@ -3471,6 +4364,8 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 	case SELECT_LEAF_MAP_KEY:
 	case SELECT_LEAF_MAP_KEY_VALUE:
 	case SELECT_APPLY:
+	case SELECT_COUNT:
+	case SELECT_EXISTS:
 		break;
 	default:
 		cf_warning(AS_PARTICLE,
@@ -3482,7 +4377,7 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 		return false;
 	}
 
-	uint16_t flags = flags_i64 & 0xF0;
+	uint16_t flags = flags_i64 & SELECT_FLAG_MASK;
 	uint32_t expected_count = 2;
 
 	if (type == SELECT_APPLY) {
@@ -3609,6 +4504,41 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 		as_exp_destroy(exp);
 		select_apply_free_mem(&apply);
 	}
+	else if (type == SELECT_COUNT) {
+		// COUNT returns an integer-bin — no msgpack buffer needed. The
+		// inner loop accrues into sel.stack[n_levels-1].ele_count;
+		// pull it out and store directly via as_bin_set_int.
+		sel.out.buffer = NULL;
+		sel.out.capacity = 0;
+
+		if (cdt_select_select(&sel)) {
+			as_bin_set_int(com->result.result,
+					(int64_t)sel.stack[sel.n_levels - 1].ele_count);
+		}
+		else {
+			cf_assert(sel.ret_code != AS_OK, AS_PARTICLE,
+					"select failed: unexpected ret_code=%d", sel.ret_code);
+		}
+	}
+	else if (type == SELECT_EXISTS) {
+		// EXISTS returns a bool — early-exits on first leaf-level match.
+		// cdt_select_select returns false either on a real error
+		// (sel.ret_code != AS_OK) or on a successful short-circuit
+		// (sel.early_exit set). Walk completing normally with no match
+		// returns true and ele_count = 0 → bool false.
+		sel.out.buffer = NULL;
+		sel.out.capacity = 0;
+
+		bool ok = cdt_select_select(&sel);
+
+		if (ok || sel.early_exit) {
+			as_bin_set_bool(com->result.result, sel.early_exit);
+		}
+		else {
+			cf_assert(sel.ret_code != AS_OK, AS_PARTICLE,
+					"select failed: unexpected ret_code=%d", sel.ret_code);
+		}
+	}
 	else {
 		// Allocate the resuilt size as the bin msgpack size.
 		// Selected msgpack is a subset of bin elements so it should not be
@@ -3687,22 +4617,44 @@ cdt_process_state_context_eval(cdt_process_state* state, cdt_op_mem* com)
 	if (! com->ctx.create_triggered) {
 		msgpack_in mp;
 		msgpack_type ctx_type;
-		msgpack_type expected = IS_CDT_LIST_OP(state->type) ? MSGPACK_TYPE_LIST
-															: MSGPACK_TYPE_MAP;
 
 		cdt_context_fill_unpacker(&com->ctx, &mp);
 		ctx_type = msgpack_peek_type(&mp);
 
-		if (ctx_type != expected) {
-			const char* name = IS_CDT_LIST_OP(state->type) ? "list" : "map";
+		// AS_CDT_OP_SIZE is polymorphic — dispatch to LIST_SIZE or MAP_SIZE
+		// based on what we navigated to.
+		if (state->type == AS_CDT_OP_SIZE) {
+			if (ctx_type == MSGPACK_TYPE_LIST) {
+				state->type = AS_CDT_OP_LIST_SIZE;
+			}
+			else if (ctx_type == MSGPACK_TYPE_MAP) {
+				state->type = AS_CDT_OP_MAP_SIZE;
+			}
+			else {
+				cf_warning(AS_PARTICLE,
+						"size op on non-CDT subcontext (type %d)", ctx_type);
+				com->ret_code = -AS_ERR_INCOMPATIBLE_TYPE;
+				return false;
+			}
+		}
+		else {
+			msgpack_type expected = IS_CDT_LIST_OP(state->type)
+					? MSGPACK_TYPE_LIST
+					: MSGPACK_TYPE_MAP;
 
-			cf_warning(AS_PARTICLE, "subcontext type %d != expected type %d (%s)",
-					ctx_type, expected, name);
-			as_error_details_set_fmt(AS_SUB_NONE,
-					"cdt context eval subcontext is type %s, expected %s (%s)",
-					msgpack_type_str(ctx_type), msgpack_type_str(expected), name);
-			com->ret_code = -AS_ERR_INCOMPATIBLE_TYPE;
-			return false;
+			if (ctx_type != expected) {
+				const char* name = IS_CDT_LIST_OP(state->type) ? "list" : "map";
+
+				cf_warning(AS_PARTICLE,
+						"subcontext type %d != expected type %d (%s)", ctx_type,
+						expected, name);
+				as_error_details_set_fmt(AS_SUB_NONE,
+						"cdt context eval subcontext is type %s, expected %s (%s)",
+						msgpack_type_str(ctx_type), msgpack_type_str(expected),
+						name);
+				com->ret_code = -AS_ERR_INCOMPATIBLE_TYPE;
+				return false;
+			}
 		}
 	}
 
@@ -5040,6 +5992,29 @@ cdt_packed_read(cdt_process_state* state, const as_bin* b, as_bin* result)
 	};
 
 	bool success;
+
+	// AS_CDT_OP_SIZE is polymorphic — at this entry point (no ctx wrapper)
+	// the bin's particle type tells us whether we're sizing a list or a map.
+	// The ctx-wrapped case is resolved inside cdt_process_state_context_eval.
+	if (state->type == AS_CDT_OP_SIZE) {
+		uint8_t bin_type = as_bin_get_particle_type(b);
+
+		if (bin_type == AS_PARTICLE_TYPE_LIST) {
+			state->type = AS_CDT_OP_LIST_SIZE;
+		}
+		else if (bin_type == AS_PARTICLE_TYPE_MAP) {
+			state->type = AS_CDT_OP_MAP_SIZE;
+		}
+		else {
+			cf_warning(AS_PARTICLE,
+					"cdt_packed_read() size op on non-CDT bin type %u", bin_type);
+			com.ret_code = -AS_ERR_INCOMPATIBLE_TYPE;
+			as_bin_set_empty(result);
+			rollback_alloc_rollback(alloc_idx);
+			rollback_alloc_rollback(alloc_result);
+			return com.ret_code;
+		}
+	}
 
 	if (state->type == AS_CDT_OP_SELECT) {
 		success = cdt_process_state_select(state, &com);
@@ -7772,10 +8747,14 @@ cdt_msgpack_ctx_to_dynbuf(msgpack_in* mp, cf_dyn_buf* db)
 		[AS_CDT_CTX_KEY] = "key",
 		[AS_CDT_CTX_VALUE] = "value",
 		[AS_CDT_CTX_EXP] = "exp",
-		[AS_CDT_CTX_INDEX_LIST] = "index_list",
-		[AS_CDT_CTX_RANK_LIST] = "rank_list",
+		[AS_CDT_CTX_INDEX_RANGE] = "index_range",
+		[AS_CDT_CTX_RANK_RANGE] = "rank_range",
 		[AS_CDT_CTX_KEY_LIST] = "key_list",
-		[AS_CDT_CTX_VALUE_LIST] = "value_list" };
+		[AS_CDT_CTX_VALUE_LIST] = "value_list",
+		[AS_CDT_CTX_KEY_INTERVAL] = "key_interval",
+		[AS_CDT_CTX_VALUE_INTERVAL] = "value_interval",
+		[AS_CDT_CTX_KEY_REL_INDEX_RANGE] = "key_rel_index_range",
+		[AS_CDT_CTX_VALUE_REL_RANK_RANGE] = "value_rel_rank_range" };
 
 	cf_dyn_buf_append_string(db, "[");
 

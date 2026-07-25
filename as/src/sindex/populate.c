@@ -40,9 +40,9 @@
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
-#include "base/exp.h"
 #include "base/index.h"
 #include "base/set_index.h"
+#include "exp/exp.h"
 #include "fabric/partition.h"
 #include "sindex/sindex.h"
 #include "sindex/sindex_tree.h"

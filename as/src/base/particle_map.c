@@ -6200,12 +6200,27 @@ packed_map_write_k_ordered(const packed_map* map, uint8_t* write_ptr,
 static void
 packed_map_sort_in_place(packed_map* map)
 {
-	uint8_t* temp_mem = cf_malloc(map->content_sz);
-	uint8_t* start_write = (uint8_t*)map->contents;
-	DEFER_FREE(temp_mem);
+	define_deferred_memory(temp_mem, map->content_sz);
 
 	packed_map_write_k_ordered(map, temp_mem, NULL);
-	memcpy(start_write, temp_mem, map->content_sz);
+	memcpy((uint8_t*)map->contents, temp_mem, map->content_sz);
+}
+
+// Key-sort a raw K_ORDERED msgpack map buffer in place. buf must be a
+// well-formed K_ORDERED map with no persist index (the AEL literal packer's
+// encoding: header count = ele_count + 1, ext pair with K_ORDERED, packed nil,
+// then the KV pairs). Returns false if the buffer doesn't parse as a map.
+bool
+map_buf_sort_in_place(uint8_t* buf, uint32_t buf_sz)
+{
+	packed_map map;
+
+	if (! packed_map_init(&map, buf, buf_sz, false)) {
+		return false;
+	}
+
+	packed_map_sort_in_place(&map);
+	return true;
 }
 
 //------------------------------------------------

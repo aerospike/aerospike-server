@@ -101,6 +101,7 @@ clean:
 	$(RM) $(DEPENDENCIES)
 
 $(LIBRARY): $(OBJECTS)
+#	$(RM) $(LIBRARY)
 	$(AR) rs $(LIBRARY) $(OBJECTS)
 
 ifeq ($(ARCH),x86_64)

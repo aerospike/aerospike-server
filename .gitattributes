@@ -1,0 +1,3 @@
+# AEL: checked-in Lemon/re2c output for builders without those tools.
+# Mark as generated so GitHub collapses / de-emphasizes them in PR diffs.
+as/src/exp/*.copy linguist-generated=true

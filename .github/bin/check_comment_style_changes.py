@@ -92,6 +92,33 @@ def added_lines(diff_range, path):
     return nums
 
 
+def introduces_block_comment(text):
+    # True only if `text` opens a real /* comment - not a /* that sits inside a
+    # string or char literal, and not one after a // line comment. C string
+    # literals and // comments do not span lines, and the caller already skips
+    # the license header, so this line-local scan is enough. It removes false
+    # positives on AEL test inputs like ASSERT_HEX_EQ("$.a /* c */ > 1", ...)
+    # and on /* sitting inside an existing // comment.
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == "/" and i + 1 < n and text[i + 1] == "/":
+            return False
+        if c == "/" and i + 1 < n and text[i + 1] == "*":
+            return True
+        if c in ('"', "'"):
+            i += 1
+            while i < n:
+                if text[i] == "\\":
+                    i += 2
+                    continue
+                if text[i] == c:
+                    break
+                i += 1
+        i += 1
+    return False
+
+
 def main():
     base, head = parse_args(sys.argv[1:])
     diff_range = "%s...%s" % (base, head) if base else "origin/master...%s" % head
@@ -113,7 +140,7 @@ def main():
         skip_through = header_last_line(src)
         added = added_lines(diff_range, path)
         for ln, text in enumerate(src.splitlines(), 1):
-            if ln > skip_through and ln in added and "/*" in text:
+            if ln > skip_through and ln in added and introduces_block_comment(text):
                 findings.append((path, ln))
 
     if not findings:

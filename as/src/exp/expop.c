@@ -24,7 +24,7 @@
 // Includes.
 //
 
-#include "base/expop.h"
+#include "exp/expop.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -35,8 +35,8 @@
 #include "msgpack_in.h"
 
 #include "base/datamodel.h"
-#include "base/exp.h"
 #include "base/proto.h"
+#include "exp/exp.h"
 #include "transaction/write.h"
 
 //==========================================================

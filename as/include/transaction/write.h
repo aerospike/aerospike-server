@@ -34,8 +34,8 @@
 
 #include "dynbuf.h"
 
-#include "base/exp.h"
 #include "base/transaction.h"
+#include "exp/exp.h"
 
 //==========================================================
 // Forward declarations.

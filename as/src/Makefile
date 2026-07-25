@@ -18,8 +18,6 @@ BASE_HEADERS += cfg_tree_handlers.hpp
 BASE_HEADERS += cfg_tree_wrapper.h
 BASE_HEADERS += datamodel.h
 BASE_HEADERS += masking.h
-BASE_HEADERS += exp.h
-BASE_HEADERS += expop.h
 BASE_HEADERS += features.h
 BASE_HEADERS += health.h
 BASE_HEADERS += index.h
@@ -58,8 +56,6 @@ BASE_SOURCES += cfg_info.c
 BASE_SOURCES += cfg_tree.cc
 BASE_SOURCES += cfg_tree_handlers.cc
 BASE_SOURCES += cfg_tree_wrapper.cc
-BASE_SOURCES += exp.c
-BASE_SOURCES += expop.c
 BASE_SOURCES += health.c
 BASE_SOURCES += index.c
 BASE_SOURCES += json_init.c
@@ -193,6 +189,30 @@ ifneq ($(USE_EE),1)
   STORAGE_SOURCES += flat_ce.c
 endif
 
+EXP_HEADERS += exp.h
+EXP_HEADERS += exp_rt.h
+EXP_HEADERS += expop.h
+EXP_HEADERS += exp_wire.h
+EXP_HEADERS += ast.h
+EXP_HEADERS += codegen.h
+EXP_HEADERS += ael_diag.h
+EXP_HEADERS += ael_parse.h
+EXP_HEADERS += ael_string.h
+EXP_HEADERS += ael_actions.h
+EXP_HEADERS += ael_func_table.h
+EXP_HEADERS += ael_lexer.h
+EXP_HEADERS += parse_context.h
+
+EXP_SOURCES += exp.c
+EXP_SOURCES += exp_rt.c
+EXP_SOURCES += expop.c
+EXP_SOURCES += ast.c
+EXP_SOURCES += codegen.c
+EXP_SOURCES += ael_string.c
+EXP_SOURCES += ael_actions.c
+EXP_SOURCES += ael_func_table.c
+EXP_SOURCES += ael_diag.c
+
 TRANSACTION_HEADERS += delete.h
 TRANSACTION_HEADERS += duplicate_resolve.h
 TRANSACTION_HEADERS += mrt_roll.h
@@ -231,6 +251,7 @@ ifneq ($(USE_EE),1)
 endif
 
 HEADERS = $(BASE_HEADERS:%=base/%)
+HEADERS += $(EXP_HEADERS:%=exp/%)
 HEADERS += $(FABRIC_HEADERS:%=fabric/%)
 HEADERS += $(GEOSPATIAL_HEADERS:%=geospatial/%)
 HEADERS += $(QUERY_HEADERS:%=query/%)
@@ -240,6 +261,7 @@ HEADERS += $(TRANSACTION_HEADERS:%=transaction/%)
 HEADERS += $(XDR_HEADERS:%=xdr/%)
 
 SOURCES = $(BASE_SOURCES:%=base/%)
+SOURCES += $(EXP_SOURCES:%=exp/%)
 SOURCES += $(FABRIC_SOURCES:%=fabric/%)
 SOURCES += $(GEOSPATIAL_SOURCES:%=geospatial/%)
 SOURCES += $(QUERY_SOURCES:%=query/%)
@@ -295,7 +317,9 @@ LIBRARIES := $(AS_LIBRARIES) $(LIBRARIES)
 
 AS_LIB_DEPS = $(AS_LIBRARIES)
 
-OBJECTS.c = $(SOURCES:%.c=$(OBJECT_DIR)/%.o) $(VERSION_OBJ)
+EXP_GEN_OBJ = $(OBJECT_DIR)/exp/ael_parser.o $(OBJECT_DIR)/exp/ael_lexer.o
+
+OBJECTS.c = $(SOURCES:%.c=$(OBJECT_DIR)/%.o) $(VERSION_OBJ) $(EXP_GEN_OBJ)
 OBJECTS = $(OBJECTS.c:%.cc=$(OBJECT_DIR)/%.o)
 DEPENDENCIES = $(OBJECTS:%.o=%.d)
 
@@ -314,12 +338,56 @@ check-syntax:
 
 .PHONY: lib
 lib: $(OBJECTS) $(AS_LIBRARIES)
+#	$(RM) $(LIBRARY_DIR)/libaerospike.a
 	ar rcsT $(LIBRARY_DIR)/libaerospike.a $(OBJECTS) $(AS_LIBRARIES)
 
 $(SERVER): $(OBJECTS) $(AS_LIB_DEPS)
 	$(LINK.c) -o $(SERVER) $(OBJECTS) $(LIBRARIES)
 
 include $(DEPTH)/make_in/Makefile.targets
+
+# AEL -- lemon/re2c generated sources.
+#
+# Lemon produces both .c and .h; use a stamp file so parallel make runs the
+# recipe only once (grouped targets &: require GNU Make 4.3+, RHEL 8 has 4.2).
+#
+# When lemon is available: regenerate and update the checked-in fallback copy.
+# When lemon is missing: use the fallback copy (ael_parser.[ch].copy).
+$(GEN_DIR)/.lemon_stamp: exp/ael_parser.y
+	@mkdir -p $(GEN_DIR)
+	@if command -v lemon >/dev/null 2>&1; then \
+		cp $< $(GEN_DIR)/ael_parser.y \
+		&& cd $(GEN_DIR) && lemon ael_parser.y \
+		&& rm -f ael_parser.out \
+		&& cp ael_parser.c $(CURDIR)/$(dir $<)ael_parser.c.copy \
+		&& cp ael_parser.h $(CURDIR)/$(dir $<)ael_parser.h.copy; \
+	else \
+		echo "  lemon not found -- using checked-in ael_parser.[ch].copy"; \
+		cp $(dir $<)ael_parser.c.copy $(GEN_DIR)/ael_parser.c; \
+		cp $(dir $<)ael_parser.h.copy $(GEN_DIR)/ael_parser.h; \
+	fi
+	@touch $@
+
+$(GEN_DIR)/ael_parser.c: $(GEN_DIR)/.lemon_stamp ;
+$(GEN_DIR)/ael_parser.h: $(GEN_DIR)/.lemon_stamp ;
+
+# When re2c is available: regenerate and update the checked-in fallback copy.
+# When re2c is missing: use the fallback copy (ael_lexer.c.copy).
+$(GEN_DIR)/ael_lexer.c: exp/ael_lexer.re
+	@mkdir -p $(GEN_DIR)
+	@if command -v re2c >/dev/null 2>&1; then \
+		re2c -W --no-generation-date -o $@ $<; \
+		cp $@ $(dir $<)ael_lexer.c.copy; \
+	else \
+		echo "  re2c not found -- using checked-in ael_lexer.c.copy"; \
+		cp $(dir $<)ael_lexer.c.copy $@; \
+	fi
+
+$(OBJECT_DIR)/exp/ael_parser.o: $(GEN_DIR)/ael_parser.c | $(GEN_DIR)/ael_parser.h
+	$(CC) $(CFLAGS) -Wno-sign-compare -Wno-implicit-fallthrough -o $@ -c $(INCLUDES) $<
+
+$(OBJECT_DIR)/exp/ael_lexer.o: $(GEN_DIR)/ael_lexer.c | $(GEN_DIR)/ael_parser.h
+	$(CC) $(CFLAGS) -Wno-sign-compare -o $@ -c $(INCLUDES) $<
 
 # Ignore S2 induced warnings
 S2_WNO := -Wno-attributes -Wno-sign-compare -Wno-deprecated-declarations

@@ -41,7 +41,6 @@
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
-#include "base/exp.h"
 #include "base/index.h"
 #include "base/proto.h"
 #include "base/security.h"
@@ -49,6 +48,7 @@
 #include "base/stats.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
+#include "exp/exp.h"
 #include "transaction/rw_utils.h"
 
 //---------------------------------------------------------

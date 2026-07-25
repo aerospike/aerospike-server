@@ -42,10 +42,10 @@
 #include "msgpack_in.h"
 
 #include "base/datamodel.h"
-#include "base/exp.h"
-#include "base/expop.h"
 #include "base/proto.h"
 #include "base/thr_info.h"
+#include "exp/exp.h"
+#include "exp/expop.h"
 #include "fabric/partition.h"
 #include "storage/storage.h"
 #include "transaction/write.h"

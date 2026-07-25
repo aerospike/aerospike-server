@@ -125,3 +125,47 @@ typedef struct cf_ll_buf_s {
 extern void cf_ll_buf_init_heap(cf_ll_buf* llb, size_t buf_sz);
 extern void cf_ll_buf_reserve(cf_ll_buf* llb, size_t sz, uint8_t** from);
 extern void cf_ll_buf_free(cf_ll_buf* llb);
+
+typedef uint8_t dynmem_buf_idx;
+typedef uint32_t dynmem_obj_idx;
+
+typedef struct dynmem_s {
+	uint32_t size;
+	uint32_t obj_sz;
+	dynmem_obj_idx alloc_idx;
+	dynmem_buf_idx n_mem;
+	uint8_t shift0;
+	uint8_t flags;
+	uint8_t pad;
+	uint8_t* mem[30];
+} dynmem;
+
+#define DYNMEM_FLAG_0_ON_STACK 0x01
+
+#define define_dynobj(_name, _obj_sz, _n_obj)                                  \
+	uint8_t _##_name##_mem[(_n_obj) * (_obj_sz)] __attribute__((aligned(16))); \
+	dynmem _name;                                                              \
+	dynmem_init(&_name, (_obj_sz), (_n_obj), (_##_name##_mem))
+
+#define define_dynmem(_name, _size) define_dynobj(_name, 1, _size)
+
+void dynmem_init(dynmem* dm, uint32_t obj_sz, uint32_t n_obj, void* stack_mem);
+// @return NULL if index is out of bounds
+void* dynmem_at(dynmem* dm, dynmem_obj_idx index);
+const void* dynmem_get(const dynmem* dm, dynmem_obj_idx index);
+
+// @return ptr to obj at index, will grow if necessary
+void* dynmem_reserve(dynmem* dm, dynmem_obj_idx* index_r);
+void* dynmem_reserve_n(dynmem* dm, uint32_t n, dynmem_obj_idx* index_r);
+bool dynmem_set(dynmem* dm, const dynmem_obj_idx index, const void* buf);
+void dynmem_destroy(dynmem* dm);
+
+static inline dynmem_buf_idx
+dynmem_get_buf_idx(const dynmem* dm, dynmem_obj_idx index)
+{
+	const uint32_t high = index >> dm->shift0;
+	return (dynmem_buf_idx)(high == 0 ? 0 : (32 - __builtin_clz(high)));
+}
+
+dynmem_obj_idx dynmem_get_obj_idx(const dynmem* dm, dynmem_buf_idx buf_idx,
+		void* obj);

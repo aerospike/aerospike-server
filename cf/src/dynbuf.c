@@ -29,6 +29,10 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "log.h"
+
+static bool dynmem_grow(dynmem* dm);
+
 #define MAX_BACKOFF (1024 * 256)
 #define MAX_FORMAT 100
 
@@ -493,4 +497,160 @@ cf_ll_buf_free(cf_ll_buf* llb)
 		cur = cur->next;
 		cf_free(temp);
 	}
+}
+
+void
+dynmem_init(dynmem* dm, uint32_t obj_sz, uint32_t n_obj, void* stack_mem)
+{
+	cf_assert(obj_sz > 0, CF_MISC, "obj_sz %u must be greater than 0", obj_sz);
+	cf_assert(n_obj >= 8, CF_MISC, "n_obj %u < 8", n_obj);
+	cf_assert((n_obj & (n_obj - 1)) == 0, CF_MISC,
+			"n_obj %u must be a power of 2", n_obj);
+
+	if (__builtin_mul_overflow(n_obj, obj_sz, &dm->size)) {
+		cf_crash(CF_MISC, "overflow: n_obj %u * obj_sz %u", n_obj, obj_sz);
+	}
+
+	dm->obj_sz = obj_sz;
+	dm->alloc_idx = 0;
+	dm->n_mem = 1;
+	dm->shift0 = (uint8_t)(31 - __builtin_clz(n_obj));
+	dm->flags = (stack_mem == NULL) ? 0 : DYNMEM_FLAG_0_ON_STACK;
+	dm->pad = 0;
+	dm->mem[0] = stack_mem;
+
+	if (stack_mem == NULL) {
+		dm->mem[0] = cf_malloc(dm->size);
+	}
+}
+
+void*
+dynmem_at(dynmem* dm, dynmem_obj_idx index)
+{
+	const dynmem* cdm =
+			(const dynmem*)dm; // ensure dm doesn't change for dynmem_get()
+	const uint8_t mem_i = dynmem_get_buf_idx(cdm, index);
+	const uint32_t sub = (mem_i == 0 ? 0 : (1U << (mem_i - 1)) << cdm->shift0);
+	const uint32_t offset = index - sub;
+
+	cf_assert(index >= sub, CF_MISC, "index %u < sub %u", index, sub);
+
+	if (mem_i >= cdm->n_mem) {
+		return NULL;
+	}
+
+	uint32_t byte_offset;
+
+	if (__builtin_mul_overflow(offset, cdm->obj_sz, &byte_offset)) {
+		cf_crash(CF_MISC, "overflow");
+	}
+
+	return (void*)(dm->mem[mem_i] + byte_offset);
+}
+
+const void*
+dynmem_get(const dynmem* dm, dynmem_obj_idx index)
+{
+	return (const void*)dynmem_at((dynmem*)dm, index);
+}
+
+void*
+dynmem_reserve(dynmem* dm, dynmem_obj_idx* index_r)
+{
+	return dynmem_reserve_n(dm, 1, index_r);
+}
+
+void*
+dynmem_reserve_n(dynmem* dm, uint32_t n, dynmem_obj_idx* index_r)
+{
+	uint32_t index = dm->alloc_idx;
+
+	while (index + n > dm->size / dm->obj_sz) {
+		if (! dynmem_grow(dm)) {
+			return NULL; // overflow
+		}
+	}
+
+	dm->alloc_idx += n;
+
+	if (index_r) {
+		*index_r = index;
+	}
+
+	return dynmem_at(dm, index);
+}
+
+bool
+dynmem_set(dynmem* dm, const dynmem_obj_idx index, const void* buf)
+{
+	void* dst = dynmem_at(dm, index);
+
+	if (dst == NULL || buf == NULL) {
+		return false;
+	}
+
+	memcpy(dst, buf, dm->obj_sz);
+
+	return true;
+}
+
+void
+dynmem_destroy(dynmem* dm)
+{
+	uint8_t start = (dm->flags & DYNMEM_FLAG_0_ON_STACK) ? 1 : 0;
+
+	for (uint8_t i = start; i < dm->n_mem; i++) {
+		if (dm->mem[i]) {
+			cf_free(dm->mem[i]);
+			dm->mem[i] = NULL;
+		}
+	}
+
+	dm->n_mem = 0;
+	dm->size = 0;
+	dm->alloc_idx = 0;
+}
+
+static inline uint32_t
+dynmem_n_objs(const dynmem* dm, dynmem_buf_idx buf_idx)
+{
+	cf_assert(buf_idx < dm->n_mem, CF_MISC, "buf_idx %u >= n_mem %u", buf_idx,
+			dm->n_mem);
+
+	uint32_t n_obj = 1U << dm->shift0;
+
+	if (buf_idx == 0) {
+		return n_obj;
+	}
+
+	return n_obj << (buf_idx - 1);
+}
+
+dynmem_obj_idx
+dynmem_get_obj_idx(const dynmem* dm, dynmem_buf_idx buf_idx, void* obj)
+{
+	uint32_t n_obj_at_idx = dynmem_n_objs(dm, buf_idx);
+	uint32_t sz = n_obj_at_idx * dm->obj_sz;
+
+	cf_assert((uintptr_t)obj >= (uintptr_t)dm->mem[buf_idx], CF_MISC,
+			"obj %p < dm->mem[%u] %p", obj, buf_idx, dm->mem[buf_idx]);
+	cf_assert((uint8_t*)obj < dm->mem[buf_idx] + sz, CF_MISC,
+			"obj %p is out of bounds of dm->mem[%u] %p + %u", obj, buf_idx,
+			dm->mem[buf_idx], sz);
+	return (dynmem_obj_idx)(((uint8_t*)obj - dm->mem[buf_idx]) / dm->obj_sz);
+}
+
+static bool
+dynmem_grow(dynmem* dm)
+{
+	uint32_t new_sz;
+
+	if (dm->n_mem >= 30 || __builtin_add_overflow(dm->size, dm->size, &new_sz)) {
+		return false;
+	}
+
+	dm->mem[dm->n_mem++] = cf_malloc(dm->size);
+	dm->size = new_sz;
+
+	return true;
 }

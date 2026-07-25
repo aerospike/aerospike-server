@@ -74,7 +74,7 @@ main() {
     debian* | ubuntu*)
         run "${sudo[@]}" apt-get update
 
-        local -a pkgs=(libssl-dev zlib1g-dev) # common (build + runtime)
+        local -a pkgs=(lemon re2c libssl-dev zlib1g-dev) # common (build + runtime)
 
         if ! $RUNTIME_ONLY; then
             # gcc-plugin.h is in gcc-<major>-plugin-dev; resolve the version apt maps 'gcc' to.
@@ -102,7 +102,7 @@ main() {
         local pm="yum"
         have dnf && pm="dnf"
 
-        local -a pkgs=(openssl-devel zlib-devel) # common (build + runtime)
+        local -a pkgs=(re2c openssl-devel zlib-devel) # common (build + runtime)
 
         if ! $RUNTIME_ONLY; then
             pkgs+=(

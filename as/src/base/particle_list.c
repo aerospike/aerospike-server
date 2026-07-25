@@ -3620,6 +3620,23 @@ packed_list_check_order(const packed_list* list, bool error_on_dup)
 	return true;
 }
 
+// Check that a raw ORDERED-flagged msgpack list buffer has its elements in
+// ascending order (duplicates allowed). buf must be a well-formed list (the AEL
+// literal packer's :ORDERED encoding: header count = ele_count + 1, ext element
+// with ORDERED, then the elements). Returns false if it doesn't parse or isn't
+// ordered. The AEL path validates rather than sorts lists.
+bool
+list_buf_check_ordered(const uint8_t* buf, uint32_t buf_sz)
+{
+	packed_list list;
+
+	if (! packed_list_init(&list, buf, buf_sz)) {
+		return false;
+	}
+
+	return packed_list_check_order(&list, false);
+}
+
 static list_cmp_t
 packed_list_ordered_cmp_nondup(const packed_list* ordered, const packed_list* in)
 {

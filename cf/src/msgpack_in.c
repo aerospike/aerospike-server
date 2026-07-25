@@ -575,6 +575,11 @@ msgpack_peek_type(const msgpack_in* mp)
 {
 	const uint8_t* buf = mp->buf + mp->offset;
 	const uint8_t* end = mp->buf + mp->buf_sz;
+
+	if (buf >= end) {
+		return MSGPACK_TYPE_ERROR;
+	}
+
 	uint8_t b = *buf++;
 
 	switch (b) {
@@ -1626,6 +1631,7 @@ msgpack_cmp_parse(parse_meta* meta)
 
 	case 0xd4: // fixext 1
 		meta->len = 1;
+		CMP_PARSE_BUF_CHECK(meta, 1 + meta->len); // ext-type byte + data
 
 		if (*meta->buf++ == CMP_EXT_TYPE) {
 			meta->has_nonstorage = true;
@@ -1649,6 +1655,7 @@ msgpack_cmp_parse(parse_meta* meta)
 		return;
 	case 0xd5: // fixext 2
 		meta->len = 2;
+		CMP_PARSE_BUF_CHECK(meta, 1 + meta->len); // ext-type byte + data
 
 		if (*meta->buf++ == CMP_EXT_TYPE) {
 			meta->has_nonstorage = true;
@@ -1660,24 +1667,29 @@ msgpack_cmp_parse(parse_meta* meta)
 		return;
 	case 0xd6: // fixext 4
 		meta->len = 4;
+		CMP_PARSE_BUF_CHECK(meta, 1 + meta->len); // ext-type byte + data
 		meta->data = ++meta->buf;
 		meta->buf += 4;
 		meta->type = MSGPACK_TYPE_EXT;
 		return;
 	case 0xd7: // fixext 8
 		meta->len = 8;
+		CMP_PARSE_BUF_CHECK(meta, 1 + meta->len); // ext-type byte + data
 		meta->data = ++meta->buf;
 		meta->buf += 8;
 		meta->type = MSGPACK_TYPE_EXT;
 		return;
 	case 0xd8: // fixext 16
 		meta->len = 16;
+		CMP_PARSE_BUF_CHECK(meta, 1 + meta->len); // ext-type byte + data
 		meta->data = ++meta->buf;
 		meta->buf += 16;
 		meta->type = MSGPACK_TYPE_EXT;
 		return;
 	case 0xc7: // ext 8
+		CMP_PARSE_BUF_CHECK(meta, 1); // length byte
 		meta->len = *meta->buf++;
+		CMP_PARSE_BUF_CHECK(meta, 1 + meta->len); // ext-type byte + data
 
 		if (*meta->buf++ == CMP_EXT_TYPE && meta->len < 4 && meta->len != 0) {
 			meta->has_nonstorage = true;
@@ -1702,8 +1714,10 @@ msgpack_cmp_parse(parse_meta* meta)
 		meta->type = MSGPACK_TYPE_EXT;
 		return;
 	case 0xc8: { // ext 16
+		CMP_PARSE_BUF_CHECK(meta, 2); // 16-bit length
 		meta->len = cf_swap_from_be16(*(uint16_t*)meta->buf);
 		meta->buf += 2;
+		CMP_PARSE_BUF_CHECK(meta, 1 + meta->len); // ext-type byte + data
 
 		if (*meta->buf++ == CMP_EXT_TYPE && meta->len < 4 && meta->len != 0) {
 			meta->has_nonstorage = true;
@@ -1714,8 +1728,11 @@ msgpack_cmp_parse(parse_meta* meta)
 		return;
 	}
 	case 0xc9: { // ext 32
+		CMP_PARSE_BUF_CHECK(meta, 4); // 32-bit length
 		meta->len = cf_swap_from_be32(*(uint32_t*)meta->buf);
 		meta->buf += 4;
+		// 64-bit add so a ~4 GiB wire length can't wrap 1 + len to 0.
+		CMP_PARSE_BUF_CHECK(meta, (uint64_t)meta->len + 1); // ext-type + data
 
 		if (*meta->buf++ == CMP_EXT_TYPE && meta->len < 4 && meta->len != 0) {
 			meta->has_nonstorage = true;
