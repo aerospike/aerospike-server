@@ -10,6 +10,8 @@ permissions:
 
 jobs:
   check-title:
+    # Dev happens in the private citrusleaf org; skip when running in any mirror or fork copy of this repo.
+    if: ${{ github.repository_owner == 'citrusleaf' }}
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
