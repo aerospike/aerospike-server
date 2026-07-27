@@ -518,12 +518,12 @@ tree_needs_ordering(const tree t)
 		case BIT_FIELD_REF:
 		case ARRAY_REF:
 		case VIEW_CONVERT_EXPR:
+		case REALPART_EXPR:
+		case IMAGPART_EXPR:
 			// recurse - check operands for pointer dereferences and globals
 			break;
 
 		case ARRAY_RANGE_REF:
-		case REALPART_EXPR:
-		case IMAGPART_EXPR:
 		case INDIRECT_REF:
 		case TARGET_MEM_REF:
 			std::cerr << "unsupported tree code " << code << std::endl;
