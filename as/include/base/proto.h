@@ -335,6 +335,7 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_TYPE_BATCH             41
 #define AS_MSG_FIELD_TYPE_BATCH_WITH_SET    42
 #define AS_MSG_FIELD_TYPE_PREDEXP           43
+#define AS_MSG_FIELD_TYPE_WHERE             44
 #define AS_MSG_FIELD_TYPE_ERROR_DETAILS     45 // msgpack map payload
 
 // Max size of error detail (error message field) payload.
@@ -567,6 +568,7 @@ typedef enum {
 #define AS_MSG_FIELD_BIT_BATCH              (1 << 24)
 #define AS_MSG_FIELD_BIT_BATCH_WITH_SET     (1 << 25)
 #define AS_MSG_FIELD_BIT_PREDEXP            (1 << 26)
+#define AS_MSG_FIELD_BIT_WHERE              (1 << 27)
 
 //------------------------------------------------
 // as_msg_op.

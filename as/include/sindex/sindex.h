@@ -41,6 +41,8 @@
 #include "vector.h"
 
 #include "base/datamodel.h"
+#include "query/query_plan_candidates.h"
+#include "query/query_plan_result.h"
 #include "sindex/populate.h"
 #include "sindex/sindex_arena.h"
 #include "sindex/sindex_manager.h"
@@ -121,6 +123,16 @@ struct as_sindex_s* as_sindex_lookup_by_defn(const struct as_namespace_s* ns,
 		const uint8_t* ctx_buf, uint32_t ctx_buf_sz);
 struct as_sindex_s* as_sindex_lookup_by_iname(const struct as_namespace_s* ns,
 		const char* iname);
+
+typedef struct as_sindex_selection_s {
+	as_query_plan_result result;
+	struct as_sindex_s* si;
+	as_exp_sindex_candidate match;
+} as_sindex_selection;
+
+as_sindex_selection as_sindex_select_from_exp(const struct as_namespace_s* ns,
+		uint16_t set_id, const struct as_exp_s* filter_exp,
+		const char* hint_iname);
 
 // Info & stats.
 as_particle_type as_sindex_ktype_from_string(const char* ktype_str);

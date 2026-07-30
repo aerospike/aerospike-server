@@ -1,7 +1,7 @@
 /*
- * query.h
+ * query_plan_result.h
  *
- * Copyright (C) 2022 Aerospike, Inc.
+ * Copyright (C) 2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -22,21 +22,13 @@
 
 #pragma once
 
-#include <stdbool.h>
-
 //==========================================================
-// Forward declarations.
+// Typedefs & constants.
 //
 
-struct as_namespace_s;
-struct as_transaction_s;
-struct as_sindex_s;
-
-//==========================================================
-// Public API.
-//
-
-int as_query(struct as_transaction_s* tr, struct as_namespace_s* ns);
-
-bool as_query_sindex_must_mask(struct as_namespace_s* ns, const char* set_name,
-		const char* username, const struct as_sindex_s* si);
+typedef enum as_query_plan_result_e {
+	AS_QUERY_PLAN_PI, // primary-index scan
+	AS_QUERY_PLAN_SINDEX, // secondary-index path
+	AS_QUERY_PLAN_FILTERED_OUT, // filter unsatisfiable - zero rows
+	AS_QUERY_PLAN_ERROR, // malformed plan request
+} as_query_plan_result;

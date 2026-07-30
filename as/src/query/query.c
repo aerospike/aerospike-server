@@ -77,6 +77,8 @@
 #include "geospatial/geospatial.h"
 #include "query/query_job.h"
 #include "query/query_manager.h"
+#include "query/query_plan.h"
+#include "query/query_where.h"
 #include "sindex/sindex.h"
 #include "sindex/sindex_tree.h"
 #include "transaction/mrt_utils.h"
@@ -140,7 +142,8 @@ static bool get_query_si_name(const as_transaction* tr, as_namespace* ns,
 static bool get_query_socket_timeout(const as_transaction* tr, int32_t* timeout);
 
 static bool get_query_sample_max(const as_transaction* tr, uint64_t* sample_max);
-static bool get_query_filter_exp(const as_transaction* tr, as_exp** exp);
+static bool get_query_filter_exp(const as_transaction* tr,
+		const as_query_where* parsed_where, as_exp** exp);
 
 static bool get_range_field(const as_transaction* tr, as_namespace* ns,
 		as_query_range* range, as_query_sindex_def* si_def);
@@ -572,16 +575,37 @@ get_query_sample_max(const as_transaction* tr, uint64_t* sample_max)
 }
 
 static bool
-get_query_filter_exp(const as_transaction* tr, as_exp** exp)
+get_query_filter_exp(const as_transaction* tr,
+		const as_query_where* parsed_where, as_exp** exp)
 {
-	if (! as_transaction_has_predexp(tr)) {
+	*exp = NULL;
+
+	const bool has_where = as_transaction_has_where_field(tr);
+	const bool has_predexp = as_transaction_has_predexp(tr);
+
+	if (! has_where && ! has_predexp) {
 		return true;
 	}
 
-	const as_msg_field* f =
-			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_PREDEXP);
+	if (has_where) {
+		as_query_where where = { 0 };
+		const as_query_where* w = parsed_where;
 
-	*exp = as_exp_filter_build(f, true);
+		if (w == NULL) {
+			if (! as_query_where_parse(tr, &where)) {
+				return false;
+			}
+
+			w = &where;
+		}
+
+		*exp = as_query_where_build_filter(w);
+	}
+	else if (has_predexp) {
+		const as_msg_field* f =
+				as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_PREDEXP);
+		*exp = as_exp_filter_build(f, true);
+	}
 
 	return *exp != NULL;
 }
@@ -1042,13 +1066,14 @@ sort_geo_range(as_query_geo_range* geo)
 	}
 }
 
-static bool
-sindex_must_mask(as_query_job* _job)
+bool
+as_query_sindex_must_mask(as_namespace* ns, const char* set_name,
+		const char* username, const as_sindex* si)
 {
-	as_set* p_set = as_namespace_get_set_by_name(_job->ns, _job->set_name);
+	as_set* p_set = as_namespace_get_set_by_name(ns, set_name);
 	as_masking_ctx ms;
 
-	if (! as_masking_ctx_init(&ms, _job->ns->name, p_set, _job->username, NULL)) {
+	if (! as_masking_ctx_init(&ms, ns->name, p_set, username, NULL)) {
 		return false;
 	}
 
@@ -1056,21 +1081,21 @@ sindex_must_mask(as_query_job* _job)
 		return false;
 	}
 
-	if (_job->si->bin_name[0] != '\0') {
-		if (as_masking_has_rule(&ms, _job->si->bin_name, _job->si->ktype)) {
+	if (si->bin_name[0] != '\0') {
+		if (as_masking_has_rule(&ms, si->bin_name, si->ktype)) {
 			cf_warning(AS_QUERY,
 					"query on masked bin '%s' denied for unauthorized user",
-					_job->si->bin_name);
+					si->bin_name);
 			return true;
 		}
 	}
 
-	if (_job->si->exp_bins_info != NULL) {
-		uint32_t n_bins = cf_vector_size(_job->si->exp_bins_info);
+	if (si->exp_bins_info != NULL) {
+		uint32_t n_bins = cf_vector_size(si->exp_bins_info);
 
 		for (uint32_t i = 0; i < n_bins; i++) {
 			as_bin_info* bin_info =
-					(as_bin_info*)cf_vector_getp(_job->si->exp_bins_info, i);
+					(as_bin_info*)cf_vector_getp(si->exp_bins_info, i);
 
 			if (as_masking_has_rule(&ms, bin_info->name, bin_info->type)) {
 				cf_warning(AS_QUERY,
@@ -1082,6 +1107,13 @@ sindex_must_mask(as_query_job* _job)
 	}
 
 	return false;
+}
+
+static bool
+sindex_must_mask(as_query_job* _job)
+{
+	return as_query_sindex_must_mask(_job->ns, _job->set_name, _job->username,
+			_job->si);
 }
 
 static bool
@@ -1682,6 +1714,36 @@ static bool build_ops_response_msg(cf_buf_builder** bb_r, as_storage_rd* rd,
 static int
 basic_query_job_start(as_transaction* tr, as_namespace* ns)
 {
+	as_query_where where = { 0 };
+	bool has_where = as_transaction_has_where_field(tr);
+
+	if (has_where) {
+		if (! as_query_where_parse(tr, &where)) {
+			return AS_ERR_PARAMETER;
+		}
+
+		if (as_query_where_is_explain(&where)) {
+			uint32_t rps = 0;
+
+			if (! get_query_rps(tr, &rps)) {
+				return AS_ERR_PARAMETER;
+			}
+
+			int result = as_security_check_rps(tr->from.proto_fd_h, rps,
+					PERM_QUERY, false, NULL);
+
+			if (result != AS_OK) {
+				return result;
+			}
+
+			return as_query_plan(tr, ns, &where);
+		}
+
+		if (! as_query_where_validate_execution(&where)) {
+			return AS_ERR_PARAMETER;
+		}
+	}
+
 	as_msg* m = &tr->msgp->msg;
 
 	// TODO - phase out now? Or if/when future clients stop sending bit?
@@ -1767,7 +1829,8 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 			(! job->no_bin_data && // if no bin data, don't get ops
 					! basic_query_get_ops(tr, ns->name, &job->msgp,
 							&job->bin_names)) ||
-			! get_query_filter_exp(tr, &job->filter_exp)) {
+			! get_query_filter_exp(tr, has_where ? &where : NULL,
+					&job->filter_exp)) {
 		cf_warning(AS_QUERY, "basic query job failed msg field processing");
 		conn_query_job_destroy(conn_job);
 		as_query_job_destroy(_job);
@@ -2541,6 +2604,11 @@ aggr_query_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_PARAMETER;
 	}
 
+	if (as_transaction_has_where_field(tr)) {
+		cf_warning(AS_QUERY, "aggregation queries do not support WHERE field");
+		return AS_ERR_UNSUPPORTED_FEATURE;
+	}
+
 	if (as_transaction_has_predexp(tr)) {
 		cf_warning(AS_QUERY,
 				"aggregation queries do not support predexp filters");
@@ -3016,6 +3084,11 @@ static void udf_bg_query_tr_complete(void* udata, int result);
 int
 udf_bg_query_job_start(as_transaction* tr, as_namespace* ns)
 {
+	if (as_transaction_has_where_field(tr)) {
+		cf_warning(AS_QUERY, "udf-bg queries do not support WHERE field");
+		return AS_ERR_UNSUPPORTED_FEATURE;
+	}
+
 	// Temporary security vulnerability protection.
 	if (g_config.udf_execution_disabled) {
 		cf_warning(AS_QUERY, "udf-bg query job forbidden");
@@ -3074,7 +3147,7 @@ udf_bg_query_job_start(as_transaction* tr, as_namespace* ns)
 
 	udf_bg_query_job_init(job);
 
-	if (! get_query_filter_exp(tr, &job->origin.filter_exp)) {
+	if (! get_query_filter_exp(tr, NULL, &job->origin.filter_exp)) {
 		cf_warning(AS_QUERY, "udf-bg query job failed msg field processing");
 		as_query_job_destroy(_job);
 		return AS_ERR_PARAMETER;
@@ -3378,6 +3451,11 @@ static void ops_bg_query_tr_complete(void* udata, int result);
 static int
 ops_bg_query_job_start(as_transaction* tr, as_namespace* ns)
 {
+	if (as_transaction_has_where_field(tr)) {
+		cf_warning(AS_QUERY, "ops-bg queries do not support WHERE field");
+		return AS_ERR_UNSUPPORTED_FEATURE;
+	}
+
 	if (as_transaction_is_short_query(tr)) {
 		cf_warning(AS_QUERY, "ops-bg queries can't be 'short' queries");
 		return AS_ERR_PARAMETER;
@@ -3430,7 +3508,7 @@ ops_bg_query_job_start(as_transaction* tr, as_namespace* ns)
 
 	ops_bg_query_job_init(job);
 
-	if (! get_query_filter_exp(tr, &job->origin.filter_exp)) {
+	if (! get_query_filter_exp(tr, NULL, &job->origin.filter_exp)) {
 		cf_warning(AS_QUERY, "ops-bg query job failed msg field processing");
 		as_query_job_destroy(_job);
 		return AS_ERR_PARAMETER;

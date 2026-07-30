@@ -388,6 +388,12 @@ as_transaction_has_where_clause(const as_transaction* tr)
 }
 
 static inline bool
+as_transaction_has_where_field(const as_transaction* tr)
+{
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_WHERE) != 0;
+}
+
+static inline bool
 as_transaction_has_index_expression(const as_transaction* tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_INDEX_EXPRESSION) != 0;

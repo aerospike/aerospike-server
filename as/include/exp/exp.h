@@ -33,6 +33,7 @@
 
 #include "dynbuf.h"
 #include "msgpack_in.h"
+#include "vector.h"
 
 #include "base/datamodel.h"
 #include "base/index.h"
@@ -152,6 +153,7 @@ bool exp_geo_mp_to_op(msgpack_in* mp, struct exp_op_value_geo_s* op,
 //
 
 as_exp* as_exp_filter_build_base64(const char* buf64, uint32_t buf64_sz);
+as_exp* as_exp_filter_build_ael(const uint8_t* ael, uint32_t ael_sz);
 as_exp* as_exp_filter_build(const as_msg_field* msg, bool cpy_instr);
 as_exp* as_exp_build_buf(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 		cf_vector* bin_names_r);

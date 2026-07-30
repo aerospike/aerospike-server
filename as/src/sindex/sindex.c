@@ -26,6 +26,7 @@
 
 #include "sindex/sindex.h"
 
+#include <inttypes.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -113,6 +114,10 @@ static void add_blob_from_msgpack(msgpack_in* element, as_sindex_bin* sbin);
 static void add_geojson_from_msgpack(msgpack_in* element, as_sindex_bin* sbin);
 
 static char const* ktype_str(as_particle_type ktype, bool use_integer);
+
+static as_sindex* as_sindex_find_best(const as_namespace* ns, uint16_t set_id,
+		const cf_vector* candidates, const char* hint_iname,
+		as_exp_sindex_candidate* matched_r);
 const char* sindex_particle_type_str(as_particle_type type);
 static as_particle_type itype_to_exp_particle_type(as_sindex_type itype);
 
@@ -375,6 +380,168 @@ as_sindex_lookup_by_iname(const as_namespace* ns, const char* iname)
 	SINDEX_GRUNLOCK();
 
 	return si;
+}
+
+//==========================================================
+// Local helpers - sindex selection from expression candidates.
+//
+
+static as_sindex*
+as_sindex_find_best(const as_namespace* ns, uint16_t set_id,
+		const cf_vector* candidates, const char* hint_iname,
+		as_exp_sindex_candidate* matched_r)
+{
+	as_sindex* best_si = NULL;
+	uint64_t best_keys_per_bval = UINT64_MAX;
+	uint64_t best_n_keys = UINT64_MAX;
+	as_exp_sindex_candidate best_match = { 0 };
+
+	uint32_t n_candidates = cf_vector_size(candidates);
+
+	SINDEX_GRLOCK();
+
+	for (uint32_t i = 0; i < n_candidates; i++) {
+		as_exp_sindex_candidate c;
+
+		cf_vector_get(candidates, i, &c);
+
+		// itype comes from the candidate so collection sindexes (LIST /
+		// MAPKEYS / MAPVALUES / SET) can be matched once CDT extractors
+		// in exp.c populate the field. Scalar candidates today emit
+		// AS_SINDEX_ITYPE_DEFAULT, which keeps prior behaviour identical.
+		as_sindex* si = as_si_by_defn(ns, set_id, c.bin_name, c.ktype, c.itype,
+				NULL, 0, NULL, 0);
+
+		if (si == NULL && set_id != INVALID_SET_ID) {
+			si = as_si_by_defn(ns, INVALID_SET_ID, c.bin_name, c.ktype, c.itype,
+					NULL, 0, NULL, 0);
+		}
+
+		if (si == NULL || si->dropped || ! si->readable) {
+			cf_debug(AS_SINDEX,
+					"{%s} query-plan: skip candidate bin=%s ktype=%d (no/dropped/unreadable si)",
+					ns->name, c.bin_name, c.ktype);
+			continue;
+		}
+
+		// If the hint names this sindex exactly, prefer it over a higher-scoring one.
+		if (hint_iname != NULL && strcmp(si->iname, hint_iname) == 0) {
+			best_si = si;
+			best_match = c;
+			break;
+		}
+
+		uint64_t n_keys = as_sindex_tree_n_keys(si);
+
+		// Lower keys_per_bval = more selective, so it's our cost metric.
+		// n_keys == 0 means genuinely empty (live count), making this
+		// AND-conjunction provably empty - the cheapest correct pick.
+		// keys_per_bval == 0 otherwise just means no stats yet, so demote
+		// it to worst score instead.
+		uint64_t keys_per_bval = n_keys == 0 ? 0
+				: si->keys_per_bval != 0	 ? si->keys_per_bval
+											 : UINT64_MAX;
+
+		if (keys_per_bval < best_keys_per_bval ||
+				(keys_per_bval == best_keys_per_bval && n_keys < best_n_keys)) {
+			best_si = si;
+			best_keys_per_bval = keys_per_bval;
+			best_n_keys = n_keys;
+			best_match = c;
+		}
+	}
+
+	if (best_si != NULL) {
+		as_sindex_job_reserve(best_si);
+		*matched_r = best_match;
+
+		if (hint_iname == NULL || strcmp(best_si->iname, hint_iname) != 0) {
+			cf_debug(AS_SINDEX,
+					"{%s} query-plan: cost pick iname=%s bin=%s kpb=%" PRIu64
+					" n_keys=%" PRIu64 " from %u candidates",
+					ns->name, best_si->iname, best_match.bin_name,
+					best_keys_per_bval, best_n_keys, n_candidates);
+		}
+	}
+
+	SINDEX_GRUNLOCK();
+
+	return best_si;
+}
+
+static as_query_plan_result
+plan_result_from_extract(as_exp_sindex_extract_result extract_result)
+{
+	switch (extract_result) {
+	case AS_EXP_SINDEX_EXTRACT_PI:
+		return AS_QUERY_PLAN_PI;
+	case AS_EXP_SINDEX_EXTRACT_FILTERED_OUT:
+		return AS_QUERY_PLAN_FILTERED_OUT;
+	case AS_EXP_SINDEX_EXTRACT_ERROR:
+		return AS_QUERY_PLAN_ERROR;
+	default:
+		cf_crash(AS_SINDEX, "unexpected extract result %d", extract_result);
+	}
+}
+
+//==========================================================
+// Public API - sindex selection from expression candidates.
+//
+
+as_sindex_selection
+as_sindex_select_from_exp(const as_namespace* ns, uint16_t set_id,
+		const as_exp* exp, const char* hint_iname)
+{
+	as_sindex_selection sel = {
+		.si = NULL,
+	};
+
+	cf_vector_define(candidates, sizeof(as_exp_sindex_candidate), 4, 0);
+
+	as_exp_sindex_extract_result extract_result =
+			as_exp_get_sindex_candidates(exp, &candidates);
+
+	if (extract_result != AS_EXP_SINDEX_EXTRACT_CANDIDATES) {
+		sel.result = plan_result_from_extract(extract_result);
+		cf_vector_destroy(&candidates);
+		return sel;
+	}
+
+	sel.si = as_sindex_find_best(ns, set_id, &candidates, hint_iname, &sel.match);
+
+	if (sel.si == NULL) {
+		sel.result = AS_QUERY_PLAN_PI;
+		cf_debug(AS_SINDEX,
+				"{%s} query-plan: fallback to PI - no good sindex found",
+				ns->name);
+	}
+	else {
+		sel.result = AS_QUERY_PLAN_SINDEX;
+
+		if (sel.match.ktype == AS_PARTICLE_TYPE_STRING) {
+			cf_debug(AS_SINDEX,
+					"{%s} query-plan: selected sindex=%s bin=%s value=%.*s len=%u",
+					ns->name, sel.si->iname, sel.match.bin_name,
+					(int)sel.match.bound_val_sz,
+					(const char*)sel.match.bound_val, sel.match.bound_val_sz);
+		}
+		else if (sel.match.ktype == AS_PARTICLE_TYPE_BLOB) {
+			cf_debug(AS_SINDEX,
+					"{%s} query-plan: selected sindex=%s bin=%s value=<blob>",
+					ns->name, sel.si->iname, sel.match.bin_name);
+		}
+		else {
+			cf_debug(AS_SINDEX,
+					"{%s} query-plan: selected sindex=%s bin=%s range=[%" PRId64
+					",%" PRId64 "]",
+					ns->name, sel.si->iname, sel.match.bin_name,
+					sel.match.bval_low, sel.match.bval_high);
+		}
+	}
+
+	cf_vector_destroy(&candidates);
+
+	return sel;
 }
 
 //==========================================================

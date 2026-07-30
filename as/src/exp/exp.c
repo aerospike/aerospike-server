@@ -38,6 +38,7 @@
 #include "citrusleaf/cf_b64.h"
 #include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_clock.h"
+#include "citrusleaf/cf_hash_math.h"
 
 #include "bits.h"
 #include "cf_defer.h"
@@ -516,6 +517,14 @@ as_exp_filter_build_base64(const char* buf64, uint32_t buf64_sz)
 			buf_sz_out, buf_sz_out, buf);
 
 	as_exp* exp = build_internal(buf, buf_sz_out, true, NULL);
+
+	return exp == NULL ? NULL : check_filter_exp(exp);
+}
+
+as_exp*
+as_exp_filter_build_ael(const uint8_t* ael_str, uint32_t ael_sz)
+{
+	as_exp* exp = build_internal_ael(ael_str, ael_sz, NULL);
 
 	return exp == NULL ? NULL : check_filter_exp(exp);
 }

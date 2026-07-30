@@ -146,10 +146,17 @@ GEOSPATIAL_SOURCES += geospatial.cc
 QUERY_HEADERS += query.h
 QUERY_HEADERS += query_job.h
 QUERY_HEADERS += query_manager.h
+QUERY_HEADERS += query_plan.h
+QUERY_HEADERS += query_plan_candidates.h
+QUERY_HEADERS += query_plan_result.h
+QUERY_HEADERS += query_where.h
 
 QUERY_SOURCES += query.c
 QUERY_SOURCES += query_job.c
 QUERY_SOURCES += query_manager.c
+QUERY_SOURCES += query_plan.c
+QUERY_SOURCES += query_plan_candidates.c
+QUERY_SOURCES += query_where.c
 
 SINDEX_HEADERS += gc.h
 SINDEX_HEADERS += populate.h

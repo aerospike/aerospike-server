@@ -224,6 +224,9 @@ as_transaction_set_msg_field_flag(as_transaction* tr, uint8_t type)
 	case AS_MSG_FIELD_TYPE_PREDEXP:
 		tr->msg_fields |= AS_MSG_FIELD_BIT_PREDEXP;
 		break;
+	case AS_MSG_FIELD_TYPE_WHERE:
+		tr->msg_fields |= AS_MSG_FIELD_BIT_WHERE;
+		break;
 	default:
 		return false;
 	}
