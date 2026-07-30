@@ -116,13 +116,13 @@ jobs:
           fi
 
           json="$(gh pr view "$PR_NUMBER" --repo "$REPO" \
-            --json headRefName,baseRefName,baseRefOid,headRefOid,mergeableState,isCrossRepository)"
+            --json headRefName,baseRefName,baseRefOid,headRefOid,mergeStateStatus,isCrossRepository)"
 
           head_ref="$(jq -r '.headRefName' <<<"$json")"
           base_ref="$(jq -r '.baseRefName' <<<"$json")"
           base_oid="$(jq -r '.baseRefOid' <<<"$json")"
           head_oid="$(jq -r '.headRefOid' <<<"$json")"
-          mergeable_state="$(jq -r '.mergeableState' <<<"$json")"
+          mergeable_state="$(jq -r '.mergeStateStatus' <<<"$json")"
           cross="$(jq -r '.isCrossRepository' <<<"$json")"
 
           if [[ "$cross" == "true" ]]; then
@@ -137,8 +137,8 @@ jobs:
               break
             fi
             sleep 3
-            json="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json mergeableState)"
-            mergeable_state="$(jq -r '.mergeableState' <<<"$json")"
+            json="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json mergeStateStatus)"
+            mergeable_state="$(jq -r '.mergeStateStatus' <<<"$json")"
           done
 
           mstate_lc="$(printf '%s' "$mergeable_state" | tr '[:upper:]' '[:lower:]')"
