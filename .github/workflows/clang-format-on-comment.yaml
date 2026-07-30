@@ -93,7 +93,7 @@ jobs:
           fi
           {
             echo "token<<${delim}"
-            printf '%s' "$tok"
+            printf '%s\n' "$tok"
             echo "${delim}"
           } >> "$GITHUB_OUTPUT"
 
