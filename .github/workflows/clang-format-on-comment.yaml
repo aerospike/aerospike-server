@@ -53,6 +53,11 @@ jobs:
 
       - name: Fetch GitHub App token
         id: app-token
+        # Fail soft: if the App installation lacks contents/pull-requests write, this
+        # step 422s. Without continue-on-error the whole job aborts here, so the
+        # "Choose credential" step below never runs and the FORMAT_BOT_PAT fallback is
+        # unreachable. Tolerating failure lets the PAT path take over.
+        continue-on-error: true
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ vars.APP_CLIENT_ID }}
@@ -76,6 +81,15 @@ jobs:
           else
             echo "source=app" >> "$GITHUB_OUTPUT"
             tok="$APP_INSTALL_TOKEN"
+          fi
+          # Fail hard when neither credential is usable (App token unminted — e.g. the
+          # installation lacks contents/pull-requests write — and no FORMAT_BOT_PAT).
+          # This sets creds.conclusion=failure so the "credential setup failed" comment
+          # below fires with an accurate message, instead of proceeding with an empty
+          # token and failing later with a misleading checkout/push error.
+          if [[ -z "$tok" ]]; then
+            echo "No usable credential: GitHub App token unavailable and FORMAT_BOT_PAT unset." >&2
+            exit 1
           fi
           {
             echo "token<<${delim}"
@@ -279,9 +293,15 @@ jobs:
             ":x: **/format** did not complete successfully (e.g. checkout, clang-format, commit, or push failed). If the branch was updated while the workflow ran, comment **/format** again to retry. See the [workflow run](${run_url}) for details."
 
       - name: Comment on workflow failure (credential setup)
-        if: failure() && (steps.app-token.conclusion == 'failure' || steps.creds.conclusion == 'failure')
+        # app-token has continue-on-error, so steps.app-token.conclusion is always
+        # 'success'; the reliable "no usable credential" signal is creds failing (above).
+        # GH_TOKEN must be the default GITHUB_TOKEN here, not the creds token — the creds
+        # token is exactly what is unavailable in this path. permissions grants
+        # pull-requests: write, so GITHUB_TOKEN can post the comment.
+        if: failure() && steps.creds.conclusion == 'failure'
         continue-on-error: true
         env:
+          GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
         run: |
