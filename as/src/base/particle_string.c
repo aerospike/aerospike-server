@@ -1004,6 +1004,19 @@ string_modify(string_state* state, as_bin* b, cf_ll_buf* particles_llb)
 	int result = state->def->prepare(state, &op);
 
 	if (result != AS_OK) {
+		// NO_FAIL suppresses a prepare-stage failure (parameter/size
+		// validation) to success with the bin unchanged, matching
+		// string_modify_ctx and the fn.modify() failure handling below.
+		// NO_FAIL covers exactly the prepare stage. Failures resolved before
+		// prepare() are NOT suppressed: argument-parse errors (string_parse_op,
+		// above), missing-bin (op-class based, above), wrong-type, and
+		// invalid-UTF-8 in the source string. Invalid-UTF-8 in the modify
+		// result (post-modify) is likewise still surfaced. See the String
+		// Operations spec.
+		if ((op.flags & AS_STRING_FLAG_NO_FAIL) != 0) {
+			return AS_OK;
+		}
+
 		// Error details set by prepare.
 		return result;
 	}
@@ -1285,6 +1298,14 @@ string_modify_ctx(string_state* state, as_bin* b, cf_ll_buf* particles_llb)
 
 	if (result != AS_OK) {
 		cf_free(ctx.pstack);
+		// NO_FAIL suppresses a prepare-stage failure to success (bin
+		// unchanged), matching the non-CTX string_modify path and the
+		// fn.modify() failure handling below. NO_FAIL covers exactly the
+		// prepare stage. Failures resolved before prepare() are NOT suppressed:
+		// argument-parse errors, missing-bin (op-class based), wrong-type, and
+		// invalid-UTF-8 in the source string (above); invalid-UTF-8 in the
+		// modify result is likewise still surfaced. See the String Operations
+		// spec.
 		if ((op.flags & AS_STRING_FLAG_NO_FAIL) != 0) {
 			return AS_OK;
 		}
