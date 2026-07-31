@@ -1,0 +1,18 @@
+[
+  {"host": "ubuntu-24.04", "distro": "amzn2023", "container": "amazonlinux:2023.4.20240401.1"},
+  {"host": "ubuntu-24.04-arm", "distro": "amzn2023", "container": "amazonlinux:2023.4.20240401.1"},
+  {"host": "ubuntu-24.04", "distro": "debian12", "container": "debian:bookworm-20241223-slim"},
+  {"host": "ubuntu-24.04-arm", "distro": "debian12", "container": "debian:bookworm-20241223-slim"},
+  {"host": "ubuntu-24.04", "distro": "debian13", "container": "debian:trixie-20241223-slim"},
+  {"host": "ubuntu-24.04-arm", "distro": "debian13", "container": "debian:trixie-20241223-slim"},
+  {"host": "ubuntu-24.04", "distro": "el8", "container": "registry.access.redhat.com/ubi8/ubi-minimal:8.10"},
+  {"host": "ubuntu-24.04-arm", "distro": "el8", "container": "registry.access.redhat.com/ubi8/ubi-minimal:8.10"},
+  {"host": "ubuntu-24.04", "distro": "el9", "container": "registry.access.redhat.com/ubi9/ubi-minimal:9.4"},
+  {"host": "ubuntu-24.04-arm", "distro": "el9", "container": "registry.access.redhat.com/ubi9/ubi-minimal:9.4"},
+  {"host": "ubuntu-24.04", "distro": "el10", "container": "redhat/ubi10:10.0"},
+  {"host": "ubuntu-24.04-arm", "distro": "el10", "container": "redhat/ubi10:10.0"},
+  {"host": "ubuntu-24.04", "distro": "ubuntu22.04", "container": "ubuntu:22.04"},
+  {"host": "ubuntu-24.04-arm", "distro": "ubuntu22.04", "container": "ubuntu:22.04"},
+  {"host": "ubuntu-24.04", "distro": "ubuntu24.04", "container": "ubuntu:24.04"},
+  {"host": "ubuntu-24.04-arm", "distro": "ubuntu24.04", "container": "ubuntu:24.04"}
+]
