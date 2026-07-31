@@ -3455,14 +3455,20 @@ string_read_op_substr(const string_op* op, const uint8_t* from, uint32_t sz,
 		end = e > s ? from + e : start;
 	}
 	else {
+		// Stop each walk at the end of the buffer even if the code-point index
+		// runs past it. char_at() forwards to substr() with to_idx = index + 1,
+		// which is len + 1 when the (clamped) index sits at the end of a
+		// non-ASCII string - one code point beyond what exists. Without the
+		// cur < sz guard, U8_NEXT would read the byte after the string. The
+		// ASCII path above already clamps both bounds to sz; this matches it.
 		int32_t cur = 0;
-		for (uint32_t i = 0; i < from_idx; i++) {
+		for (uint32_t i = 0; i < from_idx && cur < (int32_t)sz; i++) {
 			UChar32 c;
 			U8_NEXT(from, cur, (int32_t)sz, c);
 		}
 		start = from + cur;
 
-		for (uint32_t i = from_idx; i < to_idx; i++) {
+		for (uint32_t i = from_idx; i < to_idx && cur < (int32_t)sz; i++) {
 			UChar32 c;
 			U8_NEXT(from, cur, (int32_t)sz, c);
 		}
