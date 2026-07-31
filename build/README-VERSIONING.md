@@ -17,10 +17,14 @@
   next-release marker tag (see below).
 
 - **`build/gen_version`** emits the compiled-in build-id (`aerospike_build_id`).
-  It derives the version string by calling `bash build/version` (default, which
-  gives `w.x.y.z-n` on release lines) — the single source of truth — rather than
+  It derives the version string by calling `bash build/version -v` (bare, which
+  gives `w.x.y.z` on release lines) — the single source of truth — rather than
   reimplementing the `git describe` logic, and adds only the build SHA, telemetry,
-  and the C-header fields.
+  and the C-header fields. The running server therefore reports the bare `w.x.y.z`
+  marketing version throughout the dev cycle; the build number `-n` is *not*
+  compiled in. The JFrog build-id published by the deploy workflow uses the full
+  `w.x.y.z-n` instead (see Callers) so each commit maps to a unique, non-overwritten
+  JFrog coordinate.
 
 ### Callers
 
@@ -32,9 +36,12 @@ flags to get exactly the string they need:
 - `pkg/src/Makefile`: `build/version -v` for the source-archive name.
 - `.github/workflows/tag-release.yaml`: `bash build/version -v` to derive the
   bare release tag.
-- `.github/workflows/build-sign-deploy.yaml`,
-  `.github/workflows/sign-build-deploy.yaml`: `bash build/version -v` for the
+- `.github/workflows/sign-build-deploy.yaml`: `bash build/version -v` for the
   `release` / `version` output used in artifact and bundle naming.
+- `.github/workflows/build-sign-deploy.yaml`: `bash build/version` (default,
+  full `w.x.y.z-n`) for the `setup.VERSION` output, which becomes the JFrog
+  `jf-build-id`. The full build number keeps each commit's build-id unique so a
+  later run for a different commit does not overwrite an existing JFrog build.
 
 ### `build_number` and the `tag-release` "both" sequence
 
