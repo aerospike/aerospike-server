@@ -4462,9 +4462,9 @@ translate_regex_flags(uint8_t flags)
 }
 
 static uint32_t
-translate_pcre2_flags(uint8_t flags, bool utf8_mode)
+translate_pcre2_flags(uint8_t flags)
 {
-	uint32_t result = utf8_mode ? (PCRE2_UTF | PCRE2_UCP) : 0;
+	uint32_t result = 0;
 
 	if (flags & AS_STRING_REGEX_CASE_INSENSITIVE) {
 		result |= PCRE2_CASELESS;
@@ -4479,6 +4479,106 @@ translate_pcre2_flags(uint8_t flags, bool utf8_mode)
 	}
 
 	return result;
+}
+
+// Character-class set syntax is where ICU's UnicodeSet dialect and PCRE2's
+// Perl dialect disagree: ICU reads [[a-z]-[aeiou]] as set difference and
+// [[a-z]&&[^aeiou]] as intersection, while PCRE2 reads both as a union of
+// literals. Teaching PCRE2 the UnicodeSet dialect is not an option -
+// PCRE2_ALT_EXTENDED_CLASS gets '&&', '--' and nested union right, but then
+// takes '||' and '~~' as operators where ICU takes them as literal members,
+// trading one divergence for another. So ICU stays authoritative for class
+// syntax: a pattern whose classes use set syntax skips the PCRE2 fast path
+// and is evaluated by ICU whether or not the input is all-ASCII.
+//
+// Deliberately conservative - a false positive (a trailing literal '-', say)
+// costs that pattern its fast path, never correctness. POSIX names are
+// recognized so the common [[:alpha:]_] shape stays on the fast path.
+static bool
+pattern_has_class_set_syntax(const uint8_t* pattern, uint32_t pattern_sz)
+{
+	bool in_class = false;
+	bool at_class_start = false;
+
+	for (uint32_t i = 0; i < pattern_sz; i++) {
+		uint8_t c = pattern[i];
+
+		if (c == '\\') {
+			i++; // escaped - never a metacharacter in either dialect
+			at_class_start = false;
+			continue;
+		}
+
+		if (! in_class) {
+			if (c == '[') {
+				in_class = true;
+				at_class_start = true;
+
+				if (i + 1 < pattern_sz && pattern[i + 1] == '^') {
+					i++;
+				}
+			}
+
+			continue;
+		}
+
+		if (at_class_start) {
+			at_class_start = false;
+
+			// A ']' first in a class is a Perl-only literal - let ICU rule.
+			if (c == ']') {
+				return true;
+			}
+		}
+
+		if (c == ']') {
+			in_class = false;
+			continue;
+		}
+
+		if (c == '[') {
+			// A POSIX name such as [:alpha:] is a class item both dialects
+			// share, not a nested class.
+			if (i + 1 < pattern_sz && pattern[i + 1] == ':') {
+				uint32_t j = i + 2;
+
+				while (j + 1 < pattern_sz &&
+						! (pattern[j] == ':' && pattern[j + 1] == ']')) {
+					j++;
+				}
+
+				if (j + 1 < pattern_sz) {
+					i = j + 1; // consume through the closing ":]"
+					continue;
+				}
+			}
+
+			return true; // nested class - an ICU set operand
+		}
+
+		if (c == '&') {
+			return true; // ICU intersection
+		}
+
+		if (c == '-') {
+			// A literal-to-literal range ('a-z') means the same thing in both
+			// dialects. A '-' beside a bracket or an escaped class item (say
+			// '[\d-\w]') is ICU set difference.
+			if (i == 0 || i + 1 >= pattern_sz) {
+				return true;
+			}
+
+			uint8_t prev = pattern[i - 1];
+			uint8_t next = pattern[i + 1];
+
+			if (prev == '[' || prev == ']' || next == '[' || next == ']' ||
+					next == '\\') {
+				return true;
+			}
+		}
+	}
+
+	return false;
 }
 
 static pcre2_code*
@@ -4510,7 +4610,7 @@ get_cached_pcre2(const uint8_t* pattern, uint32_t pattern_sz, uint32_t flags,
 
 	if (unix_lines) {
 		cctx = pcre2_compile_context_create(NULL);
-		pcre2_set_newline(cctx, PCRE2_NEWLINE_LF);
+		pcre2_set_newline(cctx, PCRE2_NEWLINE_ANY);
 	}
 
 	int errorcode;
@@ -4562,10 +4662,12 @@ string_read_op_regex_compare(const string_op* op, const uint8_t* from,
 	// PCRE2 byte-mode fast path requires both haystack AND pattern to be
 	// ASCII. A non-ASCII pattern needs ICU's full (1-to-many) Unicode case
 	// folding under CASE_INSENSITIVE (e.g. 'ß' -> "ss"); PCRE2_CASELESS
-	// without PCRE2_UCP only folds within ASCII.
-	if (is_ascii(from, sz) && is_ascii(op->buf, op->buf_sz)) {
+	// without PCRE2_UCP only folds within ASCII. Class-set syntax goes to ICU
+	// too - the two engines read it differently.
+	if (is_ascii(from, sz) && is_ascii(op->buf, op->buf_sz) &&
+			! pattern_has_class_set_syntax(op->buf, op->buf_sz)) {
 		uint8_t raw_flags = op->int_arg1;
-		uint32_t pcre2_flags = translate_pcre2_flags(raw_flags, false);
+		uint32_t pcre2_flags = translate_pcre2_flags(raw_flags);
 		bool unix_lines = (raw_flags & AS_STRING_REGEX_UNIX_LINES_ONLY) != 0;
 		pcre2_code* re =
 				get_cached_pcre2(op->buf, op->buf_sz, pcre2_flags, unix_lines);
@@ -4744,28 +4846,37 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 		return AS_OK;
 	}
 
-	bool ascii = is_ascii(from, old_sz) && is_ascii(repl_raw, repl_raw_sz);
-	uint32_t pcre2_flags = translate_pcre2_flags(raw_flags, ! ascii);
-	bool unix_lines = (raw_flags & AS_STRING_REGEX_UNIX_LINES_ONLY) != 0;
-	pcre2_code* re = get_cached_pcre2(pattern_raw, pattern_raw_sz, pcre2_flags,
-			unix_lines);
+	// PCRE2 byte-mode fast path mirrors string_read_op_regex_compare's
+	// routing: pattern, text, AND replacement must all be ASCII, and the
+	// pattern must not use class-set syntax. Anything else goes to ICU so
+	// replace agrees with compare on what matches — PCRE2 has only simple case
+	// folding under CASELESS (even with UTF/UCP), not ICU's full (1-to-many)
+	// folding (e.g. 'ß' -> "ss").
+	if (is_ascii(pattern_raw, pattern_raw_sz) && is_ascii(from, old_sz) &&
+			is_ascii(repl_raw, repl_raw_sz) &&
+			! pattern_has_class_set_syntax(pattern_raw, pattern_raw_sz)) {
+		uint32_t pcre2_flags = translate_pcre2_flags(raw_flags);
+		bool unix_lines = (raw_flags & AS_STRING_REGEX_UNIX_LINES_ONLY) != 0;
+		pcre2_code* re = get_cached_pcre2(pattern_raw, pattern_raw_sz,
+				pcre2_flags, unix_lines);
 
-	if (re != NULL) {
-		uint32_t sub_opts = PCRE2_SUBSTITUTE_OVERFLOW_LENGTH | PCRE2_NO_UTF_CHECK;
+		if (re != NULL) {
+			uint32_t sub_opts = PCRE2_SUBSTITUTE_OVERFLOW_LENGTH;
 
-		if (global) {
-			sub_opts |= PCRE2_SUBSTITUTE_GLOBAL;
-		}
+			if (global) {
+				sub_opts |= PCRE2_SUBSTITUTE_GLOBAL;
+			}
 
-		PCRE2_SIZE out_cap =
-				(PCRE2_SIZE)(old_sz + (old_sz + 1) * repl_raw_sz) * 3;
-		PCRE2_SIZE outlength = out_cap;
-		int rc = pcre2_substitute(re, from, old_sz, 0, sub_opts, tl_pcre2_md,
-				tl_pcre2_mctx, repl_raw, repl_raw_sz, to, &outlength);
+			PCRE2_SIZE out_cap =
+					(PCRE2_SIZE)(old_sz + (old_sz + 1) * repl_raw_sz) * 3;
+			PCRE2_SIZE outlength = out_cap;
+			int rc = pcre2_substitute(re, from, old_sz, 0, sub_opts, tl_pcre2_md,
+					tl_pcre2_mctx, repl_raw, repl_raw_sz, to, &outlength);
 
-		if (rc >= 0) {
-			*new_sz = (uint32_t)outlength;
-			return AS_OK;
+			if (rc >= 0) {
+				*new_sz = (uint32_t)outlength;
+				return AS_OK;
+			}
 		}
 	}
 
