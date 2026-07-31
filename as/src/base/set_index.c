@@ -108,7 +108,7 @@ static void* run_populate_q(void* udata);
 static void* run_populate(void* udata);
 static bool populate_reduce_cb(as_index_ref* r_ref, void* udata);
 
-static inline as_set_index_tree* stree_create(void);
+static inline as_set_index_tree* stree_create(as_index_tree* tree);
 static inline void stree_destroy(as_set_index_tree* stree);
 static inline as_set_index_tree* stree_reserve(as_index_tree* tree,
 		uint16_t set_id);
@@ -139,7 +139,7 @@ static void rotate_right(stack_ele* a, stack_ele* b);
 // uarena API.
 //
 
-static void uarena_init(uarena* ua);
+static void uarena_init(uarena* ua, uint64_t* ns_n_stages);
 static void uarena_destroy(uarena* ua);
 static void uarena_add_stage(uarena* ua);
 static uarena_handle uarena_alloc(uarena* ua);
@@ -185,7 +185,7 @@ as_set_index_create_all(as_namespace* ns, as_index_tree* tree)
 
 	for (uint16_t set_id = 1; set_id <= n_sets; set_id++) {
 		if (is_set_indexed(ns, set_id)) {
-			tree->set_trees[set_id] = stree_create();
+			tree->set_trees[set_id] = stree_create(tree);
 		}
 	}
 }
@@ -211,7 +211,7 @@ as_set_index_destroy_all(as_index_tree* tree)
 void
 as_set_index_tree_create(as_index_tree* tree, uint16_t set_id)
 {
-	tree->set_trees[set_id] = stree_create();
+	tree->set_trees[set_id] = stree_create(tree);
 }
 
 void
@@ -618,6 +618,16 @@ as_set_index_used_bytes(const as_namespace* ns)
 	return n_objects * sizeof(index_ele);
 }
 
+// Stage memory currently held by every set index in the namespace. Unlike
+// used bytes, this includes whole-stage granularity and elements sitting on
+// per-uarena free lists - stages are only handed back when a set index tree is
+// destroyed, never when individual elements are freed.
+uint64_t
+as_set_index_alloc_bytes(const as_namespace* ns)
+{
+	return as_load_uint64(&ns->tree_shared.n_set_index_stages) * STAGE_SIZE;
+}
+
 //==========================================================
 // Local helpers - configuration.
 //
@@ -795,12 +805,12 @@ populate_reduce_cb(as_index_ref* r_ref, void* udata)
 //
 
 static inline as_set_index_tree*
-stree_create(void)
+stree_create(as_index_tree* tree)
 {
 	as_set_index_tree* stree = cf_rc_alloc(sizeof(as_set_index_tree));
 
 	memset(stree, 0, sizeof(as_set_index_tree));
-	uarena_init(&stree->ua);
+	uarena_init(&stree->ua, &tree->shared->n_set_index_stages);
 
 	return stree;
 }
@@ -1542,9 +1552,12 @@ rotate_right(stack_ele* a, stack_ele* b)
 //
 
 static void
-uarena_init(uarena* ua)
+uarena_init(uarena* ua, uint64_t* ns_n_stages)
 {
 	cf_mutex_init(&ua->lock);
+
+	// Must precede the first stage - uarena_add_stage() maintains it.
+	ua->ns_n_stages = ns_n_stages;
 
 	uarena_add_stage(ua);
 
@@ -1555,6 +1568,10 @@ uarena_init(uarena* ua)
 static void
 uarena_destroy(uarena* ua)
 {
+	if (ua->n_stages != 0) {
+		as_add_uint64(ua->ns_n_stages, -(int64_t)ua->n_stages);
+	}
+
 	for (uint32_t i = 0; i < ua->n_stages; i++) {
 		cf_free(ua->stages[i]);
 	}
@@ -1574,6 +1591,8 @@ uarena_add_stage(uarena* ua)
 	}
 
 	ua->stages[ua->n_stages++] = stage;
+
+	as_incr_uint64(ua->ns_n_stages);
 }
 
 static uarena_handle

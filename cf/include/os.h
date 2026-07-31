@@ -48,6 +48,14 @@ typedef enum {
 typedef cf_os_file_res (*cf_os_test_read_file_fn)(const char* path, void* buf,
 		size_t* limit);
 
+// Filled as a group - used_bytes and limit_bytes are only valid when usable
+// is true.
+typedef struct cf_os_cgroup_mem_stats_s {
+	bool usable;
+	uint64_t used_bytes;
+	uint64_t limit_bytes;
+} cf_os_cgroup_mem_stats;
+
 #define CF_OS_OPEN_MODE_USR (S_IRUSR | S_IWUSR)
 #define CF_OS_OPEN_MODE_GRP (CF_OS_OPEN_MODE_USR | S_IRGRP | S_IWGRP)
 
@@ -88,6 +96,13 @@ cf_os_log_perms(void)
 void get_mem_info(bool cgroup_mode, uint64_t* free_mem_kbytes,
 		uint32_t* free_mem_pct, uint64_t* host_free_mem_kbytes,
 		uint32_t* host_free_mem_pct, uint64_t* thp_mem_kbytes);
+
+void get_mem_info_with_cgroup_stats(bool cgroup_mode, uint64_t* free_mem_kbytes,
+		uint32_t* free_mem_pct, uint64_t* host_free_mem_kbytes,
+		uint32_t* host_free_mem_pct, uint64_t* thp_mem_kbytes,
+		cf_os_cgroup_mem_stats* cg_stats);
+
+uint64_t cf_os_process_rss_bytes(void);
 
 void cf_os_set_mem_read_file_fn_for_test(cf_os_test_read_file_fn fn);
 

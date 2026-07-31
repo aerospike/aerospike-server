@@ -45,6 +45,17 @@
 #include "warnings.h"
 
 //==========================================================
+// Typedefs & constants.
+//
+
+typedef struct cgroup_memory_stats_s {
+	uint64_t used_bytes;
+	uint64_t limit_bytes;
+	char stat_path[PATH_MAX];
+	const char* inactive_file_key;
+} cgroup_memory_stats;
+
+//==========================================================
 // Globals.
 //
 
@@ -73,6 +84,10 @@ static bool mountinfo_parse_root_and_mount_point(const char* line,
 static bool mountinfo_has_v1_controller(const char* super_options,
 		const char* controller);
 
+static bool cgroup_parse_uint64(const char* str, uint64_t* value);
+
+static inline const char* skip_white_space(const char* str);
+
 //==========================================================
 // Inlines & Macros
 //
@@ -81,6 +96,16 @@ static inline cf_os_file_res
 mem_read_file(const char* path, void* buf, size_t* limit)
 {
 	return g_mem_read_file_fn(path, buf, limit);
+}
+
+static inline const char*
+skip_white_space(const char* str)
+{
+	while (*str == ' ' || *str == '\t' || *str == '\n' || *str == '\r') {
+		str++;
+	}
+
+	return str;
 }
 
 //==========================================================
@@ -329,7 +354,8 @@ find_cgroup_path(const char* rscctrl, char* mount_pth_buf, size_t mount_buf_len,
 			cf_dyn_buf_reserve(&db, db.alloc_sz * 2, NULL);
 		}
 		else {
-			cf_warning(AS_INFO, "failed to read /proc/self/mountinfo, falling back to host memory");
+			cf_warning(AS_INFO,
+					"failed to read /proc/self/mountinfo, falling back to host memory");
 			cf_dyn_buf_free(&db);
 			return 0;
 		}
@@ -409,6 +435,39 @@ find_cgroup_path(const char* rscctrl, char* mount_pth_buf, size_t mount_buf_len,
 	return 0;
 }
 
+static long
+page_size(void)
+{
+	// glibc serves _SC_PAGESIZE from auxv - no syscall, so no need to cache.
+	long ps = sysconf(_SC_PAGESIZE);
+
+	// Every architecture we support has pages of at least 4K, so -1 (sysconf()
+	// failed) or anything smaller means the value can't be trusted.
+	// Rate-limited - callers sit on the statistics poll path. The message keys
+	// on a process-constant value, so ticker suppression works.
+	if (ps < 4096) {
+		cf_ticker_warning(CF_OS, "implausible page size %ld - using 4096", ps);
+		return 4096;
+	}
+
+	return ps;
+}
+
+static uint64_t
+cgroup_max_value(void)
+{
+	long ps = page_size();
+
+	// https://github.com/torvalds/linux/blob/2d1373e4246da3b58e1df058374ed6b101804e07/mm/memcontrol.c#L4240
+	// https://github.com/torvalds/linux/blob/2d1373e4246da3b58e1df058374ed6b101804e07/include/linux/page_counter.h#L46-L50
+	// https://github.com/torvalds/linux/blob/2d1373e4246da3b58e1df058374ed6b101804e07/mm/page_counter.c#L272
+	return ((uint64_t)LONG_MAX / (uint64_t)ps) * (uint64_t)ps;
+}
+
+// On success, pth_buf always begins with '/' - the kernel writes the
+// "0::<path>" entry with a leading '/', and both the mount-root-relative and
+// empty cases below normalize to "/". Callers rely on this when appending
+// pth_buf directly to a mount path.
 static bool
 find_cgroup_path_v2(char* pth_buf, size_t buf_len, const char* mount_root)
 {
@@ -477,17 +536,7 @@ find_smallest_cgroup_limit_v2(const char* mount_path,
 	uint64_t smallest_limit = 0;
 	bool found = false;
 
-	long page_size = sysconf(_SC_PAGESIZE);
-
-	if (page_size <= 0) {
-		page_size = 4096;
-	}
-
-	// https://github.com/torvalds/linux/blob/2d1373e4246da3b58e1df058374ed6b101804e07/mm/memcontrol.c#L4240
-	// https://github.com/torvalds/linux/blob/2d1373e4246da3b58e1df058374ed6b101804e07/include/linux/page_counter.h#L46-L50
-	// https://github.com/torvalds/linux/blob/2d1373e4246da3b58e1df058374ed6b101804e07/mm/page_counter.c#L272
-	uint64_t max_value =
-			((uint64_t)LONG_MAX / (uint64_t)page_size) * (uint64_t)page_size;
+	uint64_t max_value = cgroup_max_value();
 
 	if (leaf_cgroup_path != NULL && leaf_cgroup_path[0] != '\0') {
 		snprintf(rel_path, sizeof(rel_path), "%s", leaf_cgroup_path);
@@ -513,9 +562,11 @@ find_smallest_cgroup_limit_v2(const char* mount_path,
 
 		if (cg_max_read == CF_OS_FILE_RES_OK) {
 			cg_limit[limit_buf_sz] = '\0';
-			uint64_t parsed_limit = strtoull(cg_limit, NULL, 10);
+			cg_limit[strcspn(cg_limit, "\n")] = '\0';
+			uint64_t parsed_limit = 0;
 			bool not_max = strncmp(cg_limit, "max", 3) != 0 &&
-					parsed_limit != max_value;
+					cgroup_parse_uint64(cg_limit, &parsed_limit) &&
+					parsed_limit != 0 && parsed_limit != max_value;
 			bool update_smallest_limit = ! found || parsed_limit < smallest_limit;
 			if (not_max && update_smallest_limit) {
 				smallest_limit = parsed_limit;
@@ -547,6 +598,74 @@ find_smallest_cgroup_limit_v2(const char* mount_path,
 	}
 
 	*limit_bytes = smallest_limit;
+	return true;
+}
+
+static int
+resolve_cgroup_base_path(char* base_path, size_t base_path_sz)
+{
+	char mount_path[PATH_MAX] = "/sys/fs/cgroup";
+	char mount_root[PATH_MAX] = "/";
+	int version = find_cgroup_path("memory", mount_path, sizeof(mount_path),
+			mount_root, sizeof(mount_root));
+
+	cf_detail(CF_OS, "cgroup version: %d", version);
+
+	if (version == 0) {
+		cf_detail(CF_OS, "no cgroup path found for memory");
+	}
+
+	char cgroup_path[PATH_MAX] = { 0 };
+	char limit_dir[PATH_MAX] = { 0 };
+
+	// The bare mount path is the base for everything but cgroup v2 - and for
+	// every v2 lookup failure. Only v2 refines it, either to the directory
+	// holding the smallest limit or to the mount-relative cgroup path.
+	const char* base = mount_path;
+	const char* suffix = "";
+
+	if (version == 2 &&
+			find_cgroup_path_v2(cgroup_path, sizeof(cgroup_path), mount_root)) {
+		uint64_t smallest_limit = 0;
+
+		if (find_smallest_cgroup_limit_v2(mount_path, cgroup_path,
+					&smallest_limit, limit_dir, sizeof(limit_dir))) {
+			cf_detail(CF_OS, "smallest cgroup v2 limit %lu found at %s",
+					smallest_limit, limit_dir);
+			base = limit_dir;
+		}
+		else if (strcmp(cgroup_path, "/") != 0) {
+			suffix = cgroup_path;
+		}
+	}
+
+	snprintf(base_path, base_path_sz, "%s%s", base, suffix);
+
+	return version;
+}
+
+static bool
+cgroup_parse_uint64(const char* str, uint64_t* value)
+{
+	str = skip_white_space(str);
+
+	if (*str < '0' || *str > '9') {
+		return false;
+	}
+
+	errno = 0;
+	char* end = NULL;
+	uint64_t parsed = strtoull(str, &end, 10);
+
+	if (end == str || errno == ERANGE) {
+		return false;
+	}
+
+	if (*skip_white_space(end) != '\0') {
+		return false;
+	}
+
+	*value = parsed;
 	return true;
 }
 
@@ -582,9 +701,9 @@ cgroup_stat_value(const char* stat_path, const char* key, uint64_t* value)
 	for (char* line = strtok_r((char*)db.buf, "\n", &saveptr_line);
 			line != NULL; line = strtok_r(NULL, "\n", &saveptr_line)) {
 		if (strncmp(line, key, key_len) == 0 && line[key_len] == ' ') {
-			*value = strtoull(line + key_len + 1, NULL, 10);
+			bool ok = cgroup_parse_uint64(line + key_len + 1, value);
 			cf_dyn_buf_free(&db);
-			return true;
+			return ok;
 		}
 	}
 
@@ -593,47 +712,10 @@ cgroup_stat_value(const char* stat_path, const char* key, uint64_t* value)
 }
 
 static bool
-cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
-		uint32_t* free_mem_pct)
+read_cgroup_memory_stats(cgroup_memory_stats* stats)
 {
-	char mount_path[PATH_MAX] = "/sys/fs/cgroup";
-	char mount_root[PATH_MAX] = "/";
 	char base_path[PATH_MAX] = { 0 };
-	int version = find_cgroup_path("memory", mount_path, sizeof(mount_path),
-			mount_root, sizeof(mount_root));
-
-	cf_detail(CF_OS, "cgroup version: %d", version);
-
-	if (version == 0) {
-		cf_detail(CF_OS, "no cgroup path found for memory");
-	}
-
-	if (version == 2) {
-		char cgroup_path[PATH_MAX] = { 0 };
-
-		if (find_cgroup_path_v2(cgroup_path, sizeof(cgroup_path), mount_root)) {
-			uint64_t smallest_limit = 0;
-
-			if (find_smallest_cgroup_limit_v2(mount_path, cgroup_path,
-						&smallest_limit, base_path, sizeof(base_path))) {
-				cf_detail(CF_OS, "smallest cgroup v2 limit %lu found at %s",
-						smallest_limit, base_path);
-			}
-			else if (strcmp(cgroup_path, "/") == 0) {
-				snprintf(base_path, sizeof(base_path), "%s", mount_path);
-			}
-			else {
-				snprintf(base_path, sizeof(base_path), "%s%s", mount_path,
-						cgroup_path);
-			}
-		}
-		else {
-			snprintf(base_path, sizeof(base_path), "%s", mount_path);
-		}
-	}
-	else {
-		snprintf(base_path, sizeof(base_path), "%s", mount_path);
-	}
+	int version = resolve_cgroup_base_path(base_path, sizeof(base_path));
 
 	char nested_limit_pth[PATH_MAX] = { 0 };
 	char nested_used_pth[PATH_MAX] = { 0 };
@@ -652,12 +734,9 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 				"%s/memory.limit_in_bytes", base_path);
 		snprintf(nested_used_pth, sizeof(nested_used_pth),
 				"%s/memory.usage_in_bytes", base_path);
-		snprintf(nested_stat_pth, sizeof(nested_stat_pth),
-				"%s/memory.stat", base_path);
+		snprintf(nested_stat_pth, sizeof(nested_stat_pth), "%s/memory.stat",
+				base_path);
 	}
-
-	*free_mem_kbytes = 0;
-	*free_mem_pct = 0;
 
 	cf_detail(CF_OS, "nested_limit_pth: %s", nested_limit_pth);
 	cf_detail(CF_OS, "nested_used_pth: %s", nested_used_pth);
@@ -686,22 +765,8 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 		"inactive_file",
 		"total_inactive_file",
 	};
-	uint64_t cg_used_bytes = 0;
-	uint64_t cg_limit_bytes = 0;
-	const char* found_stat_path = NULL;
-	const char* found_inactive_file_key = NULL;
 
-	long page_size = sysconf(_SC_PAGESIZE);
-
-	if (page_size <= 0) {
-		page_size = 4096;
-	}
-
-	// https://github.com/torvalds/linux/blob/2d1373e4246da3b58e1df058374ed6b101804e07/mm/memcontrol.c#L4240
-	// https://github.com/torvalds/linux/blob/2d1373e4246da3b58e1df058374ed6b101804e07/include/linux/page_counter.h#L46-L50
-	// https://github.com/torvalds/linux/blob/2d1373e4246da3b58e1df058374ed6b101804e07/mm/page_counter.c#L272
-	uint64_t max_value =
-			((uint64_t)LONG_MAX / (uint64_t)page_size) * (uint64_t)page_size;
+	uint64_t max_value = cgroup_max_value();
 
 	for (uint32_t i = 0; i < sizeof(cg_limit_path) / sizeof(const char*); i++) {
 		size_t limit_buf_sz = sizeof(cg_limit) - 1;
@@ -718,41 +783,95 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 			cg_limit[limit_buf_sz] = '\0';
 			cg_limit[strcspn(cg_limit, "\n")] = '\0';
 
-			uint64_t parsed_limit = strtoull(cg_limit, NULL, 10);
+			uint64_t parsed_limit = 0;
 
-			if (strcmp(cg_limit, "max") == 0 || parsed_limit == max_value) {
+			if (strcmp(cg_limit, "max") != 0 &&
+					! cgroup_parse_uint64(cg_limit, &parsed_limit)) {
+				return false;
+			}
+
+			if (strcmp(cg_limit, "max") == 0 || parsed_limit == 0 ||
+					parsed_limit == max_value) {
 				return false; // unlimited memory
 			}
 
-			cg_used_bytes = strtoull(cg_used, NULL, 10);
-			cg_limit_bytes = strtoull(cg_limit, NULL, 10);
-			found_stat_path = cg_stat_path[i];
-			found_inactive_file_key = cg_inactive_file_key[i];
+			uint64_t parsed_used = 0;
 
-			break;
+			if (! cgroup_parse_uint64(cg_used, &parsed_used)) {
+				return false;
+			}
+
+			stats->used_bytes = parsed_used;
+			stats->limit_bytes = parsed_limit;
+			snprintf(stats->stat_path, sizeof(stats->stat_path), "%s",
+					cg_stat_path[i]);
+			stats->inactive_file_key = cg_inactive_file_key[i];
+
+			return true;
 		}
 	}
 
-	if (cg_limit_bytes == 0) {
+	return false;
+}
+
+static bool
+cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
+		uint32_t* free_mem_pct, cf_os_cgroup_mem_stats* cg_stats)
+{
+	*free_mem_kbytes = 0;
+	*free_mem_pct = 0;
+
+	if (cg_stats != NULL) {
+		cg_stats->usable = false;
+	}
+
+	cgroup_memory_stats stats = { 0 };
+
+	if (! read_cgroup_memory_stats(&stats)) {
 		return false;
 	}
 
-	if (found_stat_path != NULL) {
+	if (cg_stats != NULL) {
+		if (stats.used_bytes <= stats.limit_bytes) {
+			cg_stats->usable = true;
+			// Reports raw cgroup RSS (memory.current). The throttle path below
+			// acts on the inactive-file-adjusted value (cg_used_bytes); this
+			// stat intentionally mirrors the kernel's reported usage.
+			cg_stats->used_bytes = stats.used_bytes;
+			cg_stats->limit_bytes = stats.limit_bytes;
+		}
+		else {
+			// Rate-limited - this sits on the statistics poll path. Keep only
+			// the (process-constant) limit in the message: used_bytes drifts
+			// every poll, which would make each rendered message a distinct
+			// ticker cache key and defeat suppression.
+			cf_ticker_warning(CF_OS,
+					"cgroup used exceeds limit of %lu bytes; cgroup stats unusable",
+					stats.limit_bytes);
+		}
+	}
+
+	uint64_t cg_used_bytes = stats.used_bytes;
+	uint64_t cg_limit_bytes = stats.limit_bytes;
+
+	if (stats.stat_path[0] != '\0') {
 		uint64_t inactive_file_bytes = 0;
 
-		if (cgroup_stat_value(found_stat_path, found_inactive_file_key,
+		if (cgroup_stat_value(stats.stat_path, stats.inactive_file_key,
 					&inactive_file_bytes)) {
 			cf_detail(CF_OS,
 					"subtracting cgroup %s bytes %lu from used bytes %lu",
-					found_inactive_file_key, inactive_file_bytes, cg_used_bytes);
+					stats.inactive_file_key, inactive_file_bytes, cg_used_bytes);
 
-			cg_used_bytes = inactive_file_bytes < cg_used_bytes ?
-					cg_used_bytes - inactive_file_bytes : 0;
+			cg_used_bytes = inactive_file_bytes < cg_used_bytes
+					? cg_used_bytes - inactive_file_bytes
+					: 0;
 		}
 	}
 
 	if (cg_used_bytes > cg_limit_bytes) {
-		cf_warning(CF_OS, "used bytes %lu > limit bytes %lu", cg_used_bytes,
+		cf_ticker_warning(CF_OS,
+				"cgroup used exceeds limit of %lu bytes; cgroup stats unusable",
 				cg_limit_bytes);
 		return false;
 	}
@@ -760,9 +879,12 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 	uint64_t cg_free_bytes = (cg_limit_bytes - cg_used_bytes);
 
 	if (cg_free_bytes == 0) {
-		cf_warning(CF_OS,
-				"zero available cg memory: used bytes %lu == limit bytes %lu",
-				cg_used_bytes, cg_limit_bytes);
+		// Used equals limit by construction here, so printing only the
+		// (process-constant) limit loses nothing and keeps the ticker key
+		// stable.
+		cf_ticker_warning(CF_OS,
+				"zero available cg memory: used equals limit of %lu bytes",
+				cg_limit_bytes);
 		*free_mem_pct = 0;
 		*free_mem_kbytes = 0;
 		return true;
@@ -796,9 +918,10 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 // Public API - get memory info
 
 void
-get_mem_info(bool cgroup_mode, uint64_t* free_mem_kbytes,
+get_mem_info_with_cgroup_stats(bool cgroup_mode, uint64_t* free_mem_kbytes,
 		uint32_t* free_mem_pct, uint64_t* host_free_mem_kbytes,
-		uint32_t* host_free_mem_pct, uint64_t* thp_mem_kbytes)
+		uint32_t* host_free_mem_pct, uint64_t* thp_mem_kbytes,
+		cf_os_cgroup_mem_stats* cg_stats)
 {
 	uint64_t host_thp_kbytes = 0;
 
@@ -808,7 +931,7 @@ get_mem_info(bool cgroup_mode, uint64_t* free_mem_kbytes,
 	uint32_t cgroup_free_mem_pct = 0;
 
 	bool cgroup_usable = cgroup_mem_info(*host_free_mem_kbytes,
-			&cgroup_free_mem_kbytes, &cgroup_free_mem_pct);
+			&cgroup_free_mem_kbytes, &cgroup_free_mem_pct, cg_stats);
 
 	if (cgroup_mode && ! cgroup_usable) {
 		cf_detail(CF_OS,
@@ -824,6 +947,39 @@ get_mem_info(bool cgroup_mode, uint64_t* free_mem_kbytes,
 		*free_mem_pct = *host_free_mem_pct;
 		*thp_mem_kbytes = host_thp_kbytes;
 	}
+}
+
+void
+get_mem_info(bool cgroup_mode, uint64_t* free_mem_kbytes,
+		uint32_t* free_mem_pct, uint64_t* host_free_mem_kbytes,
+		uint32_t* host_free_mem_pct, uint64_t* thp_mem_kbytes)
+{
+	get_mem_info_with_cgroup_stats(cgroup_mode, free_mem_kbytes, free_mem_pct,
+			host_free_mem_kbytes, host_free_mem_pct, thp_mem_kbytes, NULL);
+}
+
+uint64_t
+cf_os_process_rss_bytes(void)
+{
+	// /proc/self/statm is a single short line: "size resident shared ...".
+	char buf[128];
+	size_t limit = sizeof(buf) - 1;
+
+	if (mem_read_file("/proc/self/statm", buf, &limit) != CF_OS_FILE_RES_OK) {
+		return 0;
+	}
+
+	buf[limit] = '\0';
+
+	// /proc/self/statm is "size resident shared ..."; skip size (%*lu) and take
+	// resident directly - the first field is only there to reach the second.
+	unsigned long resident_pages;
+
+	if (sscanf(buf, "%*lu %lu", &resident_pages) != 1) {
+		return 0;
+	}
+
+	return (uint64_t)resident_pages * (uint64_t)page_size();
 }
 
 //==========================================================

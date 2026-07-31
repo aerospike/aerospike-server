@@ -265,6 +265,13 @@ static void cmd_version(as_info_cmd_args* args);
 static const char* perm_to_string(as_sec_perm perm);
 static cf_ip_port bind_to_port(cf_serv_cfg* cfg, cf_sock_owner owner);
 static char* access_to_string(cf_addr_list* addrs);
+static void append_system_memory_statistics(cf_dyn_buf* db);
+static uint64_t index_alloc_bytes(const as_namespace* ns);
+static uint64_t index_tail_bytes(const as_namespace* ns);
+static uint64_t sindex_alloc_bytes(const as_namespace* ns);
+static uint64_t sindex_tail_bytes(const as_namespace* ns);
+static uint64_t arena_tail_bytes(uint32_t n_stages, uint32_t at_ele_id,
+		uint32_t stage_capacity, uint32_t ele_sz);
 static void info_get_aggregated_namespace_stats(cf_dyn_buf* db);
 static void info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db);
 static void namespace_rack_info(as_namespace* ns, cf_dyn_buf* db,
@@ -3391,21 +3398,7 @@ cmd_statistics(as_info_cmd_args* args)
 	info_append_uint32(db, "system_user_cpu_pct", user_pct);
 	info_append_uint32(db, "system_kernel_cpu_pct", kernel_pct);
 
-	uint64_t free_mem_kbytes;
-	uint32_t free_mem_pct;
-	uint64_t thp_mem_kbytes;
-
-	uint64_t host_free_mem_kbytes;
-	uint32_t host_free_mem_pct;
-
-	get_mem_info(g_config.cgroup_mem_tracking, &free_mem_kbytes, &free_mem_pct,
-			&host_free_mem_kbytes, &host_free_mem_pct, &thp_mem_kbytes);
-
-	info_append_uint64(db, "system_free_mem_kbytes", free_mem_kbytes);
-	info_append_int(db, "system_free_mem_pct", free_mem_pct);
-	info_append_uint64(db, "host_free_mem_kbytes", host_free_mem_kbytes);
-	info_append_int(db, "host_free_mem_pct", host_free_mem_pct);
-	info_append_uint64(db, "system_thp_mem_kbytes", thp_mem_kbytes);
+	append_system_memory_statistics(db);
 
 	info_append_uint32(db, "process_cpu_pct", g_process_cpu_pct);
 
@@ -4101,6 +4094,36 @@ info_get_aggregated_namespace_stats(cf_dyn_buf* db)
 }
 
 static void
+append_system_memory_statistics(cf_dyn_buf* db)
+{
+	uint64_t free_mem_kbytes;
+	uint32_t free_mem_pct;
+	uint64_t thp_mem_kbytes;
+
+	uint64_t host_free_mem_kbytes;
+	uint32_t host_free_mem_pct;
+
+	cf_os_cgroup_mem_stats cg_stats = { 0 };
+
+	get_mem_info_with_cgroup_stats(g_config.cgroup_mem_tracking,
+			&free_mem_kbytes, &free_mem_pct, &host_free_mem_kbytes,
+			&host_free_mem_pct, &thp_mem_kbytes, &cg_stats);
+
+	info_append_uint64(db, "system_free_mem_kbytes", free_mem_kbytes);
+	info_append_int(db, "system_free_mem_pct", free_mem_pct);
+	info_append_uint64(db, "host_free_mem_kbytes", host_free_mem_kbytes);
+	info_append_int(db, "host_free_mem_pct", host_free_mem_pct);
+	info_append_uint64(db, "system_thp_mem_kbytes", thp_mem_kbytes);
+
+	if (cg_stats.usable) {
+		info_append_uint64(db, "cgroup_memory_used_bytes", cg_stats.used_bytes);
+		info_append_uint64(db, "cgroup_memory_limit_bytes", cg_stats.limit_bytes);
+	}
+
+	info_append_uint64(db, "process_rss_bytes", cf_os_process_rss_bytes());
+}
+
+static void
 info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 {
 	// Cluster size.
@@ -4191,7 +4214,16 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 		ixs_memory_used += index_used;
 	}
 
-	if (ns->pi_xmem_type == CF_XMEM_TYPE_PMEM) {
+	uint64_t index_alloc = index_alloc_bytes(ns);
+
+	if (ns->pi_xmem_type == CF_XMEM_TYPE_SHMEM) {
+		info_append_uint64(db, "index_shmem_alloc_bytes", index_alloc);
+		info_append_uint64(db, "index_shmem_tail_bytes", index_tail_bytes(ns));
+	}
+	else if (ns->pi_xmem_type == CF_XMEM_TYPE_PMEM) {
+		info_append_uint64(db, "index_pmem_alloc_bytes", index_alloc);
+		info_append_uint64(db, "index_pmem_tail_bytes", index_tail_bytes(ns));
+
 		// If numa-pinned, not all configured mounts are used.
 		if (as_config_is_numa_pinned()) {
 			for (uint32_t i = 0; i < ns->n_pi_xmem_mounts; i++) {
@@ -4203,11 +4235,9 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 		}
 	}
 	else if (ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
-		uint64_t alloc_sz = as_load_uint64(&ns->arena->alloc_sz);
-
-		info_append_uint64(db, "index_flash_alloc_bytes", alloc_sz);
+		info_append_uint64(db, "index_flash_alloc_bytes", index_alloc);
 		info_append_uint64(db, "index_flash_alloc_pct",
-				alloc_sz * 100 / ns->pi_mounts_budget);
+				index_alloc * 100 / ns->pi_mounts_budget);
 
 		add_index_device_stats(ns, db);
 	}
@@ -4217,6 +4247,7 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	uint64_t set_index_used = as_set_index_used_bytes(ns);
 
 	info_append_uint64(db, "set_index_used_bytes", set_index_used);
+	info_append_uint64(db, "set_index_alloc_bytes", as_set_index_alloc_bytes(ns));
 
 	ixs_memory_used += set_index_used;
 
@@ -4234,7 +4265,16 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 		ixs_memory_used += sindex_used;
 	}
 
-	if (ns->si_xmem_type == CF_XMEM_TYPE_PMEM) {
+	uint64_t sindex_alloc = sindex_alloc_bytes(ns);
+
+	if (ns->si_xmem_type == CF_XMEM_TYPE_SHMEM) {
+		info_append_uint64(db, "sindex_shmem_alloc_bytes", sindex_alloc);
+		info_append_uint64(db, "sindex_shmem_tail_bytes", sindex_tail_bytes(ns));
+	}
+	else if (ns->si_xmem_type == CF_XMEM_TYPE_PMEM) {
+		info_append_uint64(db, "sindex_pmem_alloc_bytes", sindex_alloc);
+		info_append_uint64(db, "sindex_pmem_tail_bytes", sindex_tail_bytes(ns));
+
 		// If numa-pinned, not all configured mounts are used.
 		if (as_config_is_numa_pinned()) {
 			for (uint32_t i = 0; i < ns->n_si_xmem_mounts; i++) {
@@ -4246,6 +4286,9 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 		}
 	}
 	else if (ns->si_xmem_type == CF_XMEM_TYPE_FLASH) {
+		info_append_uint64(db, "sindex_flash_alloc_bytes", sindex_alloc);
+		info_append_uint64(db, "sindex_flash_tail_bytes", sindex_tail_bytes(ns));
+
 		add_sindex_device_stats(ns, db);
 	}
 
@@ -4853,6 +4896,86 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 			ns->n_ttl_reductions_ignored);
 	info_append_uint64(db, "ttl_reductions_applied",
 			ns->n_ttl_reductions_applied);
+}
+
+static uint64_t
+index_alloc_bytes(const as_namespace* ns)
+{
+	if (ns->arena == NULL) {
+		return 0;
+	}
+
+	if (ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
+		return as_load_uint64(&ns->arena->alloc_sz);
+	}
+
+	// stage_count is written under arena->lock - relaxed load is fine for a
+	// best-effort stats snapshot.
+	return (uint64_t)as_load_uint32(&ns->arena->stage_count) *
+			ns->arena->stage_size;
+}
+
+// Not meaningful for a chunked (flash) primary index, where allocation is by
+// chunk within a stage rather than by a single element frontier - callers must
+// not use this for CF_XMEM_TYPE_FLASH.
+static uint64_t
+index_tail_bytes(const as_namespace* ns)
+{
+	if (ns->arena == NULL) {
+		return 0;
+	}
+
+	// stage_count and at_element_id are written under arena->lock - relaxed
+	// loads are fine for a best-effort stats snapshot.
+	return arena_tail_bytes(as_load_uint32(&ns->arena->stage_count),
+			as_load_uint32(&ns->arena->at_element_id),
+			ns->arena->stage_capacity, ns->arena->element_size);
+}
+
+static uint64_t
+sindex_alloc_bytes(const as_namespace* ns)
+{
+	if (ns->si_arena == NULL) {
+		return 0;
+	}
+
+	return (uint64_t)as_load_uint32(&ns->si_arena->n_stages) *
+			ns->si_arena->stage_sz;
+}
+
+// Valid for every sindex backing type, since the sindex arena never chunks.
+static uint64_t
+sindex_tail_bytes(const as_namespace* ns)
+{
+	if (ns->si_arena == NULL) {
+		return 0;
+	}
+
+	return arena_tail_bytes(as_load_uint32(&ns->si_arena->n_stages),
+			as_load_uint32(&ns->si_arena->at_ele_id),
+			ns->si_arena->stage_capacity, ns->si_arena->ele_sz);
+}
+
+// Untouched headroom in the newest stage - i.e. how much can still be
+// end-allocated before another stage must be added. Stages are added only when
+// the current one's end-allocation frontier is exhausted, so all earlier stages
+// are behind the frontier and contribute nothing here. Free elements below the
+// frontier are NOT counted - those are reusable holes, derivable as
+// alloc - used - tail.
+//
+// Zero stages means there is no stage to have headroom in - the sindex arena
+// drops all of them when its last element is freed, which resets at_ele_id. A
+// frontier at or past capacity is either exhausted, or a concurrent stage
+// addition seen half-applied; both report zero.
+static uint64_t
+arena_tail_bytes(uint32_t n_stages, uint32_t at_ele_id, uint32_t stage_capacity,
+		uint32_t ele_sz)
+{
+	if (n_stages == 0 || at_ele_id >= stage_capacity) {
+		return 0;
+	}
+
+	return (uint64_t)(stage_capacity - at_ele_id) * ele_sz;
 }
 
 static void

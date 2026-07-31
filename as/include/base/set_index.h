@@ -63,6 +63,13 @@ typedef struct uarena_s {
 	uint16_t at_ele_id;
 	uint32_t n_stages;
 	uint8_t** stages;
+
+	// Not this uarena's stage count - n_stages above is that. This points at
+	// the namespace-wide total across every set index, which we maintain as we
+	// add and drop stages. Stats only - see as_set_index_alloc_bytes(). Lives
+	// here because teardown is handed only the uarena, so the total has to be
+	// reachable without a namespace.
+	uint64_t* ns_n_stages;
 } uarena;
 
 #define ELE_ID_N_BITS 8
@@ -150,6 +157,7 @@ bool as_set_index_disable(struct as_namespace_s* ns, struct as_set_s* p_set,
 bool as_set_index_stats_str(const struct as_namespace_s* ns,
 		const struct as_set_s* p_set, cf_dyn_buf* db);
 uint64_t as_set_index_used_bytes(const struct as_namespace_s* ns);
+uint64_t as_set_index_alloc_bytes(const struct as_namespace_s* ns);
 
 //==========================================================
 // Private API - enterprise separation only.

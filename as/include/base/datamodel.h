@@ -708,6 +708,12 @@ typedef struct as_index_tree_shared_s {
 	// Offsets into as_index_tree struct's variable-sized data.
 	uint32_t sprigs_offset;
 	uint32_t puddles_offset;
+
+	// Set-index micro-arena stages currently allocated, across every set index
+	// in this namespace. Stats only - see as_set_index_alloc_bytes(). Lives
+	// here because it must outlive individual trees, which come and go with
+	// partition ownership.
+	uint64_t n_set_index_stages;
 } as_index_tree_shared;
 
 typedef struct as_sprigx_s {
