@@ -15,8 +15,12 @@ FEATURES=""
 
 # build/version is the single source of truth for the version string — it handles the
 # /work/VERSION and git-describe paths, the bare-tag --match, and the master/hotfix
-# --long-suffix strip.
-VERSION="$(bash "$SCRIPT_DIR/version")"
+# --long-suffix strip. -v (version_only) yields the bare w.x.y.z marketing version on
+# release lines: that is what the running server reports as aerospike_build_id through
+# the dev cycle. The JFrog build-id published by build-sign-deploy.yaml's setup job
+# intentionally uses the full w.x.y.z-n (default mode) so every commit gets a unique
+# coordinate that JFrog will not overwrite.
+VERSION="$(bash "$SCRIPT_DIR/version" -v)"
 
 # CE source SHA: from the /work event payload on /work builds, else HEAD.
 if [[ -f /work/VERSION ]]; then

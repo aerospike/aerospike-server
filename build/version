@@ -15,6 +15,10 @@
 #   string the Debian Version: field rejects ("does not start with digit").
 # - master/hotfix: strip the describe --long suffix to w.x.y.z; default appends -n.
 # - Dev branches: keep the full describe output (-<n>-g<sha>); build number is 1.
+#   preview/** is deliberately treated as a dev branch here: although it is routed
+#   through the release-grade publish gates in build-sign-deploy.yaml, its JFrog/bundle
+#   coordinate intentionally keeps the -<n>-g<sha> descriptor to distinguish preview
+#   builds from master/hotfix releases.
 # - Falls back to the short SHA when no bare tag is reachable (never v…).
 #
 # build_number counts first-parent commits after the bare x.y.z.w next-release
@@ -108,6 +112,14 @@ branch="$(git branch --show-current)"
 if [[ -z "$branch" ]]; then
     branch="$(git branch -r --contains HEAD | grep -v HEAD | head -1 |
         sed -e 's/origin\///' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+fi
+
+# Test hook (build/version_test.sh only): force the branch classification so the
+# master/hotfix release-line path can be exercised from any checkout — e.g. a PR
+# merge ref where branch detection would otherwise take the dev path. Never set
+# in production.
+if [[ -n "${AEROSPIKE_VERSION_FORCE_BRANCH:-}" ]]; then
+    branch="$AEROSPIKE_VERSION_FORCE_BRANCH"
 fi
 
 if [[ "$branch" == "master" || "$branch" =~ ^hotfix/ ]]; then
