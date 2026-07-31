@@ -51,16 +51,17 @@ COMPILER_ASSERT(AST_PATH_FUNC_STR_LENGTH == AST_PATH_FUNC_HLL_ADD + 1);
 // ast_new_func1/func2/nary); BIT / HLL result types are derived in their
 // finalizers.
 //
-// Slots with name AEL_PNAME_NONE are positional; named slots follow. Today
-// every SCALAR row is fully positional and every BIT row is fully named, so
-// scalars reject `name:` args and bit ops reject positional args purely from
-// the slot names — no extra flag needed. hllAdd is the one hybrid (positional
-// list, then named indexBits / minHashBits).
+// Slots with name AEL_PNAME_NONE are positional; named slots follow. A slot is
+// positional-only or named-only, enforced purely by the slot names (no extra
+// flag). Fixed-arity multi-arg scalars (log / pow / findBitLeft / findBitRight)
+// and every BIT row are fully named — mandatory and order-independent;
+// single-arg scalars and variadic min / max stay positional. hllAdd is the one
+// hybrid (positional list, then named indexBits / minHashBits).
 //
 
 static const ael_func_spec_t FUNC_TABLE[] = {
 	//------------------------------------------------
-	// Scalar math — positional (Java Exp API convention).
+	// Scalar math (positional, except named fixed-arity log / pow / findBit*).
 
 	{ "abs", AST_FUNC_ABS, AEL_FAM_SCALAR, false, 1, 1, AST_ETYPE_AUTO_NUMERIC,
 			{ { AEL_PNAME_NONE, AST_ETYPE_AUTO_NUMERIC } } },
@@ -72,23 +73,23 @@ static const ael_func_spec_t FUNC_TABLE[] = {
 			AST_ETYPE_INT, { { AEL_PNAME_NONE, AST_ETYPE_INT } } },
 
 	{ "log", AST_FUNC_LOG, AEL_FAM_SCALAR, false, 2, 2, AST_ETYPE_FLOAT,
-			{ { AEL_PNAME_NONE, AST_ETYPE_FLOAT },
-					{ AEL_PNAME_NONE, AST_ETYPE_FLOAT } } },
+			{ { AEL_PNAME_VALUE, AST_ETYPE_FLOAT },
+					{ AEL_PNAME_BASE, AST_ETYPE_FLOAT } } },
 	{ "pow", AST_FUNC_POW, AEL_FAM_SCALAR, false, 2, 2, AST_ETYPE_FLOAT,
-			{ { AEL_PNAME_NONE, AST_ETYPE_FLOAT },
-					{ AEL_PNAME_NONE, AST_ETYPE_FLOAT } } },
+			{ { AEL_PNAME_BASE, AST_ETYPE_FLOAT },
+					{ AEL_PNAME_EXPONENT, AST_ETYPE_FLOAT } } },
 
-	// findBitLeft / findBitRight: arg0 INT (value scanned), arg1 TRILEAN
-	// (true => find a set bit, false => a clear bit), result INT (offset).
+	// findBitLeft / findBitRight(x:, value:): x = INT scanned, value = TRILEAN
+	// (true => find a set bit, false => a clear bit); result INT (offset).
 	// See build_int_scan in exp.c.
 	{ "findBitLeft", AST_FUNC_FIND_BIT_LEFT, AEL_FAM_SCALAR, false, 2, 2,
 			AST_ETYPE_INT,
-			{ { AEL_PNAME_NONE, AST_ETYPE_INT },
-					{ AEL_PNAME_NONE, AST_ETYPE_TRILEAN } } },
+			{ { AEL_PNAME_X, AST_ETYPE_INT },
+					{ AEL_PNAME_VALUE, AST_ETYPE_TRILEAN } } },
 	{ "findBitRight", AST_FUNC_FIND_BIT_RIGHT, AEL_FAM_SCALAR, false, 2, 2,
 			AST_ETYPE_INT,
-			{ { AEL_PNAME_NONE, AST_ETYPE_INT },
-					{ AEL_PNAME_NONE, AST_ETYPE_TRILEAN } } },
+			{ { AEL_PNAME_X, AST_ETYPE_INT },
+					{ AEL_PNAME_VALUE, AST_ETYPE_TRILEAN } } },
 
 	// Variadic: >= required_count same-typed positional args. params[0]
 	// is the element template; param_count is 0 (no fixed slots).
@@ -246,9 +247,12 @@ static const ael_func_spec_t FUNC_TABLE[] = {
 			AST_ETYPE_AUTO, { { 0 } } },
 	{ "getMaps", AST_PATH_FUNC_GET_MAPS, AEL_FAM_PATH, false, 0, 0,
 			AST_ETYPE_AUTO, { { 0 } } },
-	{ "asInt", AST_PATH_FUNC_CAST_INT, AEL_FAM_PATH, false, 0, 0,
+	// toInt / toFloat are polymorphic casts: the operand may be numeric (a
+	// FLOAT->INT / INT->FLOAT cast) or a STRING (parsed). The concrete op is
+	// chosen from the resolved operand type post-inference (ael_dispatch_to_cast).
+	{ "toInt", AST_PATH_FUNC_CAST_INT, AEL_FAM_PATH, false, 0, 0,
 			AST_ETYPE_AUTO, { { 0 } } },
-	{ "asFloat", AST_PATH_FUNC_CAST_FLOAT, AEL_FAM_PATH, false, 0, 0,
+	{ "toFloat", AST_PATH_FUNC_CAST_FLOAT, AEL_FAM_PATH, false, 0, 0,
 			AST_ETYPE_AUTO, { { 0 } } },
 	{ "clear", AST_PATH_FUNC_CLEAR, AEL_FAM_PATH, false, 0, 0, AST_ETYPE_AUTO,
 			{ { 0 } } },
@@ -302,10 +306,8 @@ static const ael_func_spec_t FUNC_TABLE[] = {
 			AST_ETYPE_TRILEAN, { { AEL_PNAME_NONE, AST_ETYPE_STR } } },
 	{ "endsWith", AST_PATH_FUNC_STR_ENDS_WITH, AEL_FAM_STR, false, 1, 1,
 			AST_ETYPE_TRILEAN, { { AEL_PNAME_NONE, AST_ETYPE_STR } } },
-	{ "toInt", AST_PATH_FUNC_STR_TO_INT, AEL_FAM_STR, false, 0, 0,
-			AST_ETYPE_INT, { { 0 } } },
-	{ "toFloat", AST_PATH_FUNC_STR_TO_FLOAT, AEL_FAM_STR, false, 0, 0,
-			AST_ETYPE_FLOAT, { { 0 } } },
+	// toInt / toFloat are the polymorphic path-casts above; their string-parse
+	// form is reached through ael_dispatch_to_cast, not by name from here.
 	{ "bytesLength", AST_PATH_FUNC_STR_BYTES_LENGTH, AEL_FAM_STR, false, 0, 0,
 			AST_ETYPE_INT, { { 0 } } },
 	{ "isNumeric", AST_PATH_FUNC_STR_IS_NUMERIC, AEL_FAM_STR, false, 0, 0,
@@ -377,7 +379,7 @@ static const ael_func_spec_t FUNC_TABLE[] = {
 
 	//------------------------------------------------
 	// Cross-type conversion — toString() on an INT / FLOAT / BLOB receiver;
-	// zero args, result STR. A unary op like asInt / asFloat (EXP_TO_STRING).
+	// zero args, result STR. A unary op like toInt / toFloat (EXP_TO_STRING).
 	{ "toString", AST_PATH_FUNC_CAST_STRING, AEL_FAM_PATH, false, 0, 0,
 			AST_ETYPE_AUTO, { { 0 } } },
 
@@ -418,6 +420,9 @@ static const struct {
 	{ AEL_PNAME_FIND, "find" },
 	{ AEL_PNAME_REPLACE, "replace" },
 	{ AEL_PNAME_PATTERN, "pattern" },
+	{ AEL_PNAME_BASE, "base" },
+	{ AEL_PNAME_EXPONENT, "exponent" },
+	{ AEL_PNAME_X, "x" },
 };
 
 #define PNAME_TABLE_COUNT (sizeof(PNAME_TABLE) / sizeof(PNAME_TABLE[0]))

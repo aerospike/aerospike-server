@@ -607,7 +607,17 @@ get_query_filter_exp(const as_transaction* tr,
 		*exp = as_exp_filter_build(f, true);
 	}
 
-	return *exp != NULL;
+	if (*exp == NULL) {
+		// Stage the build failure - the service thread is armed, and
+		// as_query_error() sends the detail with the start-failure reply.
+		as_exp_stage_build_error_details("invalid filter expression in query");
+		return false;
+	}
+
+	// Non-taking build - drop the accumulator's payload ref.
+	as_exp_build_err_reset();
+
+	return true;
 }
 
 static bool
@@ -1232,7 +1242,12 @@ record_matches_query(as_query_job* _job, as_storage_rd* rd)
 
 		as_exp_ctx ctx_rd = { .ns = _job->ns, .r = rd->r, .rd = rd };
 
-		if (! as_exp_eval(si->exp, &ctx_rd, &rb, NULL)) {
+		// No eval-fault suppression needed here - query worker threads are
+		// never armed, and the inline path drops verbosity for the whole job
+		// in as_query_manager_start_job().
+		as_exp_trilean rv = as_exp_eval(si->exp, &ctx_rd, &rb, NULL);
+
+		if (rv != AS_EXP_TRUE) {
 			return false;
 		}
 
@@ -2215,7 +2230,19 @@ basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 			? &ms
 			: NULL;
 
-	if (filter_exp != NULL && read_and_filter_bins(&rd, filter_exp) != 0) {
+	// 'explain' is false - a query filters many records per request, so the
+	// filter-decision explainer (a single-record opt-in) must never run here.
+	//
+	// Eval-fault staging is suppressed for the whole job, once, at the inline
+	// dispatch in as_query_manager_start_job() - nothing on this callback can
+	// author a detail. No query RECORD reply can carry field 45 anyway; only a
+	// start-failure reply does, via as_query_error(), which runs before the job
+	// starts.
+	int filter_rv = filter_exp != NULL
+			? read_and_filter_bins(&rd, filter_exp, false, NULL)
+			: 0;
+
+	if (filter_rv != 0) {
 		as_storage_record_close(&rd);
 		as_record_done(r_ref, ns);
 		as_incr_uint64(&_job->n_filtered_bins);
@@ -2269,6 +2296,10 @@ basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 		}
 
 		if (job->msgp != NULL) {
+			// These read ops stage build and eval faults too
+			// (process_bin_read_op -> as_exp_read_tr, record phase), and
+			// build_ops_response_msg calls neither prep nor clear - so nothing
+			// discards here. Covered by the same job-level suppression.
 			bool rv = apply_ops_make_response(slice->bb_r, &rd, job->msgp,
 					_job->si != NULL, bval);
 
@@ -2505,8 +2536,13 @@ apply_ops_make_response(cf_buf_builder** bb_r, as_storage_rd* rd, cl_msg* msgp,
 		as_bin* result_bin = &bin;
 		int error_code;
 
-		read_op_result read_result = process_bin_read_op(rd, op, respond_all_ops,
-				result_bins, &n_result_bins, &result_bin, &error_code);
+		// NULL tr - a query record body has no client transaction to check
+		// read permission against, and as_exp_explain_allowed() fails closed on
+		// NULL, so the value explainer never runs here. That is the intended
+		// outcome: the explainer is a single-record opt-in.
+		read_op_result read_result =
+				process_bin_read_op(NULL, rd, op, respond_all_ops, result_bins,
+						&n_result_bins, &result_bin, &error_code);
 
 		if (read_result == READ_OP_RESULT_ERROR) {
 			// TODO: handle error code - add stats?

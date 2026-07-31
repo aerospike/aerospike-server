@@ -104,7 +104,29 @@ as_query_manager_start_job(as_query_job* _job)
 	}
 
 	if (_job->do_inline) {
+		// An inline job runs synchronously on the service thread, which is
+		// armed with this client's verbosity. Nothing it stages can ever be
+		// emitted - no query record reply carries field 45, and a
+		// start-failure detail is staged by the validation code before we get
+		// here and emitted by as_query_error(), which only runs when the job
+		// never started - so drop the tier for the run rather than render a
+		// trace (first-set-wins: one render, at the first faulting record)
+		// that tsvc's disarm would just discard.
+		//
+		// No save/restore: verbosity is per-transaction, armed at
+		// as_tsvc_process_transaction() entry and dropped at its Cleanup, and
+		// the job is this transaction's terminal work. Nothing after it can
+		// author. (Contrast the NO_FAIL sub-ops in cdt.c / expop.c and the
+		// sindex eval in rw_utils.c, which sit mid-transaction and must hand
+		// the tier back so the enclosing write can still report its own
+		// failure.)
+		//
+		// The non-inline path below runs on a transient thread that is never
+		// armed, so it needs nothing.
+		g_error_verbosity = AS_ERROR_VERBOSITY_OFF;
+
 		as_query_job_run((void*)_job);
+
 		return 0;
 	}
 

@@ -1007,7 +1007,11 @@ as_batch_queue_task(as_transaction* btr)
 	if (predexp_mf != NULL) {
 		shared->predexp_mf = predexp_mf;
 
-		if ((shared->predexp = as_exp_filter_build(predexp_mf, true)) == NULL) {
+		shared->predexp = as_exp_filter_build(predexp_mf, true);
+		// Non-taking build - drop the accumulator's payload ref.
+		as_exp_build_err_reset();
+
+		if (shared->predexp == NULL) {
 			cf_warning(AS_BATCH, "Failed to build batch predexp");
 			cf_free(shared);
 			return as_batch_send_error(btr, AS_ERR_PARAMETER);

@@ -68,6 +68,7 @@ static __thread uint8_t g_error_details[AS_ERROR_DETAILS_MAX];
 __thread uint32_t g_error_details_len;
 __thread bool g_error_details_set;
 __thread uint8_t g_error_verbosity;
+__thread as_error_exp_trace g_error_exp_trace;
 
 //==========================================================
 // Forward declarations.
@@ -124,10 +125,384 @@ as_msg_swap_op(as_msg_op* op)
 // Public API - error message response support.
 //
 
+// The "middle elided" marker rendered into the path array when the real
+// nesting depth exceeded AS_EXP_TRACE_MAX_FRAMES (between the outermost frames
+// and the innermost failing op).
+static const char EXP_TRACE_PATH_ELLIPSIS[] = "...";
+
+// Upper bound on the bytes pack_exp_trace() will write for this trace,
+// including the key-3 header. include_operands / include_snippet /
+// include_path reflect the budget cascade's drop order (operands first, then
+// snippet, then path) - a tier is dropped whole, never truncated.
+static uint32_t
+exp_trace_max_sz(const as_error_exp_trace* t, bool include_path,
+		bool include_snippet, bool include_operands)
+{
+	// key 3 (1) + sub-map header (1) + phase k/v (2) = 4. The phase value packs
+	// as 1 byte: phase is a small enum (AS_EXP_TRACE_PHASE_BUILD/EVAL, both
+	// < 128), the only values any caller stages.
+	uint32_t sz = 4;
+
+	if (t->has_offset) {
+		sz += 1 + 9; // key + uint value
+	}
+
+	if (t->has_op) {
+		sz += 1 + 3 + t->op_len; // key + str header + bytes
+	}
+
+	// n_frames == 0 would make the truncation arithmetic below emit a list
+	// header that over-claims its element count - guard it (the build path
+	// never sets has_path without frames, but hand-staged traces could).
+	if (include_path && t->has_path && t->n_frames != 0) {
+		sz += 1 + 9; // depth key + uint value
+		sz += 1 + 3; // path key + array header
+
+		for (uint16_t i = 0; i < t->n_frames; i++) {
+			sz += 3 + (uint32_t)strlen(t->path[i]); // str header + bytes
+		}
+
+		if (t->path_truncated) {
+			sz += 3 + (uint32_t)(sizeof(EXP_TRACE_PATH_ELLIPSIS) - 1);
+		}
+	}
+
+	if (include_snippet && t->has_snippet) {
+		sz += 1 + 3 + t->snippet_len; // key + str header + bytes
+	}
+
+	// Operand values: key + 2-element str array [lhs, rhs].
+	if (include_operands && t->has_operands) {
+		sz += 1 + 3; // key + array header
+		sz += 3 + t->lhs_len; // str header + bytes
+		sz += 3 + t->rhs_len;
+	}
+
+	// outcome (small enum, structural - never dropped by the budget logic).
+	if (t->has_outcome) {
+		sz += 1 + 9; // key + uint value
+	}
+
+	// AEL locator keys (small, structural - never dropped by the budget logic).
+	if (t->has_lang) {
+		sz += 1 + 9; // key + uint value
+	}
+
+	if (t->has_ael_offset) {
+		sz += 1 + 9;
+	}
+
+	if (t->has_ael_span) {
+		sz += 1 + 9;
+	}
+
+	return sz;
+}
+
+// Pack the staged expression trace as field-45 key 3 (a nested map): phase,
+// optional byte_offset + op, depth + path array root -> fault, the human-only
+// snippet, outcome, the AEL lang/offset/span locator, and the decisive
+// operands. include_path / include_snippet / include_operands reflect the
+// budget decision made by the caller, which has already accounted for this key
+// in the outer map header.
+static void
+pack_exp_trace(as_packer* pk, const as_error_exp_trace* t, bool include_path,
+		bool include_snippet, bool include_operands)
+{
+	// Keep this condition identical to exp_trace_max_sz - n_frames == 0 would
+	// over-claim the path list header (see the guard there).
+	bool emit_path = include_path && t->has_path && t->n_frames != 0;
+	bool emit_snippet = include_snippet && t->has_snippet;
+	bool emit_operands = include_operands && t->has_operands;
+
+	uint32_t n_sub = 1; // phase is always present
+
+	if (t->has_offset) {
+		n_sub++;
+	}
+
+	if (t->has_op) {
+		n_sub++;
+	}
+
+	if (emit_path) {
+		n_sub += 2; // depth + path
+	}
+
+	if (emit_snippet) {
+		n_sub++;
+	}
+
+	if (emit_operands) {
+		n_sub++;
+	}
+
+	if (t->has_outcome) {
+		n_sub++;
+	}
+
+	if (t->has_lang) {
+		n_sub++;
+	}
+
+	if (t->has_ael_offset) {
+		n_sub++;
+	}
+
+	if (t->has_ael_span) {
+		n_sub++;
+	}
+
+	// The caller's budget cascade (exp_trace_max_sz vs AS_ERROR_DETAILS_MAX)
+	// is a strict upper bound on the bytes written below, so none of these
+	// packs can overflow: the uint/header packs (key + value, map/list headers)
+	// are guaranteed to fit and their returns aren't checked. Only the variable
+	// str packs (op/path/snippet) carry a cf_crash backstop - that's deliberate
+	// (str sizing has the most moving parts), not an inconsistency. If the
+	// budget ever under-counts, the str crash fires; a header/uint would instead
+	// truncate silently, so keep exp_trace_max_sz a true over-estimate.
+	// exp_trace_max_sz hardcodes this header at one byte, which holds only
+	// while the sub-map is a fixmap. Past 15 entries it widens to three and the
+	// sizer would under-count by two - the silent-truncation class above, not
+	// the str crash. 11 keys are reachable today, 2 more are reserved.
+	cf_assert(n_sub <= 15, AS_PROTO,
+			"exp trace sub-map outgrew fixmap (%u entries) - widen the header "
+			"estimate in exp_trace_max_sz",
+			n_sub);
+
+	as_pack_uint64(pk, AS_ERROR_DETAIL_KEY_EXP_TRACE);
+	as_pack_map_header(pk, n_sub);
+
+	as_pack_uint64(pk, AS_EXP_TRACE_KEY_PHASE);
+	as_pack_uint64(pk, t->phase);
+
+	if (t->has_offset) {
+		as_pack_uint64(pk, AS_EXP_TRACE_KEY_BYTE_OFFSET);
+		as_pack_uint64(pk, t->byte_offset);
+	}
+
+	if (t->has_op) {
+		as_pack_uint64(pk, AS_EXP_TRACE_KEY_OP);
+
+		if (as_pack_str(pk, (const uint8_t*)t->op, t->op_len) != 0) {
+			cf_crash(AS_PROTO, "error detail exp-trace op didn't fit");
+		}
+	}
+
+	if (emit_path) {
+		as_pack_uint64(pk, AS_EXP_TRACE_KEY_DEPTH);
+		as_pack_uint64(pk, t->depth);
+
+		as_pack_uint64(pk, AS_EXP_TRACE_KEY_PATH);
+
+		// When truncated, the gap between the outermost frames and the innermost
+		// failing op is rendered as an explicit "..." element.
+		uint32_t n_eles = t->path_truncated ? t->n_frames + 1u : t->n_frames;
+		uint32_t inner_ix = t->n_frames - 1u; // innermost failing op slot
+
+		as_pack_list_header(pk, n_eles);
+
+		for (uint16_t i = 0; i < t->n_frames; i++) {
+			if (t->path_truncated && i == inner_ix) {
+				if (as_pack_str(pk, (const uint8_t*)EXP_TRACE_PATH_ELLIPSIS,
+							(uint32_t)(sizeof(EXP_TRACE_PATH_ELLIPSIS) - 1)) !=
+						0) {
+					cf_crash(AS_PROTO, "error detail exp-trace path didn't fit");
+				}
+			}
+
+			if (as_pack_str(pk, (const uint8_t*)t->path[i],
+						(uint32_t)strlen(t->path[i])) != 0) {
+				cf_crash(AS_PROTO, "error detail exp-trace path didn't fit");
+			}
+		}
+	}
+
+	if (emit_snippet) {
+		as_pack_uint64(pk, AS_EXP_TRACE_KEY_SNIPPET);
+
+		if (as_pack_str(pk, (const uint8_t*)t->snippet, t->snippet_len) != 0) {
+			cf_crash(AS_PROTO, "error detail exp-trace snippet didn't fit");
+		}
+	}
+
+	if (emit_operands) {
+		as_pack_uint64(pk, AS_EXP_TRACE_KEY_OPERANDS);
+		as_pack_list_header(pk, 2);
+
+		if (as_pack_str(pk, (const uint8_t*)t->lhs, t->lhs_len) != 0) {
+			cf_crash(AS_PROTO, "error detail exp-trace operand didn't fit");
+		}
+
+		if (as_pack_str(pk, (const uint8_t*)t->rhs, t->rhs_len) != 0) {
+			cf_crash(AS_PROTO, "error detail exp-trace operand didn't fit");
+		}
+	}
+
+	if (t->has_outcome) {
+		as_pack_uint64(pk, AS_EXP_TRACE_KEY_OUTCOME);
+		as_pack_uint64(pk, t->outcome);
+	}
+
+	if (t->has_lang) {
+		as_pack_uint64(pk, AS_EXP_TRACE_KEY_LANG);
+		as_pack_uint64(pk, t->lang);
+	}
+
+	if (t->has_ael_offset) {
+		as_pack_uint64(pk, AS_EXP_TRACE_KEY_AEL_OFFSET);
+		as_pack_uint64(pk, t->ael_offset);
+	}
+
+	if (t->has_ael_span) {
+		as_pack_uint64(pk, AS_EXP_TRACE_KEY_AEL_SPAN);
+		as_pack_uint64(pk, t->ael_span);
+	}
+}
+
+// Decide which trace tiers fit in 'budget' bytes, dropping in fixed order
+// (richest/least essential first): the operand values, then the snippet, then
+// the path - never truncating a tier to something misleading. Returns false
+// when even the phase/offset/op/depth core won't fit (emit no trace at all).
+// Shared by as_error_details_set_fmt (budget = cap minus subcode/message) and
+// the late-append path below (budget = cap minus the assembled payload).
+static bool
+exp_trace_fit(const as_error_exp_trace* t, uint32_t budget, bool* include_path,
+		bool* include_snippet, bool* include_operands)
+{
+	*include_path = true;
+	*include_snippet = true;
+	*include_operands = true;
+
+	if (exp_trace_max_sz(t, *include_path, *include_snippet, *include_operands) >
+			budget) {
+		*include_operands = false; // drop the operand values first
+	}
+
+	if (exp_trace_max_sz(t, *include_path, *include_snippet, *include_operands) >
+			budget) {
+		*include_snippet = false; // then the snippet
+	}
+
+	if (exp_trace_max_sz(t, *include_path, *include_snippet, *include_operands) >
+			budget) {
+		*include_path = false; // then the path
+	}
+
+	// If even the phase/offset/op/depth core won't fit, drop the trace.
+	return exp_trace_max_sz(t, *include_path, *include_snippet,
+				   *include_operands) <= budget;
+}
+
+// Late attach: serialize the just-staged trace into an ALREADY-assembled
+// field-45 payload. Covers the message-first ordering: a subsystem deep
+// inside expression evaluation (CDT ops, select) authors its message via
+// as_error_details_set_fmt before the fault reaches the exp boundary that
+// stages the trace. Subcode/message first-set-wins is untouched - the outer
+// map is always a fixmap (<= 3 entries) with the trace last when present, so
+// attaching = append key 3 at the end and bump the count byte. Safe because
+// the payload is only ever read at reply-build time (error_msg_field_prep),
+// never mid-eval - error_msg_field_write() asserts that, since prep hands out an
+// alias plus a length snapshot and this mutation would invalidate the pair.
+static void
+error_details_append_trace(void)
+{
+	bool include_path;
+	bool include_snippet;
+	bool include_operands;
+
+	if (g_error_details_len == 0) {
+		// set_fmt's nothing-to-convey arm claimed the slot without producing
+		// bytes - build a fresh trace-only map. If even the core won't fit
+		// (can't happen at today's sizes), emit nothing rather than an empty
+		// map: error_msg_field_prep relies on len > 0 <=> valid payload.
+		if (! exp_trace_fit(&g_error_exp_trace, AS_ERROR_DETAILS_MAX - 1,
+					&include_path, &include_snippet, &include_operands)) {
+			return;
+		}
+
+		as_packer pk = { .buffer = g_error_details,
+			.capacity = AS_ERROR_DETAILS_MAX };
+
+		as_pack_map_header(&pk, 1);
+		pack_exp_trace(&pk, &g_error_exp_trace, include_path, include_snippet,
+				include_operands);
+
+		cf_assert(pk.offset <= AS_ERROR_DETAILS_MAX, AS_PROTO,
+				"exp trace overran error-details buffer");
+
+		g_error_details_len = pk.offset;
+		return;
+	}
+
+	// (0x80 | n) fixmap - set_fmt packs at most 3 entries, and a trace can't
+	// already be among them: if set_fmt had packed one, g_error_exp_trace.set
+	// would have blocked this staging before the append.
+	cf_assert((g_error_details[0] & 0xf0) == 0x80, AS_PROTO,
+			"unexpected error-details map header 0x%x", g_error_details[0]);
+
+	if (! exp_trace_fit(&g_error_exp_trace,
+				AS_ERROR_DETAILS_MAX - g_error_details_len, &include_path,
+				&include_snippet, &include_operands)) {
+		return; // whole trace dropped - leave the payload untouched (no bump)
+	}
+
+	as_packer pk = { .buffer = g_error_details,
+		.capacity = AS_ERROR_DETAILS_MAX,
+		.offset = g_error_details_len };
+
+	pack_exp_trace(&pk, &g_error_exp_trace, include_path, include_snippet,
+			include_operands);
+
+	// The packer's capacity hard-bounds every write, so this documents the
+	// commit-side invariant rather than catching a reachable overrun.
+	cf_assert(pk.offset <= AS_ERROR_DETAILS_MAX, AS_PROTO,
+			"exp trace overran error-details buffer");
+
+	g_error_details[0]++; // count the appended entry - fixmap, so +1 is safe
+	g_error_details_len = pk.offset;
+}
+
+void
+as_error_exp_trace_set(const as_error_exp_trace* t)
+{
+	// First-set-wins (deepest build failure wins) and gated at the richest
+	// verbosity tier - mirrors as_error_details_set_fmt's early-out. Below the
+	// tier this function allocates nothing, takes no lock and logs nothing.
+	//
+	// It is not free tree-wide, but what remains below the tier is small and
+	// per-op, never per-byte:
+	//   - the eval path tests rt->explain, once universally in rt_eval and
+	//     again per comparison / boolean op;
+	//   - build_next builds a two-word ancestor frame and swaps the chain
+	//     pointer in and back out on every op - four stores. That chain is not
+	//     only for this: the build-failure path/depth needs it at every
+	//     tier >= 1;
+	//   - an AEL build sizes an op-ordinal -> source-span map into the
+	//     expression's own allocation, 4 bytes per op, in addition to the AEL
+	//     source text the runtime bin table already requires.
+	// None of it scales with record or bin size, so an expression run with
+	// error details off pays a small constant per op and no separate
+	// allocation.
+	if (g_error_exp_trace.set || g_error_verbosity < AS_ERROR_VERBOSITY_TRACE) {
+		return;
+	}
+
+	g_error_exp_trace = *t;
+	g_error_exp_trace.set = true;
+
+	if (g_error_details_set) {
+		// The message was authored first (e.g. a CDT op deep inside eval,
+		// first-set-wins) - attach the trace to the assembled payload so the
+		// stage/author ordering doesn't decide whether the trace ships.
+		error_details_append_trace();
+	}
+}
+
 void
 as_error_details_set_fmt(uint32_t subcode, const char* format, ...)
 {
-	if (g_error_details_set || g_error_verbosity == 0) {
+	if (g_error_details_set || g_error_verbosity == AS_ERROR_VERBOSITY_OFF) {
 		return;
 	}
 
@@ -145,7 +520,7 @@ as_error_details_set_fmt(uint32_t subcode, const char* format, ...)
 	char message[AS_ERROR_MESSAGE_MAX];
 	uint32_t message_len = 0;
 
-	if (g_error_verbosity >= 2) {
+	if (g_error_verbosity >= AS_ERROR_VERBOSITY_MESSAGES) {
 		va_list ap;
 		va_start(ap, format);
 		int n = vsnprintf(message, sizeof(message), format, ap);
@@ -162,15 +537,39 @@ as_error_details_set_fmt(uint32_t subcode, const char* format, ...)
 
 	bool has_message = message_len > 0;
 
-	// Neither a dispatchable subcode nor a message - nothing to convey, so
-	// omit field 45 entirely instead of emitting an empty map.
-	if (! has_subcode && ! has_message) {
+	// The structured expression trace rides only at the richest tier; it is
+	// staged by an in-scope caller (verbosity-gated, first-set-wins) before
+	// this call. It composes with the subcode/message in the same field-45 map.
+	bool has_trace = g_error_exp_trace.set &&
+			g_error_verbosity >= AS_ERROR_VERBOSITY_TRACE;
+
+	// Keep the whole map inside AS_ERROR_DETAILS_MAX. The phase/offset/op/depth
+	// core is tiny, but the operand values, a long snippet, or a deep path can
+	// push a near-max message over budget - exp_trace_fit owns the drop order.
+	// The core is kept as long as the message itself fits.
+	bool include_operands = true;
+	bool include_snippet = true;
+	bool include_path = true;
+
+	if (has_trace) {
+		uint32_t base_sz = 1; // outer map header
+		base_sz += has_subcode ? 1 + 9 : 0; // subcode key + uint value
+		base_sz += has_message ? 1 + 3 + message_len : 0; // key + str hdr + bytes
+
+		has_trace = exp_trace_fit(&g_error_exp_trace,
+				AS_ERROR_DETAILS_MAX - base_sz, &include_path, &include_snippet,
+				&include_operands);
+	}
+
+	// Nothing to convey - omit field 45 entirely instead of an empty map.
+	if (! has_subcode && ! has_message && ! has_trace) {
 		return;
 	}
 
 	as_packer pk = { .buffer = g_error_details, .capacity = AS_ERROR_DETAILS_MAX };
 
-	as_pack_map_header(&pk, (has_subcode ? 1 : 0) + (has_message ? 1 : 0));
+	as_pack_map_header(&pk,
+			(has_subcode ? 1 : 0) + (has_message ? 1 : 0) + (has_trace ? 1 : 0));
 
 	if (has_subcode) {
 		as_pack_uint64(&pk, AS_ERROR_DETAIL_KEY_SUBCODE);
@@ -185,6 +584,11 @@ as_error_details_set_fmt(uint32_t subcode, const char* format, ...)
 					"error detail message didn't fit - "
 					"check AS_ERROR_MSGPACK_OVERHEAD");
 		}
+	}
+
+	if (has_trace) {
+		pack_exp_trace(&pk, &g_error_exp_trace, include_path, include_snippet,
+				include_operands);
 	}
 
 	g_error_details_len = pk.offset;

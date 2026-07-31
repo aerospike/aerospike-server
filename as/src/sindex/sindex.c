@@ -236,7 +236,12 @@ as_sindex_put_rd(as_sindex* si, as_storage_rd* rd, as_index_ref* r_ref)
 
 		as_exp_ctx ctx_rd = { .ns = si->ns, .r = r, .rd = rd };
 
-		if (! as_exp_eval(si->exp, &ctx_rd, &rb, NULL)) {
+		// No eval-fault suppression needed here - only sindex populate calls
+		// this, on builder threads that are never armed. (Contrast the write
+		// path's eval_and_populate_sbin() in rw_utils.c, which runs armed.)
+		as_exp_trilean rv = as_exp_eval(si->exp, &ctx_rd, &rb, NULL);
+
+		if (rv != AS_EXP_TRUE) {
 			return;
 		}
 
@@ -1084,6 +1089,8 @@ parse_exp(const char* exp_b64, exp_def* e_def_r)
 
 	cf_vector* bins_info = cf_vector_create(sizeof(as_bin_info), 10, 0);
 	as_exp* exp = as_exp_build_buf(buf, (uint32_t)buf_sz, false, bins_info);
+	// Non-taking build - drop the accumulator's payload ref.
+	as_exp_build_err_reset();
 
 	if (exp == NULL) {
 		cf_warning(AS_SINDEX, "SINDEX CREATE: invalid expression %s", exp_b64);

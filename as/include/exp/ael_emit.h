@@ -37,7 +37,7 @@
 // AEL emit helpers.
 //
 // The msgpack-emission primitives (AST -> wire) shared by the two AEL
-// emitters: exp.c's runtime build pass (ael_build_node) and codegen.c's
+// emitters: exp.c's runtime build pass (ael_build_node) and ael_codegen.c's
 // static emitter. The complementary parse phase -- grammar actions that build
 // and validate the AST -- lives in ael_actions.h.
 

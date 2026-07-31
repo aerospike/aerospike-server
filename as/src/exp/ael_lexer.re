@@ -157,10 +157,10 @@ loop:
 	// Bare type-name keywords (INT / FLOAT / ...) are particle-type constants
 	// in operand position; type() reads a bin's type via the func table.
 
-	// `local` — bin scope marker (lowercase keyword). Promoted from
+	// `LOCAL` — bin scope marker (uppercase modifier keyword). Promoted from
 	// TOK_NAME string-compare so the parser doesn't need to validate
 	// the spelling at every bin_base reduction.
-	"local"        { return TOK_LOCAL; }
+	"LOCAL"        { return TOK_LOCAL; }
 
 	// `:PROPERTY` postfix flag constants (NO_FAIL / REVERSE / LIST_ORDERED /
 	// MAP_KEY_ORDERED / PERSIST_INDEX / …) are NOT keywords — they lex as

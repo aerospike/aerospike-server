@@ -35,6 +35,7 @@
 #include "citrusleaf/cf_digest.h"
 
 #include "dynbuf.h"
+#include "log.h"
 #include "socket.h"
 #include "vector.h"
 
@@ -60,6 +61,8 @@ struct as_storage_rd_s;
 extern __thread uint32_t g_error_details_len;
 extern __thread bool g_error_details_set;
 extern __thread uint8_t g_error_verbosity;
+struct as_error_exp_trace_s;
+extern __thread struct as_error_exp_trace_s g_error_exp_trace;
 
 //------------------------------------------------
 // Result codes used in client protocol. Must
@@ -348,6 +351,132 @@ typedef struct as_msg_field_s {
 // Error detail map keys (keep these as single-byte integers).
 #define AS_ERROR_DETAIL_KEY_SUBCODE         1
 #define AS_ERROR_DETAIL_KEY_MESSAGE         2
+#define AS_ERROR_DETAIL_KEY_EXP_TRACE       3 // value = nested msgpack map
+
+// Expression-trace sub-map keys (under AS_ERROR_DETAIL_KEY_EXP_TRACE). Keep
+// these as single-byte integers, and treat published meanings as fixed (AEL
+// adds new keys rather than repurposing these).
+#define AS_EXP_TRACE_KEY_PHASE              1 // uint: 1=build, 2=eval
+#define AS_EXP_TRACE_KEY_BYTE_OFFSET        2 // uint: byte offset into payload
+#define AS_EXP_TRACE_KEY_OP                 3 // str:  failing op name
+#define AS_EXP_TRACE_KEY_DEPTH              4 // uint: nesting depth
+#define AS_EXP_TRACE_KEY_PATH               5 // str array root->fault
+#define AS_EXP_TRACE_KEY_SNIPPET            6 // str:  human-only display
+
+// Why the record was not matched (eval phase only - the build phase never
+// emits this).
+#define AS_EXP_TRACE_KEY_OUTCOME            7 // uint: AS_EXP_TRACE_OUTCOME_*
+
+#define AS_EXP_TRACE_OUTCOME_FAULT          1 // eval faulted
+#define AS_EXP_TRACE_OUTCOME_FALSE          2 // clean FALSE
+#define AS_EXP_TRACE_OUTCOME_ABSENT         3 // bin/key absent
+
+// AEL-language keys. 'lang' is omitted for a msgpack expression (msgpack is
+// the default when the key is absent), so a msgpack trace spends no extra
+// bytes. byte_offset (key 2) stays the msgpack-payload offset; ael_offset /
+// ael_span index the AEL source text - the two coordinate spaces are never
+// conflated.
+#define AS_EXP_TRACE_KEY_LANG               8 // 1=msgpack (default), 2=ael
+#define AS_EXP_TRACE_KEY_AEL_OFFSET         9 // char offset into AEL src
+#define AS_EXP_TRACE_KEY_AEL_SPAN          10 // byte width of AEL span
+#define AS_EXP_TRACE_KEY_AEL_LINE          11 // uint: 1-based line (reserved)
+#define AS_EXP_TRACE_KEY_AEL_COL           12 // uint: 1-based column (reserved)
+
+#define AS_EXP_TRACE_LANG_MSGPACK           1
+#define AS_EXP_TRACE_LANG_AEL               2
+
+// The decisive comparison's operand values, as a 2-element str array
+// [lhs, rhs] (e.g. ["15", "18"] for gt(bin("age")=15, 18)). Emitted only for
+// an outcome=FALSE trace whose decisive op is a comparison; dropped first by
+// the budget cascade.
+#define AS_EXP_TRACE_KEY_OPERANDS          13 // str[2]: [lhs, rhs] values
+
+// Only 15 entries fit the one-byte fixmap header that exp_trace_max_sz()
+// assumes for this sub-map; pack_exp_trace() asserts the live count against
+// that. Bound it at compile time too: the keys are distinct and numbered from
+// 1, so the highest key number bounds the entry count. Keep this on the
+// highest key in use.
+//
+// TWO numbers are left (14, 15) - 11 and 12 above are reserved, not free. A
+// 16th key needs the three-byte map header and a widened estimate in
+// exp_trace_max_sz(), so it fails the build here rather than aborting asd on
+// the first trace that carries it.
+COMPILER_ASSERT(AS_EXP_TRACE_KEY_OPERANDS <= 15);
+
+#define AS_EXP_TRACE_PHASE_BUILD            1
+#define AS_EXP_TRACE_PHASE_EVAL             2
+
+// Verbosity tiers gating what rides in field 45: nothing at 0 (OFF), subcode at
+// >= 1, message at >= 2 (MESSAGES), the structured expression trace only at the
+// top "all" tier (3, TRACE).
+#define AS_ERROR_VERBOSITY_OFF              0
+#define AS_ERROR_VERBOSITY_MESSAGES         2
+#define AS_ERROR_VERBOSITY_TRACE            3
+
+// Cap on the pre-rendered failing op name staged for the trace.
+#define AS_EXP_TRACE_OP_MAX                 32
+
+// Cap on the number of ancestor path frames staged for the trace. The
+// path is the op-name chain root -> failing op; if the real nesting is deeper,
+// the outermost AS_EXP_TRACE_MAX_FRAMES-1 frames plus the innermost (failing)
+// op are kept and the gap is marked truncated (a "..." frame is emitted in the
+// middle - see pack_exp_trace).
+#define AS_EXP_TRACE_MAX_FRAMES             16
+
+// Cap on the pre-rendered human-only snippet staged for the trace.
+#define AS_EXP_TRACE_SNIPPET_MAX            256
+
+// Cap on each pre-rendered operand value. Small - these are scalar
+// comparison operands; longer values are truncated.
+#define AS_EXP_TRACE_OPERAND_MAX            48
+
+// Server-side staging slot for the expression trace - a sibling to the
+// g_error_details payload, filled (verbosity-gated, first-set-wins) by an
+// in-scope caller, and merged into field-45 key 3 regardless of staging
+// order: staged before as_error_details_set_fmt() it packs inline; staged
+// after a message was already authored it is appended to the assembled
+// payload by as_error_exp_trace_set() itself. All strings are pre-rendered
+// by the exp module, so proto needs no access to the op table.
+typedef struct as_error_exp_trace_s {
+	bool      set;        // first-set-wins guard (independent of subcode/msg)
+	uint8_t   phase;      // AS_EXP_TRACE_PHASE_*
+	bool      has_offset;
+	uint32_t  byte_offset;
+	bool      has_op;
+	uint16_t  op_len;     // length of the pre-rendered op name (no NUL)
+	char      op[AS_EXP_TRACE_OP_MAX]; // pre-rendered in exp.c (NUL-terminated)
+	// Depth + ancestor path (root -> failing op). depth is the true
+	// nesting depth even when the rendered path is truncated.
+	bool      has_path;
+	uint16_t  depth;
+	bool      path_truncated; // true if the real depth exceeded n_frames
+	uint16_t  n_frames;   // number of rendered frames in path[]
+	char      path[AS_EXP_TRACE_MAX_FRAMES][AS_EXP_TRACE_OP_MAX]; // NUL-term
+	// Human-only snippet rendered from the msgpack payload.
+	bool      has_snippet;
+	uint16_t  snippet_len; // length of snippet (no NUL)
+	char      snippet[AS_EXP_TRACE_SNIPPET_MAX]; // NUL-terminated
+	// Why the record was not matched (eval phase only).
+	bool      has_outcome;
+	uint8_t   outcome;    // AS_EXP_TRACE_OUTCOME_*
+	// AEL-language locator. 'lang' is absent for a msgpack build trace (msgpack
+	// is the wire default); the AEL compiler branch sets lang=AEL +
+	// ael_offset/ael_span (offset into the AEL source text, not the msgpack
+	// payload - see key 2).
+	bool      has_lang;
+	uint8_t   lang;       // AS_EXP_TRACE_LANG_*
+	bool      has_ael_offset;
+	uint32_t  ael_offset; // char offset into the AEL source text
+	bool      has_ael_span;
+	uint32_t  ael_span;   // byte width of the offending AEL source region
+	// The decisive comparison's operand values, pre-rendered. Set only for
+	// outcome=FALSE when the deciding op is a comparison.
+	bool      has_operands;
+	uint16_t  lhs_len;    // length of lhs (no NUL)
+	char      lhs[AS_EXP_TRACE_OPERAND_MAX]; // NUL-terminated
+	uint16_t  rhs_len;    // length of rhs (no NUL)
+	char      rhs[AS_EXP_TRACE_OPERAND_MAX]; // NUL-terminated
+} as_error_exp_trace;
 
 // Subcodes - per-status enums. Each top-level status family that
 // subdivides into app-dispatchable conditions has its own enum;
@@ -864,6 +993,11 @@ size_t as_msg_send_fin_timeout(cf_socket* sock, uint32_t result_code,
 void as_error_details_set_fmt(uint32_t subcode, const char* format, ...)
 		__attribute__((format(printf, 2, 3)));
 
+// Stage a structured expression trace for field-45 key 3. First-set-wins and
+// verbosity-gated (top "all" tier only), mirroring as_error_details_set_fmt.
+// The op name is pre-rendered by the caller, so this stays free of exp.h.
+void as_error_exp_trace_set(const as_error_exp_trace* t);
+
 const uint8_t* as_error_msg_peek(uint32_t* len);
 
 static inline void
@@ -871,6 +1005,21 @@ as_error_msg_clear(void)
 {
 	g_error_details_len = 0;
 	g_error_details_set = false;
+	g_error_exp_trace.set = false;
+}
+
+// Clear the armed detail and drop verbosity back to off. Use at transaction
+// boundaries. as_error_msg_clear() alone leaves g_error_verbosity armed, and
+// service threads are pooled across connections - a thread that served one
+// opted-in client would keep authoring details for whatever it does next, until
+// something re-arms it. The per-reply and per-row clears must NOT use this:
+// they run mid-transaction, where dropping verbosity would silently disable
+// details for the rest of that transaction.
+static inline void
+as_error_msg_disarm(void)
+{
+	as_error_msg_clear();
+	g_error_verbosity = AS_ERROR_VERBOSITY_OFF;
 }
 
 // Error-details wire field - shared by the single-record response builders
@@ -889,6 +1038,12 @@ typedef struct error_msg_field_s {
 // client didn't opt in, any armed detail is discarded here so it can't leak
 // onto this reply or a later one on the same thread. Pair with
 // error_msg_field_write(), which writes the field and clears.
+//
+// The returned 'msg' ALIASES mutable thread-local storage and 'len' is a
+// snapshot of it, so nothing between this call and the matching write may stage
+// a detail or a trace: as_error_exp_trace_set() appends in place and bumps the
+// payload's map header, which would leave the write copying a header promising
+// one more entry than the snapshot length carries. The write asserts it.
 static inline error_msg_field
 error_msg_field_prep(bool include_error_msg, bool is_error)
 {
@@ -922,6 +1077,16 @@ error_msg_field_write(uint8_t** at, const error_msg_field* f)
 	if (! f->add) {
 		return;
 	}
+
+	// The prep-time snapshot must still describe the armed payload. A grown one
+	// is not a buffer overrun - the copy below is bounded by the snapshot - but
+	// the first byte it copies is a map header already bumped in the aliased
+	// thread-local, so the client would decode one more entry than the field
+	// carries and drop the whole detail. Server-internal invariant, reachable
+	// only by a future builder folding expression work between prep and write.
+	cf_assert(f->len == g_error_details_len, AS_PROTO,
+			"error-details payload changed between prep and write (%u -> %u)",
+			f->len, g_error_details_len);
 
 	as_msg_field* mf = (as_msg_field*)*at;
 

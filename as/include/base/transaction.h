@@ -331,6 +331,18 @@ as_transaction_is_batch_sub(const as_transaction* tr)
 	return (tr->from_flags & FROM_FLAG_BATCH_SUB) != 0;
 }
 
+// A client-facing single-record-style request may run the filter-decision
+// explainer on a filtered-out record: direct read/write/delete, its proxied
+// form, and batch sub-ops. The internal background bulk sub-transactions
+// (FROM_IUDF/FROM_IOPS) share the same paths but stay excluded - they are
+// not client-facing and their fan-out is not a debugging request.
+static inline bool
+as_transaction_may_explain_filter(const as_transaction* tr)
+{
+	return tr->origin == FROM_CLIENT || tr->origin == FROM_PROXY ||
+			tr->origin == FROM_BATCH;
+}
+
 static inline bool
 as_transaction_is_restart_strict(const as_transaction* tr)
 {

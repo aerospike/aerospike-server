@@ -63,18 +63,19 @@
 // ends the source. Pass a second ref for a range (`a:b`), AST_REF_NULL for a
 // single operand. Falls back to the last token if the operand span is empty.
 static void
-seg_operand_span(parse_context* ctx, ast_ref a, ast_ref b, uint32_t* offset,
+seg_operand_span(ael_context* ctx, ast_ref a, ast_ref b, uint32_t* offset,
 		uint32_t* byte_sz)
 {
 	ast_node* ap = ast_pool_at(ctx->pool, a);
-	uint32_t start = ap->offset;
-	uint32_t end = ap->offset + ap->sz;
+	uint32_t start = ast_disp_offset(ap);
+	uint32_t end = start + ap->sz;
 
 	if (b != AST_REF_NULL) {
 		ast_node* bp = ast_pool_at(ctx->pool, b);
+		uint32_t b_start = ast_disp_offset(bp);
 
-		start = bp->offset < start ? bp->offset : start;
-		end = bp->offset + bp->sz > end ? bp->offset + bp->sz : end;
+		start = b_start < start ? b_start : start;
+		end = b_start + bp->sz > end ? b_start + bp->sz : end;
 	}
 
 	if (end > start) {
@@ -87,7 +88,7 @@ seg_operand_span(parse_context* ctx, ast_ref a, ast_ref b, uint32_t* offset,
 	}
 }
 
-#line 91 "ael_parser.c"
+#line 92 "ael_parser.c"
 /**************** End of %include directives **********************************/
 /* These constants specify the various numeric values for terminal symbols.
 ***************** Begin token definitions *************************************/
@@ -251,10 +252,10 @@ typedef union {
 #ifndef YYSTACKDEPTH
 #define YYSTACKDEPTH 100
 #endif
-#define ParseARG_SDECL  parse_context* ctx ;
-#define ParseARG_PDECL , parse_context* ctx 
+#define ParseARG_SDECL  ael_context* ctx ;
+#define ParseARG_PDECL , ael_context* ctx 
 #define ParseARG_PARAM ,ctx 
-#define ParseARG_FETCH  parse_context* ctx =yypParser->ctx ;
+#define ParseARG_FETCH  ael_context* ctx =yypParser->ctx ;
 #define ParseARG_STORE yypParser->ctx =ctx ;
 #define ParseCTX_SDECL
 #define ParseCTX_PDECL
@@ -1468,9 +1469,9 @@ static void yy_destructor(
     case 123: /* meta_key_call */
     case 124: /* method_open */
 {
-#line 1639 "ael_parser.y"
+#line 1683 "ael_parser.y"
  (void)ctx; (void)yypminor; 
-#line 1473 "ael_parser.c"
+#line 1474 "ael_parser.c"
 }
       break;
 /********* End destructor definitions *****************************************/
@@ -1688,11 +1689,11 @@ static void yyStackOverflow(yyParser *yypParser){
    /* Here code is inserted which will execute if the parser
    ** stack every overflows */
 /******** Begin %stack_overflow code ******************************************/
-#line 93 "ael_parser.y"
+#line 94 "ael_parser.y"
 
 	ael_diag_add(&ctx->diags, AEL_SEV_ERROR, 0, 0,
 			"expression too complex (parser stack overflow)");
-#line 1695 "ael_parser.c"
+#line 1696 "ael_parser.c"
 /******** End %stack_overflow code ********************************************/
    ParseARG_STORE /* Suppress warning about unused %extra_argument var */
    ParseCTX_STORE
@@ -2221,157 +2222,160 @@ static YYACTIONTYPE yy_reduce(
 /********** Begin reduce actions **********************************************/
         YYMINORTYPE yylhsminor;
       case 0: /* program ::= expr */
-#line 196 "ael_parser.y"
+#line 197 "ael_parser.y"
 { ctx->root = yymsp[0].minor.yy97; }
-#line 2226 "ael_parser.c"
+#line 2227 "ael_parser.c"
         break;
       case 1: /* expr ::= expr TOK_OR expr */
-#line 202 "ael_parser.y"
+#line 203 "ael_parser.y"
 { yylhsminor.yy97 = ast_nary_merge(ctx, AST_OR, yymsp[-2].minor.yy97, yymsp[0].minor.yy97, AST_ETYPE_TRILEAN); }
-#line 2231 "ael_parser.c"
+#line 2232 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 2: /* expr ::= expr TOK_AND expr */
-#line 203 "ael_parser.y"
+#line 204 "ael_parser.y"
 { yylhsminor.yy97 = ast_nary_merge(ctx, AST_AND, yymsp[-2].minor.yy97, yymsp[0].minor.yy97, AST_ETYPE_TRILEAN); }
-#line 2237 "ael_parser.c"
+#line 2238 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 3: /* expr ::= expr TOK_EQ expr */
-#line 206 "ael_parser.y"
+#line 207 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_bcmp(ctx, AST_CMP_EQ, yymsp[-2].minor.yy97, yymsp[0].minor.yy97); }
-#line 2243 "ael_parser.c"
+#line 2244 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 4: /* expr ::= expr TOK_NE expr */
-#line 207 "ael_parser.y"
+#line 208 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_bcmp(ctx, AST_CMP_NE, yymsp[-2].minor.yy97, yymsp[0].minor.yy97); }
-#line 2249 "ael_parser.c"
+#line 2250 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 5: /* expr ::= expr TOK_GT expr */
-#line 208 "ael_parser.y"
+#line 209 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_bcmp(ctx, AST_CMP_GT, yymsp[-2].minor.yy97, yymsp[0].minor.yy97); }
-#line 2255 "ael_parser.c"
+#line 2256 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 6: /* expr ::= expr TOK_GE expr */
-#line 209 "ael_parser.y"
+#line 210 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_bcmp(ctx, AST_CMP_GE, yymsp[-2].minor.yy97, yymsp[0].minor.yy97); }
-#line 2261 "ael_parser.c"
+#line 2262 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 7: /* expr ::= expr TOK_LT expr */
-#line 210 "ael_parser.y"
+#line 211 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_bcmp(ctx, AST_CMP_LT, yymsp[-2].minor.yy97, yymsp[0].minor.yy97); }
-#line 2267 "ael_parser.c"
+#line 2268 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 8: /* expr ::= expr TOK_LE expr */
-#line 211 "ael_parser.y"
+#line 212 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_bcmp(ctx, AST_CMP_LE, yymsp[-2].minor.yy97, yymsp[0].minor.yy97); }
-#line 2273 "ael_parser.c"
+#line 2274 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 9: /* expr ::= expr TOK_IN expr */
-#line 212 "ael_parser.y"
+#line 213 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_in(ctx, yymsp[-2].minor.yy97, yymsp[0].minor.yy97); }
-#line 2279 "ael_parser.c"
+#line 2280 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 10: /* expr ::= expr TOK_MATCH TOK_REGEX */
-#line 217 "ael_parser.y"
+#line 218 "ael_parser.y"
 { yylhsminor.yy97 = ael_new_regex_match(ctx, yymsp[-2].minor.yy97, yymsp[0].minor.yy0.offset + 1, yymsp[0].minor.yy0.regex.pat_sz, yymsp[0].minor.yy0.offset + yymsp[0].minor.yy0.regex.pat_sz + 2, yymsp[0].minor.yy0.regex.flag_sz); }
-#line 2285 "ael_parser.c"
+#line 2286 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 11: /* expr ::= expr TOK_PLUS expr */
-#line 222 "ael_parser.y"
+#line 223 "ael_parser.y"
 { yylhsminor.yy97 = ast_nary_merge(ctx, AST_ADD, yymsp[-2].minor.yy97, yymsp[0].minor.yy97, AST_ETYPE_AUTO_ADD); }
-#line 2291 "ael_parser.c"
+#line 2292 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 12: /* expr ::= expr TOK_MINUS expr */
-#line 223 "ael_parser.y"
+#line 224 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_bmath(ctx, AST_SUB, yymsp[-2].minor.yy97, yymsp[0].minor.yy97, AST_ETYPE_AUTO_NUMERIC); }
-#line 2297 "ael_parser.c"
+#line 2298 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 13: /* expr ::= expr TOK_STAR expr */
-#line 224 "ael_parser.y"
+#line 225 "ael_parser.y"
 { yylhsminor.yy97 = ast_nary_merge(ctx, AST_MUL, yymsp[-2].minor.yy97, yymsp[0].minor.yy97, AST_ETYPE_AUTO_NUMERIC); }
-#line 2303 "ael_parser.c"
+#line 2304 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 14: /* expr ::= expr TOK_SLASH expr */
-#line 225 "ael_parser.y"
+#line 226 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_bmath(ctx, AST_DIV, yymsp[-2].minor.yy97, yymsp[0].minor.yy97, AST_ETYPE_AUTO_NUMERIC); }
-#line 2309 "ael_parser.c"
+#line 2310 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 15: /* expr ::= expr TOK_PERCENT expr */
-#line 226 "ael_parser.y"
+#line 227 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_bmath(ctx, AST_MOD, yymsp[-2].minor.yy97, yymsp[0].minor.yy97, AST_ETYPE_INT); }
-#line 2315 "ael_parser.c"
+#line 2316 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 16: /* expr ::= expr TOK_POWER expr */
-#line 227 "ael_parser.y"
+#line 228 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_bmath(ctx, AST_POW, yymsp[-2].minor.yy97, yymsp[0].minor.yy97, AST_ETYPE_FLOAT); }
-#line 2321 "ael_parser.c"
+#line 2322 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 17: /* expr ::= TOK_MINUS expr */
-#line 233 "ael_parser.y"
-{ yymsp[-1].minor.yy97 = ast_new_neg(ctx, yymsp[0].minor.yy97); }
-#line 2327 "ael_parser.c"
+#line 234 "ael_parser.y"
+{
+	yylhsminor.yy97 = ast_new_neg(ctx, yymsp[0].minor.yy97, yymsp[-1].minor.yy0.offset + yymsp[-1].minor.yy0.sz);
+}
+#line 2330 "ael_parser.c"
+  yymsp[-1].minor.yy97 = yylhsminor.yy97;
         break;
       case 18: /* expr ::= TOK_PLUS expr */
-#line 234 "ael_parser.y"
+#line 237 "ael_parser.y"
 {
 	ast_set_implicit_type(ctx, yymsp[0].minor.yy97, AST_ETYPE_AUTO_NUMERIC);
 	yymsp[-1].minor.yy97 = yymsp[0].minor.yy97;
 }
-#line 2335 "ael_parser.c"
+#line 2339 "ael_parser.c"
         break;
       case 19: /* expr ::= expr TOK_AMP expr */
-#line 240 "ael_parser.y"
+#line 243 "ael_parser.y"
 { yylhsminor.yy97 = ast_nary_merge(ctx, AST_BIT_AND, yymsp[-2].minor.yy97, yymsp[0].minor.yy97, AST_ETYPE_INT); }
-#line 2340 "ael_parser.c"
+#line 2344 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 20: /* expr ::= expr TOK_PIPE expr */
-#line 241 "ael_parser.y"
+#line 244 "ael_parser.y"
 { yylhsminor.yy97 = ast_nary_merge(ctx, AST_BIT_OR, yymsp[-2].minor.yy97, yymsp[0].minor.yy97, AST_ETYPE_INT); }
-#line 2346 "ael_parser.c"
+#line 2350 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 21: /* expr ::= expr TOK_CARET expr */
-#line 242 "ael_parser.y"
+#line 245 "ael_parser.y"
 { yylhsminor.yy97 = ast_nary_merge(ctx, AST_BIT_XOR, yymsp[-2].minor.yy97, yymsp[0].minor.yy97, AST_ETYPE_INT); }
-#line 2352 "ael_parser.c"
+#line 2356 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 22: /* expr ::= expr TOK_LSHIFT expr */
-#line 243 "ael_parser.y"
+#line 246 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_bmath(ctx, AST_LSHIFT, yymsp[-2].minor.yy97, yymsp[0].minor.yy97, AST_ETYPE_INT); }
-#line 2358 "ael_parser.c"
+#line 2362 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 23: /* expr ::= expr TOK_RSHIFT expr */
-#line 244 "ael_parser.y"
+#line 247 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_bmath(ctx, AST_RSHIFT_ARITH, yymsp[-2].minor.yy97, yymsp[0].minor.yy97, AST_ETYPE_INT); }
-#line 2364 "ael_parser.c"
+#line 2368 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 24: /* expr ::= expr TOK_RSHIFT_LOGIC expr */
-#line 245 "ael_parser.y"
+#line 248 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_bmath(ctx, AST_RSHIFT_LOGIC, yymsp[-2].minor.yy97, yymsp[0].minor.yy97, AST_ETYPE_INT); }
-#line 2370 "ael_parser.c"
+#line 2374 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 25: /* expr ::= TOK_TILDE expr */
-#line 246 "ael_parser.y"
+#line 249 "ael_parser.y"
 {
 	ast_set_implicit_type(ctx, yymsp[0].minor.yy97, AST_ETYPE_INT);
 	yymsp[-1].minor.yy97 = ast_new_unary(ctx->pool, AST_BIT_NOT, yymsp[0].minor.yy97);
@@ -2379,10 +2383,10 @@ static YYACTIONTYPE yy_reduce(
 		ast_pool_at(ctx->pool, yymsp[-1].minor.yy97)->etype = AST_ETYPE_INT;
 	}
 }
-#line 2382 "ael_parser.c"
+#line 2386 "ael_parser.c"
         break;
       case 26: /* expr ::= TOK_NOT TOK_LPAREN expr TOK_RPAREN */
-#line 255 "ael_parser.y"
+#line 258 "ael_parser.y"
 {
 	ast_set_implicit_type(ctx, yymsp[-1].minor.yy97, AST_ETYPE_TRILEAN);
 	yymsp[-3].minor.yy97 = ast_new_unary(ctx->pool, AST_NOT, yymsp[-1].minor.yy97);
@@ -2390,10 +2394,10 @@ static YYACTIONTYPE yy_reduce(
 		ast_pool_at(ctx->pool, yymsp[-3].minor.yy97)->etype = AST_ETYPE_TRILEAN;
 	}
 }
-#line 2393 "ael_parser.c"
+#line 2397 "ael_parser.c"
         break;
       case 27: /* expr ::= TOK_EXCLUSIVE TOK_LPAREN expr_list TOK_RPAREN */
-#line 264 "ael_parser.y"
+#line 267 "ael_parser.y"
 {
 	yymsp[-3].minor.yy97 = yymsp[-1].minor.yy97;
 	ast_node* n = ast_pool_at(ctx->pool, yymsp[-3].minor.yy97);
@@ -2407,18 +2411,18 @@ static YYACTIONTYPE yy_reduce(
 		ast_set_implicit_type(ctx, e, AST_ETYPE_TRILEAN);
 	}
 }
-#line 2410 "ael_parser.c"
+#line 2414 "ael_parser.c"
         break;
       case 28: /* let_head ::= TOK_LET TOK_LPAREN var_def_list TOK_RPAREN TOK_THEN */
-#line 280 "ael_parser.y"
+#line 283 "ael_parser.y"
 {
 	yymsp[-4].minor.yy97 = yymsp[-2].minor.yy97;
 	// Scope was already pushed in var_def_list.
 }
-#line 2418 "ael_parser.c"
+#line 2422 "ael_parser.c"
         break;
       case 29: /* expr ::= let_head TOK_LPAREN expr TOK_RPAREN */
-#line 285 "ael_parser.y"
+#line 288 "ael_parser.y"
 {
 	if (yymsp[-3].minor.yy97 == AST_REF_NULL || yymsp[-1].minor.yy97 == AST_REF_NULL) {
 		yylhsminor.yy97 = AST_REF_NULL;
@@ -2431,16 +2435,28 @@ static YYACTIONTYPE yy_reduce(
 		// Append body.
 		AST_PLIST_PUSH_TAIL(ctx->pool, n, yymsp[-1].minor.yy97);
 
+		// The shell was spanned over the first binding when it was created
+		// (mid-construct); extend through the body so the LET's span covers
+		// bindings -> body.
+		ast_node* bp = ast_pool_at(ctx->pool, yymsp[-1].minor.yy97);
+		uint32_t let_end = ast_disp_offset(bp) + bp->sz;
+		uint32_t let_start = ast_disp_offset(n);
+
+		if (let_end > let_start) {
+			uint32_t span = let_end - let_start;
+			n->sz = span > 255 ? 255 : (uint8_t)span;
+		}
+
 		// Pop scope — let_scope is at list head.
 		ast_node* sp = ast_pool_at(ctx->pool, n->u.list.head);
 		ctx->cur_scope = sp->u.let_scope.parent;
 	}
 }
-#line 2439 "ael_parser.c"
+#line 2455 "ael_parser.c"
   yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 30: /* expr ::= TOK_WHEN TOK_LPAREN case_list TOK_COMMA TOK_DEFAULT TOK_ARROW expr TOK_RPAREN */
-#line 304 "ael_parser.y"
+#line 319 "ael_parser.y"
 {
 	// yymsp[-5].minor.yy97 is a freshly-built list (never null); only yymsp[-1].minor.yy97 can fail.
 	if (yymsp[-1].minor.yy97 == AST_REF_NULL) {
@@ -2453,9 +2469,7 @@ static YYACTIONTYPE yy_reduce(
 
 		// Span the whole when(...) so diagnostics (e.g. a non-boolean when used
 		// as a logical operand) point at the operator, not the reused case_list.
-		uint32_t span = yymsp[0].minor.yy0.str.offset + yymsp[0].minor.yy0.str.sz - yymsp[-7].minor.yy0.str.offset;
-		n->offset = yymsp[-7].minor.yy0.str.offset;
-		n->sz = (span > 255) ? 255 : (uint8_t)span;
+		ast_set_span(ctx->pool, yylhsminor.yy97, yymsp[-7].minor.yy0.offset, yymsp[0].minor.yy0.offset + yymsp[0].minor.yy0.sz - yymsp[-7].minor.yy0.offset);
 
 		AST_PLIST_PUSH_TAIL(ctx->pool, n, yymsp[-1].minor.yy97);
 
@@ -2491,7 +2505,7 @@ static YYACTIONTYPE yy_reduce(
 				result_types != AST_ETYPE_AUTO_NUMERIC;
 
 		if (incompatible) {
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, n->offset, n->sz,
+			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(n), n->sz,
 				"when branches have incompatible types");
 		}
 
@@ -2522,15 +2536,22 @@ static YYACTIONTYPE yy_reduce(
 		}
 	}
 }
-#line 2525 "ael_parser.c"
+#line 2539 "ael_parser.c"
   yymsp[-7].minor.yy97 = yylhsminor.yy97;
         break;
       case 31: /* exp_base ::= TOK_LPAREN expr TOK_RPAREN */
-      case 48: /* literal ::= TOK_LBRACKET list_body TOK_RBRACKET */ yytestcase(yyruleno==48);
-      case 50: /* literal ::= TOK_LBRACE map_body TOK_RBRACE */ yytestcase(yyruleno==50);
-#line 392 "ael_parser.y"
-{ yymsp[-2].minor.yy97 = yymsp[-1].minor.yy97; }
-#line 2533 "ael_parser.c"
+#line 405 "ael_parser.y"
+{
+	yylhsminor.yy97 = yymsp[-1].minor.yy97;
+
+	// Widen the grouped node's displayed span over the parens so a highlight
+	// of the group includes both. Applies to every kind: ast_set_display_span
+	// widens without moving the node's anchor, so a grouped bin or variable
+	// keeps its name locator on the name.
+	ast_set_display_span(ctx->pool, yylhsminor.yy97, yymsp[-2].minor.yy0.offset, yymsp[0].minor.yy0.offset + yymsp[0].minor.yy0.sz);
+}
+#line 2553 "ael_parser.c"
+  yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 32: /* expr ::= operand */
       case 33: /* expr ::= func_call */ yytestcase(yyruleno==33);
@@ -2541,9 +2562,9 @@ static YYACTIONTYPE yy_reduce(
       case 83: /* operand ::= method_call */ yytestcase(yyruleno==83);
       case 93: /* operand ::= meta_key_call */ yytestcase(yyruleno==93);
       case 194: /* list_elem ::= literal */ yytestcase(yyruleno==194);
-#line 395 "ael_parser.y"
+#line 416 "ael_parser.y"
 { yylhsminor.yy97 = yymsp[0].minor.yy97; }
-#line 2546 "ael_parser.c"
+#line 2567 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 34: /* literal ::= TOK_INT */
@@ -2551,171 +2572,191 @@ static YYACTIONTYPE yy_reduce(
       case 169: /* key_val ::= TOK_INT */ yytestcase(yyruleno==169);
       case 178: /* idx_val ::= TOK_INT */ yytestcase(yyruleno==178);
       case 179: /* rank_val ::= TOK_INT */ yytestcase(yyruleno==179);
-#line 404 "ael_parser.y"
+#line 425 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_int(ctx->pool, yymsp[0].minor.yy0.ival); STAMP(yylhsminor.yy97, yymsp[0].minor.yy0); }
-#line 2556 "ael_parser.c"
+#line 2577 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 35: /* literal ::= TOK_FLOAT */
       case 170: /* key_val ::= TOK_FLOAT */ yytestcase(yyruleno==170);
-#line 405 "ael_parser.y"
+#line 426 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_float(ctx->pool, yymsp[0].minor.yy0.fval); STAMP(yylhsminor.yy97, yymsp[0].minor.yy0); }
-#line 2563 "ael_parser.c"
+#line 2584 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 36: /* literal ::= TOK_TRUE */
       case 171: /* key_val ::= TOK_TRUE */ yytestcase(yyruleno==171);
-#line 406 "ael_parser.y"
+#line 427 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_bool(ctx->pool, true); STAMP(yylhsminor.yy97, yymsp[0].minor.yy0); }
-#line 2570 "ael_parser.c"
+#line 2591 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 37: /* literal ::= TOK_FALSE */
       case 172: /* key_val ::= TOK_FALSE */ yytestcase(yyruleno==172);
-#line 407 "ael_parser.y"
+#line 428 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_bool(ctx->pool, false); STAMP(yylhsminor.yy97, yymsp[0].minor.yy0); }
-#line 2577 "ael_parser.c"
+#line 2598 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 38: /* literal ::= TOK_NIL */
       case 173: /* key_val ::= TOK_NIL */ yytestcase(yyruleno==173);
-#line 408 "ael_parser.y"
+#line 429 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_nil(ctx->pool); STAMP(yylhsminor.yy97, yymsp[0].minor.yy0); }
-#line 2584 "ael_parser.c"
+#line 2605 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 39: /* literal ::= TOK_STRING */
       case 43: /* map_key ::= TOK_STRING */ yytestcase(yyruleno==43);
       case 168: /* key_val ::= TOK_STRING */ yytestcase(yyruleno==168);
-#line 409 "ael_parser.y"
+#line 430 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_string_token(ctx, yymsp[0].minor.yy0.str.offset, yymsp[0].minor.yy0.str.sz); STAMP(yylhsminor.yy97, yymsp[0].minor.yy0); }
-#line 2592 "ael_parser.c"
+#line 2613 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 40: /* literal ::= TOK_BLOB_LITERAL */
       case 45: /* map_key ::= TOK_BLOB_LITERAL */ yytestcase(yyruleno==45);
-#line 410 "ael_parser.y"
+#line 431 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_blob_from_hex(ctx->pool, TOK_STR(ctx, yymsp[0].minor.yy0), yymsp[0].minor.yy0.str.sz); STAMP(yylhsminor.yy97, yymsp[0].minor.yy0); }
-#line 2599 "ael_parser.c"
+#line 2620 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 41: /* literal ::= TOK_B64_BLOB_LITERAL */
       case 46: /* map_key ::= TOK_B64_BLOB_LITERAL */ yytestcase(yyruleno==46);
-#line 411 "ael_parser.y"
+#line 432 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_blob_from_b64(ctx->pool, TOK_STR(ctx, yymsp[0].minor.yy0), yymsp[0].minor.yy0.str.sz); STAMP(yylhsminor.yy97, yymsp[0].minor.yy0); }
-#line 2606 "ael_parser.c"
+#line 2627 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 44: /* map_key ::= TOK_NAME */
       case 167: /* key_val ::= TOK_NAME */ yytestcase(yyruleno==167);
-#line 416 "ael_parser.y"
+#line 437 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_string(ctx->pool, TOK_STR(ctx, yymsp[0].minor.yy0), yymsp[0].minor.yy0.str.sz, false); STAMP(yylhsminor.yy97, yymsp[0].minor.yy0); }
-#line 2613 "ael_parser.c"
+#line 2634 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 47: /* literal ::= TOK_LBRACKET TOK_RBRACKET */
-#line 421 "ael_parser.y"
+#line 447 "ael_parser.y"
 {
-	yymsp[-1].minor.yy97 = ast_new(ctx->pool, AST_LIST);
-	ast_pool_at(ctx->pool, yymsp[-1].minor.yy97)->etype = AST_ETYPE_LIST;
+	yylhsminor.yy97 = ast_new(ctx->pool, AST_LIST);
+	ast_pool_at(ctx->pool, yylhsminor.yy97)->etype = AST_ETYPE_LIST;
 
-	AST_LIST_CLR(ctx->pool, yymsp[-1].minor.yy97);
+	AST_LIST_CLR(ctx->pool, yylhsminor.yy97);
+	ast_set_span(ctx->pool, yylhsminor.yy97, yymsp[-1].minor.yy0.offset, yymsp[0].minor.yy0.offset + yymsp[0].minor.yy0.sz - yymsp[-1].minor.yy0.offset);
 }
-#line 2624 "ael_parser.c"
+#line 2646 "ael_parser.c"
+  yymsp[-1].minor.yy97 = yylhsminor.yy97;
+        break;
+      case 48: /* literal ::= TOK_LBRACKET list_body TOK_RBRACKET */
+      case 50: /* literal ::= TOK_LBRACE map_body TOK_RBRACE */ yytestcase(yyruleno==50);
+#line 455 "ael_parser.y"
+{
+	yylhsminor.yy97 = yymsp[-1].minor.yy97;
+	ast_set_span(ctx->pool, yylhsminor.yy97, yymsp[-2].minor.yy0.offset, yymsp[0].minor.yy0.offset + yymsp[0].minor.yy0.sz - yymsp[-2].minor.yy0.offset);
+}
+#line 2656 "ael_parser.c"
+  yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 49: /* literal ::= TOK_LBRACE TOK_RBRACE */
-#line 431 "ael_parser.y"
+#line 461 "ael_parser.y"
 {
-	yymsp[-1].minor.yy97 = ast_new(ctx->pool, AST_MAP);
-	ast_pool_at(ctx->pool, yymsp[-1].minor.yy97)->etype = AST_ETYPE_MAP;
+	yylhsminor.yy97 = ast_new(ctx->pool, AST_MAP);
+	ast_pool_at(ctx->pool, yylhsminor.yy97)->etype = AST_ETYPE_MAP;
 
-	AST_LIST_CLR(ctx->pool, yymsp[-1].minor.yy97);
+	AST_LIST_CLR(ctx->pool, yylhsminor.yy97);
+	ast_set_span(ctx->pool, yylhsminor.yy97, yymsp[-1].minor.yy0.offset, yymsp[0].minor.yy0.offset + yymsp[0].minor.yy0.sz - yymsp[-1].minor.yy0.offset);
 }
-#line 2634 "ael_parser.c"
+#line 2668 "ael_parser.c"
+  yymsp[-1].minor.yy97 = yylhsminor.yy97;
         break;
       case 51: /* literal ::= TOK_LBRACKET TOK_RBRACKET TOK_COLON TOK_NAME */
-#line 444 "ael_parser.y"
+#line 478 "ael_parser.y"
 {
-	yymsp[-3].minor.yy97 = ast_new(ctx->pool, AST_LIST);
-	ast_pool_at(ctx->pool, yymsp[-3].minor.yy97)->etype = AST_ETYPE_LIST;
+	yylhsminor.yy97 = ast_new(ctx->pool, AST_LIST);
+	ast_pool_at(ctx->pool, yylhsminor.yy97)->etype = AST_ETYPE_LIST;
 
-	AST_LIST_CLR(ctx->pool, yymsp[-3].minor.yy97);
-	ael_apply_literal_order(ctx, yymsp[-3].minor.yy97, yymsp[0].minor.yy0.str.offset, yymsp[0].minor.yy0.str.sz);
+	AST_LIST_CLR(ctx->pool, yylhsminor.yy97);
+	ast_set_span(ctx->pool, yylhsminor.yy97, yymsp[-3].minor.yy0.offset, yymsp[-2].minor.yy0.offset + yymsp[-2].minor.yy0.sz - yymsp[-3].minor.yy0.offset);
+	ael_apply_literal_order(ctx, yylhsminor.yy97, yymsp[0].minor.yy0.str.offset, yymsp[0].minor.yy0.str.sz);
 }
-#line 2645 "ael_parser.c"
+#line 2681 "ael_parser.c"
+  yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 52: /* literal ::= TOK_LBRACKET list_body TOK_RBRACKET TOK_COLON TOK_NAME */
       case 54: /* literal ::= TOK_LBRACE map_body TOK_RBRACE TOK_COLON TOK_NAME */ yytestcase(yyruleno==54);
-#line 452 "ael_parser.y"
+#line 487 "ael_parser.y"
 {
 	ael_apply_literal_order(ctx, yymsp[-3].minor.yy97, yymsp[0].minor.yy0.str.offset, yymsp[0].minor.yy0.str.sz);
-	yymsp[-4].minor.yy97 = yymsp[-3].minor.yy97;
+	yylhsminor.yy97 = yymsp[-3].minor.yy97;
+	ast_set_span(ctx->pool, yylhsminor.yy97, yymsp[-4].minor.yy0.offset, yymsp[-2].minor.yy0.offset + yymsp[-2].minor.yy0.sz - yymsp[-4].minor.yy0.offset);
 }
-#line 2654 "ael_parser.c"
+#line 2692 "ael_parser.c"
+  yymsp[-4].minor.yy97 = yylhsminor.yy97;
         break;
       case 53: /* literal ::= TOK_LBRACE TOK_RBRACE TOK_COLON TOK_NAME */
-#line 457 "ael_parser.y"
+#line 493 "ael_parser.y"
 {
-	yymsp[-3].minor.yy97 = ast_new(ctx->pool, AST_MAP);
-	ast_pool_at(ctx->pool, yymsp[-3].minor.yy97)->etype = AST_ETYPE_MAP;
+	yylhsminor.yy97 = ast_new(ctx->pool, AST_MAP);
+	ast_pool_at(ctx->pool, yylhsminor.yy97)->etype = AST_ETYPE_MAP;
 
-	AST_LIST_CLR(ctx->pool, yymsp[-3].minor.yy97);
-	ael_apply_literal_order(ctx, yymsp[-3].minor.yy97, yymsp[0].minor.yy0.str.offset, yymsp[0].minor.yy0.str.sz);
+	AST_LIST_CLR(ctx->pool, yylhsminor.yy97);
+	ast_set_span(ctx->pool, yylhsminor.yy97, yymsp[-3].minor.yy0.offset, yymsp[-2].minor.yy0.offset + yymsp[-2].minor.yy0.sz - yymsp[-3].minor.yy0.offset);
+	ael_apply_literal_order(ctx, yylhsminor.yy97, yymsp[0].minor.yy0.str.offset, yymsp[0].minor.yy0.str.sz);
 }
-#line 2665 "ael_parser.c"
+#line 2705 "ael_parser.c"
+  yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 56: /* operand ::= TOK_UNKNOWN */
-#line 476 "ael_parser.y"
+#line 514 "ael_parser.y"
 { yymsp[0].minor.yy97 = ast_new(ctx->pool, AST_UNKNOWN); }
-#line 2670 "ael_parser.c"
+#line 2711 "ael_parser.c"
         break;
       case 57: /* operand ::= TOK_NAME */
-#line 485 "ael_parser.y"
+#line 523 "ael_parser.y"
 {
 	ael_diag_addf(&ctx->diags, AEL_SEV_ERROR, yymsp[0].minor.yy0.str.offset, yymsp[0].minor.yy0.str.sz,
 			"unexpected identifier '%.*s' -- use $.%.*s for a bin",
 			(int)yymsp[0].minor.yy0.str.sz, TOK_STR(ctx, yymsp[0].minor.yy0), (int)yymsp[0].minor.yy0.str.sz, TOK_STR(ctx, yymsp[0].minor.yy0));
 	yylhsminor.yy97 = ast_new(ctx->pool, AST_UNKNOWN);
 }
-#line 2680 "ael_parser.c"
+#line 2721 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 58: /* loop_var ::= TOK_AT */
-#line 500 "ael_parser.y"
+#line 538 "ael_parser.y"
 { yylhsminor.yy97 = ael_new_loop_var(ctx, AS_EXP_BUILTIN_VALUE, yymsp[0].minor.yy0.str.offset, yymsp[0].minor.yy0.str.sz); STAMP(yylhsminor.yy97, yymsp[0].minor.yy0); }
-#line 2686 "ael_parser.c"
+#line 2727 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 59: /* loop_var ::= TOK_AT_KEY */
-#line 501 "ael_parser.y"
+#line 539 "ael_parser.y"
 { yylhsminor.yy97 = ael_new_loop_var(ctx, AS_EXP_BUILTIN_KEY,   yymsp[0].minor.yy0.str.offset, yymsp[0].minor.yy0.str.sz); STAMP(yylhsminor.yy97, yymsp[0].minor.yy0); }
-#line 2692 "ael_parser.c"
+#line 2733 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 60: /* loop_var ::= TOK_AT_INDEX */
-#line 502 "ael_parser.y"
+#line 540 "ael_parser.y"
 { yylhsminor.yy97 = ael_new_loop_var(ctx, AS_EXP_BUILTIN_INDEX, yymsp[0].minor.yy0.str.offset, yymsp[0].minor.yy0.str.sz); STAMP(yylhsminor.yy97, yymsp[0].minor.yy0); }
-#line 2698 "ael_parser.c"
+#line 2739 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 61: /* loop_var ::= loop_var TOK_COLON type_name */
       case 92: /* meta_key_call ::= meta_key_call TOK_COLON type_name */ yytestcase(yyruleno==92);
       case 152: /* path_seg ::= path_seg TOK_COLON type_name */ yytestcase(yyruleno==152);
-#line 509 "ael_parser.y"
+#line 547 "ael_parser.y"
 {
 	yylhsminor.yy97 = ael_node_apply_postfix(ctx, yymsp[-2].minor.yy97, AEL_POSTFIX_TYPE, (uint32_t)yymsp[0].minor.yy142);
 }
-#line 2708 "ael_parser.c"
+#line 2749 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 63: /* operand ::= TOK_VARIABLE */
-#line 515 "ael_parser.y"
+#line 553 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_var_ref(ctx, yymsp[0].minor.yy0.str.offset, yymsp[0].minor.yy0.str.sz); }
-#line 2714 "ael_parser.c"
+#line 2755 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 64: /* operand ::= TOK_PLACEHOLDER */
-#line 517 "ael_parser.y"
+#line 555 "ael_parser.y"
 {
 	ael_diag_add(&ctx->diags, AEL_SEV_ERROR, yymsp[0].minor.yy0.offset, yymsp[0].minor.yy0.sz,
 			"placeholder expressions (?N) are not yet supported");
@@ -2723,50 +2764,54 @@ static YYACTIONTYPE yy_reduce(
 	// NULL-deref. The diag above prevents successful compile.
 	yylhsminor.yy97 = ast_new(ctx->pool, AST_UNKNOWN);
 }
-#line 2726 "ael_parser.c"
+#line 2767 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 65: /* bin_base ::= TOK_DOLLAR_DOT TOK_NAME */
       case 68: /* bin_base ::= TOK_DOLLAR_DOT TOK_STRING */ yytestcase(yyruleno==68);
-#line 537 "ael_parser.y"
+#line 575 "ael_parser.y"
 {
-	yymsp[-1].minor.yy97 = ast_new_bin(ctx, yymsp[0].minor.yy0.str.offset, yymsp[0].minor.yy0.str.sz);
+	yylhsminor.yy97 = ast_new_bin(ctx, yymsp[-1].minor.yy0.offset, yymsp[0].minor.yy0.offset + yymsp[0].minor.yy0.sz, yymsp[0].minor.yy0.str.offset, yymsp[0].minor.yy0.str.sz);
 }
-#line 2735 "ael_parser.c"
+#line 2776 "ael_parser.c"
+  yymsp[-1].minor.yy97 = yylhsminor.yy97;
         break;
       case 66: /* bin_base ::= TOK_DOLLAR_DOT TOK_NAME TOK_COLON type_name */
       case 69: /* bin_base ::= TOK_DOLLAR_DOT TOK_STRING TOK_COLON type_name */ yytestcase(yyruleno==69);
-#line 540 "ael_parser.y"
+#line 578 "ael_parser.y"
 {
-	yymsp[-3].minor.yy97 = ast_new_bin(ctx, yymsp[-2].minor.yy0.str.offset, yymsp[-2].minor.yy0.str.sz);
+	yylhsminor.yy97 = ast_new_bin(ctx, yymsp[-3].minor.yy0.offset, yymsp[-2].minor.yy0.offset + yymsp[-2].minor.yy0.sz, yymsp[-2].minor.yy0.str.offset, yymsp[-2].minor.yy0.str.sz);
 
-	if (yymsp[-3].minor.yy97 != AST_REF_NULL) {
-		ast_bin_set_implicit_type(ctx, yymsp[-3].minor.yy97, (ast_etype)yymsp[0].minor.yy142);
+	if (yylhsminor.yy97 != AST_REF_NULL) {
+		ast_bin_set_implicit_type(ctx, yylhsminor.yy97, (ast_etype)yymsp[0].minor.yy142);
 	}
 }
-#line 2747 "ael_parser.c"
+#line 2789 "ael_parser.c"
+  yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 67: /* bin_base ::= TOK_DOLLAR_DOT TOK_NAME TOK_COLON TOK_LOCAL TOK_COLON type_name */
       case 70: /* bin_base ::= TOK_DOLLAR_DOT TOK_STRING TOK_COLON TOK_LOCAL TOK_COLON type_name */ yytestcase(yyruleno==70);
-#line 547 "ael_parser.y"
+#line 585 "ael_parser.y"
 {
-	yymsp[-5].minor.yy97 = ast_new_local_bin(ctx, yymsp[-4].minor.yy0.str.offset, yymsp[-4].minor.yy0.str.sz, (ast_etype)yymsp[0].minor.yy142);
+	yylhsminor.yy97 = ast_new_local_bin(ctx, yymsp[-5].minor.yy0.offset, yymsp[-4].minor.yy0.offset + yymsp[-4].minor.yy0.sz, yymsp[-4].minor.yy0.str.offset,
+			yymsp[-4].minor.yy0.str.sz, (ast_etype)yymsp[0].minor.yy142);
 }
-#line 2755 "ael_parser.c"
+#line 2799 "ael_parser.c"
+  yymsp[-5].minor.yy97 = yylhsminor.yy97;
         break;
       case 71: /* bin_base ::= bin_base TOK_COLON type_name */
-#line 569 "ael_parser.y"
+#line 609 "ael_parser.y"
 {
 	if (yymsp[-2].minor.yy97 != AST_REF_NULL) {
 		ast_bin_set_implicit_type(ctx, yymsp[-2].minor.yy97, (ast_etype)yymsp[0].minor.yy142);
 	}
 	yylhsminor.yy97 = yymsp[-2].minor.yy97;
 }
-#line 2765 "ael_parser.c"
+#line 2810 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 74: /* operand ::= ctx_list */
-#line 591 "ael_parser.y"
+#line 631 "ael_parser.y"
 {
 	// Implicit get on the last seg of ctx_list. The grammar guarantees at
 	// least one path_seg here, so ael_ctx_list_pop always finds a leaf.
@@ -2788,67 +2833,67 @@ static YYACTIONTYPE yy_reduce(
 			AST_REF_NULL :
 			ael_consume_leaf_then_finalize(ctx, yymsp[0].minor.yy97, impl_get, leaf);
 }
-#line 2791 "ael_parser.c"
+#line 2836 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 75: /* method_call ::= bin_base TOK_DOT method_fn */
-#line 633 "ael_parser.y"
+#line 673 "ael_parser.y"
 {
 	yylhsminor.yy97 = ael_finalize_method_call_bin(ctx, yymsp[-2].minor.yy97, yymsp[0].minor.yy97);
 }
-#line 2799 "ael_parser.c"
+#line 2844 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 76: /* method_call ::= ctx_list TOK_DOT method_fn */
-#line 639 "ael_parser.y"
+#line 679 "ael_parser.y"
 {
 	yylhsminor.yy97 = ael_finalize_method_call_path(ctx, yymsp[-2].minor.yy97, yymsp[0].minor.yy97);
 }
-#line 2807 "ael_parser.c"
+#line 2852 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 77: /* method_call ::= TOK_BLOB_LITERAL TOK_DOT method_fn */
-#line 642 "ael_parser.y"
+#line 682 "ael_parser.y"
 {
 	ast_ref recv = ast_new_blob_from_hex(ctx->pool, TOK_STR(ctx, yymsp[-2].minor.yy0),
 			yymsp[-2].minor.yy0.str.sz);
 	yylhsminor.yy97 = ael_finalize_method_call(ctx, recv, yymsp[0].minor.yy97);
 }
-#line 2817 "ael_parser.c"
+#line 2862 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 78: /* method_call ::= TOK_B64_BLOB_LITERAL TOK_DOT method_fn */
-#line 647 "ael_parser.y"
+#line 687 "ael_parser.y"
 {
 	ast_ref recv = ast_new_blob_from_b64(ctx->pool, TOK_STR(ctx, yymsp[-2].minor.yy0),
 			yymsp[-2].minor.yy0.str.sz);
 	yylhsminor.yy97 = ael_finalize_method_call(ctx, recv, yymsp[0].minor.yy97);
 }
-#line 2827 "ael_parser.c"
+#line 2872 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 79: /* method_call ::= func_call TOK_DOT method_fn */
       case 80: /* method_call ::= method_call TOK_DOT method_fn */ yytestcase(yyruleno==80);
       case 81: /* method_call ::= exp_base TOK_DOT method_fn */ yytestcase(yyruleno==81);
-#line 652 "ael_parser.y"
+#line 692 "ael_parser.y"
 {
 	yylhsminor.yy97 = ael_finalize_method_call(ctx, yymsp[-2].minor.yy97, yymsp[0].minor.yy97);
 }
-#line 2837 "ael_parser.c"
+#line 2882 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 82: /* method_fn ::= method_fn TOK_COLON prop_flag */
       case 151: /* path_seg ::= path_seg TOK_COLON prop_flag */ yytestcase(yyruleno==151);
-#line 668 "ael_parser.y"
+#line 708 "ael_parser.y"
 {
 	yylhsminor.yy97 = ael_node_apply_postfix(ctx, yymsp[-2].minor.yy97, AEL_POSTFIX_PROP, yymsp[0].minor.yy250);
 }
-#line 2846 "ael_parser.c"
+#line 2891 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 84: /* ctx_list ::= bin_base TOK_DOT path_seg */
       case 85: /* ctx_list ::= exp_base TOK_DOT path_seg */ yytestcase(yyruleno==85);
-#line 676 "ael_parser.y"
+#line 716 "ael_parser.y"
 {
 	if (yymsp[-2].minor.yy97 == AST_REF_NULL) {
 		yylhsminor.yy97 = AST_REF_NULL;
@@ -2858,37 +2903,37 @@ static YYACTIONTYPE yy_reduce(
 		yylhsminor.yy97 = ael_ctx_list_append(ctx, c, yymsp[0].minor.yy97);
 	}
 }
-#line 2861 "ael_parser.c"
+#line 2906 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 86: /* ctx_list ::= ctx_list TOK_DOT path_seg */
-#line 699 "ael_parser.y"
+#line 739 "ael_parser.y"
 {
 	yylhsminor.yy97 = ael_ctx_list_append(ctx, yymsp[-2].minor.yy97, yymsp[0].minor.yy97);
 }
-#line 2869 "ael_parser.c"
+#line 2914 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 87: /* ctx_list ::= ctx_list and_filter_open expr TOK_RPAREN TOK_RBRACKET */
-#line 709 "ael_parser.y"
+#line 749 "ael_parser.y"
 {
 	ael_filter_scope_pop(ctx);
 	yylhsminor.yy97 = ael_extend_with_and_seg(ctx, yymsp[-4].minor.yy97, yymsp[-2].minor.yy97, yymsp[-3].minor.yy141, yymsp[-1].minor.yy0.str.offset - yymsp[-3].minor.yy141);
 }
-#line 2878 "ael_parser.c"
+#line 2923 "ael_parser.c"
   yymsp[-4].minor.yy97 = yylhsminor.yy97;
         break;
       case 88: /* and_filter_open ::= TOK_AMP_LBRACK_QPAREN */
-#line 714 "ael_parser.y"
+#line 754 "ael_parser.y"
 {
 	(void)ael_filter_scope_push(ctx);
 	yylhsminor.yy141 = yymsp[0].minor.yy0.str.offset + yymsp[0].minor.yy0.str.sz;
 }
-#line 2887 "ael_parser.c"
+#line 2932 "ael_parser.c"
   yymsp[0].minor.yy141 = yylhsminor.yy141;
         break;
       case 89: /* ctx_list ::= TOK_AT TOK_DOT path_seg */
-#line 722 "ael_parser.y"
+#line 762 "ael_parser.y"
 {
 	ast_ref lv = ael_new_loop_var(ctx, AS_EXP_BUILTIN_VALUE, yymsp[-2].minor.yy0.str.offset, yymsp[-2].minor.yy0.str.sz);
 
@@ -2908,78 +2953,84 @@ static YYACTIONTYPE yy_reduce(
 		yylhsminor.yy97 = ael_ctx_list_append(ctx, c, yymsp[0].minor.yy97);
 	}
 }
-#line 2911 "ael_parser.c"
+#line 2956 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 90: /* meta_key_call ::= TOK_DOLLAR_DOT TOK_NAME TOK_LPAREN TOK_RPAREN */
-#line 755 "ael_parser.y"
+#line 795 "ael_parser.y"
 {
-	yymsp[-3].minor.yy97 = ael_resolve_meta_call(ctx, yymsp[-2].minor.yy0.str.offset, yymsp[-2].minor.yy0.str.sz, 0, false);
+	yylhsminor.yy97 = ael_resolve_meta_call(ctx, yymsp[-2].minor.yy0.str.offset, yymsp[-2].minor.yy0.str.sz, 0, false);
+	// Span the whole '$.name()' so a runtime trace (e.g. an ABSENT $.key())
+	// focuses the accessor, not ast_new's lookahead default.
+	ast_set_span(ctx->pool, yylhsminor.yy97, yymsp[-3].minor.yy0.offset, yymsp[0].minor.yy0.offset + yymsp[0].minor.yy0.sz - yymsp[-3].minor.yy0.offset);
 }
-#line 2919 "ael_parser.c"
+#line 2967 "ael_parser.c"
+  yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 91: /* meta_key_call ::= TOK_DOLLAR_DOT TOK_NAME TOK_LPAREN TOK_INT TOK_RPAREN */
-#line 760 "ael_parser.y"
+#line 803 "ael_parser.y"
 {
-	yymsp[-4].minor.yy97 = ael_resolve_meta_call(ctx, yymsp[-3].minor.yy0.str.offset, yymsp[-3].minor.yy0.str.sz, yymsp[-1].minor.yy0.ival, true);
+	yylhsminor.yy97 = ael_resolve_meta_call(ctx, yymsp[-3].minor.yy0.str.offset, yymsp[-3].minor.yy0.str.sz, yymsp[-1].minor.yy0.ival, true);
+	ast_set_span(ctx->pool, yylhsminor.yy97, yymsp[-4].minor.yy0.offset, yymsp[0].minor.yy0.offset + yymsp[0].minor.yy0.sz - yymsp[-4].minor.yy0.offset);
 }
-#line 2926 "ael_parser.c"
+#line 2976 "ael_parser.c"
+  yymsp[-4].minor.yy97 = yylhsminor.yy97;
         break;
       case 94: /* arg ::= expr */
-#line 782 "ael_parser.y"
+#line 826 "ael_parser.y"
 { yylhsminor.yy97 = ael_new_positional_arg(ctx, yymsp[0].minor.yy97); }
-#line 2931 "ael_parser.c"
+#line 2982 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 95: /* arg ::= TOK_NAME TOK_COLON expr */
-#line 783 "ael_parser.y"
+#line 827 "ael_parser.y"
 {
 	yylhsminor.yy97 = ael_new_named_arg(ctx, yymsp[-2].minor.yy0.str.offset, yymsp[-2].minor.yy0.str.sz, yymsp[0].minor.yy97);
 }
-#line 2939 "ael_parser.c"
+#line 2990 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 96: /* arg ::= TOK_NAME TOK_COLON TOK_REGEX */
-#line 789 "ael_parser.y"
+#line 833 "ael_parser.y"
 {
 	yylhsminor.yy97 = ael_new_named_arg(ctx, yymsp[-2].minor.yy0.str.offset, yymsp[-2].minor.yy0.str.sz,
 			ael_new_regex_operand(ctx, yymsp[0].minor.yy0.offset + 1, yymsp[0].minor.yy0.regex.pat_sz,
 					yymsp[0].minor.yy0.offset + yymsp[0].minor.yy0.regex.pat_sz + 2, yymsp[0].minor.yy0.regex.flag_sz));
 }
-#line 2949 "ael_parser.c"
+#line 3000 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 97: /* arg_list ::= arg */
-#line 794 "ael_parser.y"
+#line 838 "ael_parser.y"
 { yylhsminor.yy97 = ael_new_arg_list(ctx, yymsp[0].minor.yy97); }
-#line 2955 "ael_parser.c"
+#line 3006 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 98: /* arg_list ::= arg_list TOK_COMMA arg */
-#line 795 "ael_parser.y"
+#line 839 "ael_parser.y"
 { yylhsminor.yy97 = ael_append_arg(ctx, yymsp[-2].minor.yy97, yymsp[0].minor.yy97); }
-#line 2961 "ael_parser.c"
+#line 3012 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 99: /* func_call ::= TOK_NAME TOK_LPAREN arg_list TOK_RPAREN */
-#line 799 "ael_parser.y"
+#line 843 "ael_parser.y"
 {
 	yylhsminor.yy97 = ael_resolve_func_call(ctx, yymsp[-3].minor.yy0.str.offset, yymsp[-3].minor.yy0.str.sz, yymsp[-1].minor.yy97);
 }
-#line 2969 "ael_parser.c"
+#line 3020 "ael_parser.c"
   yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 100: /* func_call ::= TOK_NAME TOK_LPAREN TOK_RPAREN */
-#line 802 "ael_parser.y"
+#line 846 "ael_parser.y"
 {
 	yylhsminor.yy97 = ael_resolve_func_call(ctx, yymsp[-2].minor.yy0.str.offset, yymsp[-2].minor.yy0.str.sz,
 			ael_new_empty_arg_list(ctx));
 }
-#line 2978 "ael_parser.c"
+#line 3029 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 101: /* method_open ::= TOK_NAME TOK_LPAREN */
-#line 824 "ael_parser.y"
+#line 868 "ael_parser.y"
 {
 	yylhsminor.yy140 = yymsp[-1].minor.yy0;
 
@@ -2987,53 +3038,53 @@ static YYACTIONTYPE yy_reduce(
 		(void)ael_filter_scope_push(ctx);
 	}
 }
-#line 2990 "ael_parser.c"
+#line 3041 "ael_parser.c"
   yymsp[-1].minor.yy140 = yylhsminor.yy140;
         break;
       case 102: /* method_fn ::= method_open arg_list TOK_RPAREN */
-#line 831 "ael_parser.y"
+#line 875 "ael_parser.y"
 {
 	yylhsminor.yy97 = ael_resolve_method_fn(ctx, yymsp[-2].minor.yy140.str.offset, yymsp[-2].minor.yy140.str.sz, yymsp[-1].minor.yy97);
 }
-#line 2998 "ael_parser.c"
+#line 3049 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 103: /* method_fn ::= method_open TOK_RPAREN */
-#line 834 "ael_parser.y"
+#line 878 "ael_parser.y"
 {
 	yylhsminor.yy97 = ael_resolve_method_fn(ctx, yymsp[-1].minor.yy140.str.offset, yymsp[-1].minor.yy140.str.sz,
 			ael_new_empty_arg_list(ctx));
 }
-#line 3007 "ael_parser.c"
+#line 3058 "ael_parser.c"
   yymsp[-1].minor.yy97 = yylhsminor.yy97;
         break;
       case 104: /* path_seg ::= TOK_STAR */
-#line 844 "ael_parser.y"
+#line 888 "ael_parser.y"
 {
 	yymsp[0].minor.yy97 = ast_new(ctx->pool, AST_WILDCARD_SEG);
 	ast_pool_at(ctx->pool, yymsp[0].minor.yy97)->u.by_exp_seg.filter = AST_REF_NULL;
 }
-#line 3016 "ael_parser.c"
+#line 3067 "ael_parser.c"
         break;
       case 105: /* path_seg ::= filter_open expr TOK_RPAREN TOK_RBRACKET */
-#line 857 "ael_parser.y"
+#line 901 "ael_parser.y"
 {
 	ael_filter_scope_pop(ctx);
 	yylhsminor.yy97 = ael_new_wild_filter_seg(ctx, yymsp[-2].minor.yy97, yymsp[-3].minor.yy141, yymsp[-1].minor.yy0.str.offset - yymsp[-3].minor.yy141);
 }
-#line 3024 "ael_parser.c"
+#line 3075 "ael_parser.c"
   yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 106: /* filter_open ::= TOK_STAR TOK_LBRACK_QPAREN */
-#line 864 "ael_parser.y"
+#line 908 "ael_parser.y"
 {
 	(void)ael_filter_scope_push(ctx);
 	yymsp[-1].minor.yy141 = yymsp[0].minor.yy0.str.offset + yymsp[0].minor.yy0.str.sz;
 }
-#line 3033 "ael_parser.c"
+#line 3084 "ael_parser.c"
         break;
       case 107: /* path_seg ::= TOK_NAME */
-#line 870 "ael_parser.y"
+#line 914 "ael_parser.y"
 {
 	ast_ref key = ast_new_string(ctx->pool, TOK_STR(ctx, yymsp[0].minor.yy0), yymsp[0].minor.yy0.str.sz, false);
 	STAMP(key, yymsp[0].minor.yy0);
@@ -3041,11 +3092,11 @@ static YYACTIONTYPE yy_reduce(
 	STAMP(yylhsminor.yy97, yymsp[0].minor.yy0);
 	ast_pool_at(ctx->pool, yylhsminor.yy97)->u.seg.operand = key;
 }
-#line 3044 "ael_parser.c"
+#line 3095 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 108: /* path_seg ::= TOK_STRING */
-#line 877 "ael_parser.y"
+#line 921 "ael_parser.y"
 {
 	ast_ref key = ast_new_string_token(ctx, yymsp[0].minor.yy0.str.offset, yymsp[0].minor.yy0.str.sz);
 	STAMP(key, yymsp[0].minor.yy0);
@@ -3053,11 +3104,11 @@ static YYACTIONTYPE yy_reduce(
 	STAMP(yylhsminor.yy97, yymsp[0].minor.yy0);
 	ast_pool_at(ctx->pool, yylhsminor.yy97)->u.seg.operand = key;
 }
-#line 3056 "ael_parser.c"
+#line 3107 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 109: /* path_seg ::= TOK_INT */
-#line 884 "ael_parser.y"
+#line 928 "ael_parser.y"
 {
 	ast_ref key = ast_new_int(ctx->pool, yymsp[0].minor.yy0.ival);
 	STAMP(key, yymsp[0].minor.yy0);
@@ -3065,11 +3116,11 @@ static YYACTIONTYPE yy_reduce(
 	STAMP(yylhsminor.yy97, yymsp[0].minor.yy0);
 	ast_pool_at(ctx->pool, yylhsminor.yy97)->u.seg.operand = key;
 }
-#line 3068 "ael_parser.c"
+#line 3119 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 110: /* path_seg ::= brace_open key_val TOK_RBRACE */
-#line 896 "ael_parser.y"
+#line 940 "ael_parser.y"
 {
 	uint32_t seg_off;
 	uint32_t seg_sz;
@@ -3090,11 +3141,11 @@ static YYACTIONTYPE yy_reduce(
 		ast_pool_at(ctx->pool, yylhsminor.yy97)->u.seg.operand = yymsp[-1].minor.yy97;
 	}
 }
-#line 3093 "ael_parser.c"
+#line 3144 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 111: /* path_seg ::= brace_open key_val TOK_COLON key_val TOK_RBRACE */
-#line 916 "ael_parser.y"
+#line 960 "ael_parser.y"
 {
 	uint32_t seg_off;
 	uint32_t seg_sz;
@@ -3118,11 +3169,11 @@ static YYACTIONTYPE yy_reduce(
 		if (yymsp[-4].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.range_seg.inverted = true; }
 	}
 }
-#line 3121 "ael_parser.c"
+#line 3172 "ael_parser.c"
   yymsp[-4].minor.yy97 = yylhsminor.yy97;
         break;
       case 112: /* path_seg ::= brace_open key_val TOK_COLON TOK_RBRACE */
-#line 939 "ael_parser.y"
+#line 983 "ael_parser.y"
 {
 	uint32_t seg_off;
 	uint32_t seg_sz;
@@ -3140,11 +3191,11 @@ static YYACTIONTYPE yy_reduce(
 		if (yymsp[-3].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.range_seg.inverted = true; }
 	}
 }
-#line 3143 "ael_parser.c"
+#line 3194 "ael_parser.c"
   yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 113: /* path_seg ::= brace_open TOK_COLON key_val TOK_RBRACE */
-#line 961 "ael_parser.y"
+#line 1005 "ael_parser.y"
 {
 	uint32_t seg_off;
 	uint32_t seg_sz;
@@ -3168,11 +3219,11 @@ static YYACTIONTYPE yy_reduce(
 		if (yymsp[-3].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.range_seg.inverted = true; }
 	}
 }
-#line 3171 "ael_parser.c"
+#line 3222 "ael_parser.c"
   yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 114: /* path_seg ::= brace_open key_val TOK_COLON key_val TOK_TILDE key_val TOK_RBRACE */
-#line 987 "ael_parser.y"
+#line 1031 "ael_parser.y"
 {
 	uint32_t seg_off;
 	uint32_t seg_sz;
@@ -3196,11 +3247,11 @@ static YYACTIONTYPE yy_reduce(
 		}
 	}
 }
-#line 3199 "ael_parser.c"
+#line 3250 "ael_parser.c"
   yymsp[-6].minor.yy97 = yylhsminor.yy97;
         break;
       case 115: /* path_seg ::= brace_open key_val TOK_COLON TOK_TILDE key_val TOK_RBRACE */
-#line 1010 "ael_parser.y"
+#line 1054 "ael_parser.y"
 {
 	uint32_t seg_off;
 	uint32_t seg_sz;
@@ -3220,12 +3271,12 @@ static YYACTIONTYPE yy_reduce(
 		}
 	}
 }
-#line 3223 "ael_parser.c"
+#line 3274 "ael_parser.c"
   yymsp[-5].minor.yy97 = yylhsminor.yy97;
         break;
       case 116: /* path_seg ::= brace_open key_val TOK_COMMA key_list TOK_RBRACE */
       case 133: /* path_seg ::= brace_at_open key_val TOK_COMMA key_list TOK_RBRACE */ yytestcase(yyruleno==133);
-#line 1029 "ael_parser.y"
+#line 1073 "ael_parser.y"
 {
 	ast_node* n = ast_pool_at(ctx->pool, yymsp[-1].minor.yy97);
 	ast_pool_at(ctx->pool, yymsp[-3].minor.yy97)->next = n->u.list.head;
@@ -3236,11 +3287,11 @@ static YYACTIONTYPE yy_reduce(
 	n->u.list_seg.inverted = yymsp[-4].minor.yy142;
 	yylhsminor.yy97 = yymsp[-1].minor.yy97;
 }
-#line 3239 "ael_parser.c"
+#line 3290 "ael_parser.c"
   yymsp[-4].minor.yy97 = yylhsminor.yy97;
         break;
       case 117: /* path_seg ::= brace_eq_open key_val TOK_RBRACE */
-#line 1041 "ael_parser.y"
+#line 1085 "ael_parser.y"
 {
 	if (yymsp[-2].minor.yy142) {
 		uint32_t seg_off;
@@ -3253,39 +3304,39 @@ static YYACTIONTYPE yy_reduce(
 	yylhsminor.yy97 = ast_new(ctx->pool, AST_MAP_VALUE);
 	ast_pool_at(ctx->pool, yylhsminor.yy97)->u.seg.operand = yymsp[-1].minor.yy97;
 }
-#line 3256 "ael_parser.c"
+#line 3307 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 118: /* path_seg ::= brace_eq_open key_val TOK_COLON key_val TOK_RBRACE */
-#line 1053 "ael_parser.y"
+#line 1097 "ael_parser.y"
 {
 	yylhsminor.yy97 = ast_new_range_seg(ctx->pool, AST_MAP_VALUE_RANGE, yymsp[-3].minor.yy97, yymsp[-1].minor.yy97);
 	if (yymsp[-4].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.range_seg.inverted = true; }
 }
-#line 3265 "ael_parser.c"
+#line 3316 "ael_parser.c"
   yymsp[-4].minor.yy97 = yylhsminor.yy97;
         break;
       case 119: /* path_seg ::= brace_eq_open key_val TOK_COLON TOK_RBRACE */
-#line 1057 "ael_parser.y"
+#line 1101 "ael_parser.y"
 {
 	yylhsminor.yy97 = ast_new_range_seg(ctx->pool, AST_MAP_VALUE_RANGE, yymsp[-2].minor.yy97, AST_REF_NULL);
 	if (yymsp[-3].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.range_seg.inverted = true; }
 }
-#line 3274 "ael_parser.c"
+#line 3325 "ael_parser.c"
   yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 120: /* path_seg ::= brace_eq_open TOK_COLON key_val TOK_RBRACE */
-#line 1063 "ael_parser.y"
+#line 1107 "ael_parser.y"
 {
 	ast_ref nil_start = ast_new_nil(ctx->pool);
 	yylhsminor.yy97 = ast_new_range_seg(ctx->pool, AST_MAP_VALUE_RANGE, nil_start, yymsp[-1].minor.yy97);
 	if (yymsp[-3].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.range_seg.inverted = true; }
 }
-#line 3284 "ael_parser.c"
+#line 3335 "ael_parser.c"
   yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 121: /* path_seg ::= brace_eq_open key_val TOK_COMMA key_list TOK_RBRACE */
-#line 1068 "ael_parser.y"
+#line 1112 "ael_parser.y"
 {
 	ast_node* n = ast_pool_at(ctx->pool, yymsp[-1].minor.yy97);
 	ast_pool_at(ctx->pool, yymsp[-3].minor.yy97)->next = n->u.list.head;
@@ -3296,11 +3347,11 @@ static YYACTIONTYPE yy_reduce(
 	n->u.list_seg.inverted = yymsp[-4].minor.yy142;
 	yylhsminor.yy97 = yymsp[-1].minor.yy97;
 }
-#line 3299 "ael_parser.c"
+#line 3350 "ael_parser.c"
   yymsp[-4].minor.yy97 = yylhsminor.yy97;
         break;
       case 122: /* path_seg ::= brace_eq_open key_val TOK_COMMA TOK_RBRACE */
-#line 1079 "ael_parser.y"
+#line 1123 "ael_parser.y"
 {
 	yylhsminor.yy97 = ast_new(ctx->pool, AST_MAP_VALUE_LIST);
 	ast_node* n = ast_pool_at(ctx->pool, yylhsminor.yy97);
@@ -3309,11 +3360,11 @@ static YYACTIONTYPE yy_reduce(
 	n->u.list_seg.count = 1;
 	n->u.list_seg.inverted = yymsp[-3].minor.yy142;
 }
-#line 3312 "ael_parser.c"
+#line 3363 "ael_parser.c"
   yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 123: /* path_seg ::= brace_hash_open rank_val TOK_RBRACE */
-#line 1089 "ael_parser.y"
+#line 1133 "ael_parser.y"
 {
 	if (yymsp[-2].minor.yy142) {
 		uint32_t seg_off;
@@ -3326,11 +3377,11 @@ static YYACTIONTYPE yy_reduce(
 	yylhsminor.yy97 = ast_new(ctx->pool, AST_MAP_RANK);
 	ast_pool_at(ctx->pool, yylhsminor.yy97)->u.seg.operand = yymsp[-1].minor.yy97;
 }
-#line 3329 "ael_parser.c"
+#line 3380 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 124: /* path_seg ::= brace_hash_open rank_val TOK_COLON rank_val TOK_RBRACE */
-#line 1101 "ael_parser.y"
+#line 1145 "ael_parser.y"
 {
 	uint32_t seg_off;
 	uint32_t seg_sz;
@@ -3348,20 +3399,20 @@ static YYACTIONTYPE yy_reduce(
 		if (yymsp[-4].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.range_seg.inverted = true; }
 	}
 }
-#line 3351 "ael_parser.c"
+#line 3402 "ael_parser.c"
   yymsp[-4].minor.yy97 = yylhsminor.yy97;
         break;
       case 125: /* path_seg ::= brace_hash_open rank_val TOK_COLON TOK_RBRACE */
-#line 1118 "ael_parser.y"
+#line 1162 "ael_parser.y"
 {
 	yylhsminor.yy97 = ast_new_range_seg(ctx->pool, AST_MAP_RANK_RANGE, yymsp[-2].minor.yy97, AST_REF_NULL);
 	if (yymsp[-3].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.range_seg.inverted = true; }
 }
-#line 3360 "ael_parser.c"
+#line 3411 "ael_parser.c"
   yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 126: /* path_seg ::= brace_hash_open TOK_COLON rank_val TOK_RBRACE */
-#line 1122 "ael_parser.y"
+#line 1166 "ael_parser.y"
 {
 	uint32_t seg_off;
 	uint32_t seg_sz;
@@ -3379,11 +3430,11 @@ static YYACTIONTYPE yy_reduce(
 		if (yymsp[-3].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.range_seg.inverted = true; }
 	}
 }
-#line 3382 "ael_parser.c"
+#line 3433 "ael_parser.c"
   yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 127: /* path_seg ::= brace_hash_open rank_val TOK_COLON rank_val TOK_TILDE key_val TOK_RBRACE */
-#line 1142 "ael_parser.y"
+#line 1186 "ael_parser.y"
 {
 	if (! ael_rel_range_count_ok(ctx, yymsp[-5].minor.yy97, yymsp[-3].minor.yy97)) {
 		yylhsminor.yy97 = AST_REF_NULL;
@@ -3395,21 +3446,21 @@ static YYACTIONTYPE yy_reduce(
 		}
 	}
 }
-#line 3398 "ael_parser.c"
+#line 3449 "ael_parser.c"
   yymsp[-6].minor.yy97 = yylhsminor.yy97;
         break;
       case 128: /* path_seg ::= brace_hash_open rank_val TOK_COLON TOK_TILDE key_val TOK_RBRACE */
-#line 1153 "ael_parser.y"
+#line 1197 "ael_parser.y"
 {
 	yylhsminor.yy97 = ast_new_rel_range_seg(ctx->pool, AST_MAP_RANK_REL_RANGE, yymsp[-4].minor.yy97,
 			AST_REF_NULL, yymsp[-1].minor.yy97);
 	if (yymsp[-5].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.rel_range_seg.inverted = true; }
 }
-#line 3408 "ael_parser.c"
+#line 3459 "ael_parser.c"
   yymsp[-5].minor.yy97 = yylhsminor.yy97;
         break;
       case 129: /* path_seg ::= brace_at_open key_val TOK_RBRACE */
-#line 1162 "ael_parser.y"
+#line 1206 "ael_parser.y"
 {
 	if (yymsp[-2].minor.yy142) {
 		uint32_t seg_off;
@@ -3422,39 +3473,39 @@ static YYACTIONTYPE yy_reduce(
 	yylhsminor.yy97 = ast_new(ctx->pool, AST_MAP_KEY);
 	ast_pool_at(ctx->pool, yylhsminor.yy97)->u.seg.operand = yymsp[-1].minor.yy97;
 }
-#line 3425 "ael_parser.c"
+#line 3476 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 130: /* path_seg ::= brace_at_open key_val TOK_COLON key_val TOK_RBRACE */
-#line 1174 "ael_parser.y"
+#line 1218 "ael_parser.y"
 {
 	yylhsminor.yy97 = ast_new_range_seg(ctx->pool, AST_MAP_KEY_RANGE, yymsp[-3].minor.yy97, yymsp[-1].minor.yy97);
 	if (yymsp[-4].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.range_seg.inverted = true; }
 }
-#line 3434 "ael_parser.c"
+#line 3485 "ael_parser.c"
   yymsp[-4].minor.yy97 = yylhsminor.yy97;
         break;
       case 131: /* path_seg ::= brace_at_open key_val TOK_COLON TOK_RBRACE */
-#line 1178 "ael_parser.y"
+#line 1222 "ael_parser.y"
 {
 	yylhsminor.yy97 = ast_new_range_seg(ctx->pool, AST_MAP_KEY_RANGE, yymsp[-2].minor.yy97, AST_REF_NULL);
 	if (yymsp[-3].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.range_seg.inverted = true; }
 }
-#line 3443 "ael_parser.c"
+#line 3494 "ael_parser.c"
   yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 132: /* path_seg ::= brace_at_open TOK_COLON key_val TOK_RBRACE */
-#line 1184 "ael_parser.y"
+#line 1228 "ael_parser.y"
 {
 	ast_ref nil_start = ast_new_nil(ctx->pool);
 	yylhsminor.yy97 = ast_new_range_seg(ctx->pool, AST_MAP_KEY_RANGE, nil_start, yymsp[-1].minor.yy97);
 	if (yymsp[-3].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.range_seg.inverted = true; }
 }
-#line 3453 "ael_parser.c"
+#line 3504 "ael_parser.c"
   yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 134: /* path_seg ::= brace_at_open key_val TOK_COMMA TOK_RBRACE */
-#line 1200 "ael_parser.y"
+#line 1244 "ael_parser.y"
 {
 	yylhsminor.yy97 = ast_new(ctx->pool, AST_MAP_KEY_LIST);
 	ast_node* n = ast_pool_at(ctx->pool, yylhsminor.yy97);
@@ -3463,11 +3514,11 @@ static YYACTIONTYPE yy_reduce(
 	n->u.list_seg.count = 1;
 	n->u.list_seg.inverted = yymsp[-3].minor.yy142;
 }
-#line 3466 "ael_parser.c"
+#line 3517 "ael_parser.c"
   yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 135: /* path_seg ::= bracket_open idx_val TOK_RBRACKET */
-#line 1210 "ael_parser.y"
+#line 1254 "ael_parser.y"
 {
 	if (yymsp[-2].minor.yy142) {
 		uint32_t seg_off;
@@ -3480,11 +3531,11 @@ static YYACTIONTYPE yy_reduce(
 	yylhsminor.yy97 = ast_new(ctx->pool, AST_LIST_INDEX);
 	ast_pool_at(ctx->pool, yylhsminor.yy97)->u.seg.operand = yymsp[-1].minor.yy97;
 }
-#line 3483 "ael_parser.c"
+#line 3534 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 136: /* path_seg ::= bracket_open idx_val TOK_COLON idx_val TOK_RBRACKET */
-#line 1222 "ael_parser.y"
+#line 1266 "ael_parser.y"
 {
 	uint32_t seg_off;
 	uint32_t seg_sz;
@@ -3502,20 +3553,20 @@ static YYACTIONTYPE yy_reduce(
 		if (yymsp[-4].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.range_seg.inverted = true; }
 	}
 }
-#line 3505 "ael_parser.c"
+#line 3556 "ael_parser.c"
   yymsp[-4].minor.yy97 = yylhsminor.yy97;
         break;
       case 137: /* path_seg ::= bracket_open idx_val TOK_COLON TOK_RBRACKET */
-#line 1239 "ael_parser.y"
+#line 1283 "ael_parser.y"
 {
 	yylhsminor.yy97 = ast_new_range_seg(ctx->pool, AST_LIST_INDEX_RANGE, yymsp[-2].minor.yy97, AST_REF_NULL);
 	if (yymsp[-3].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.range_seg.inverted = true; }
 }
-#line 3514 "ael_parser.c"
+#line 3565 "ael_parser.c"
   yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 138: /* path_seg ::= bracket_open TOK_COLON idx_val TOK_RBRACKET */
-#line 1243 "ael_parser.y"
+#line 1287 "ael_parser.y"
 {
 	uint32_t seg_off;
 	uint32_t seg_sz;
@@ -3533,11 +3584,11 @@ static YYACTIONTYPE yy_reduce(
 		if (yymsp[-3].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.range_seg.inverted = true; }
 	}
 }
-#line 3536 "ael_parser.c"
+#line 3587 "ael_parser.c"
   yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 139: /* path_seg ::= bracket_eq_open key_val TOK_RBRACKET */
-#line 1262 "ael_parser.y"
+#line 1306 "ael_parser.y"
 {
 	if (yymsp[-2].minor.yy142) {
 		uint32_t seg_off;
@@ -3550,39 +3601,39 @@ static YYACTIONTYPE yy_reduce(
 	yylhsminor.yy97 = ast_new(ctx->pool, AST_LIST_VALUE);
 	ast_pool_at(ctx->pool, yylhsminor.yy97)->u.seg.operand = yymsp[-1].minor.yy97;
 }
-#line 3553 "ael_parser.c"
+#line 3604 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 140: /* path_seg ::= bracket_eq_open key_val TOK_COLON key_val TOK_RBRACKET */
-#line 1274 "ael_parser.y"
+#line 1318 "ael_parser.y"
 {
 	yylhsminor.yy97 = ast_new_range_seg(ctx->pool, AST_LIST_VALUE_RANGE, yymsp[-3].minor.yy97, yymsp[-1].minor.yy97);
 	if (yymsp[-4].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.range_seg.inverted = true; }
 }
-#line 3562 "ael_parser.c"
+#line 3613 "ael_parser.c"
   yymsp[-4].minor.yy97 = yylhsminor.yy97;
         break;
       case 141: /* path_seg ::= bracket_eq_open key_val TOK_COLON TOK_RBRACKET */
-#line 1278 "ael_parser.y"
+#line 1322 "ael_parser.y"
 {
 	yylhsminor.yy97 = ast_new_range_seg(ctx->pool, AST_LIST_VALUE_RANGE, yymsp[-2].minor.yy97, AST_REF_NULL);
 	if (yymsp[-3].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.range_seg.inverted = true; }
 }
-#line 3571 "ael_parser.c"
+#line 3622 "ael_parser.c"
   yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 142: /* path_seg ::= bracket_eq_open TOK_COLON key_val TOK_RBRACKET */
-#line 1284 "ael_parser.y"
+#line 1328 "ael_parser.y"
 {
 	ast_ref nil_start = ast_new_nil(ctx->pool);
 	yylhsminor.yy97 = ast_new_range_seg(ctx->pool, AST_LIST_VALUE_RANGE, nil_start, yymsp[-1].minor.yy97);
 	if (yymsp[-3].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.range_seg.inverted = true; }
 }
-#line 3581 "ael_parser.c"
+#line 3632 "ael_parser.c"
   yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 143: /* path_seg ::= bracket_eq_open key_val TOK_COMMA key_list TOK_RBRACKET */
-#line 1289 "ael_parser.y"
+#line 1333 "ael_parser.y"
 {
 	ast_node* n = ast_pool_at(ctx->pool, yymsp[-1].minor.yy97);
 	ast_pool_at(ctx->pool, yymsp[-3].minor.yy97)->next = n->u.list.head;
@@ -3593,11 +3644,11 @@ static YYACTIONTYPE yy_reduce(
 	n->u.list_seg.inverted = yymsp[-4].minor.yy142;
 	yylhsminor.yy97 = yymsp[-1].minor.yy97;
 }
-#line 3596 "ael_parser.c"
+#line 3647 "ael_parser.c"
   yymsp[-4].minor.yy97 = yylhsminor.yy97;
         break;
       case 144: /* path_seg ::= bracket_eq_open key_val TOK_COMMA TOK_RBRACKET */
-#line 1300 "ael_parser.y"
+#line 1344 "ael_parser.y"
 {
 	yylhsminor.yy97 = ast_new(ctx->pool, AST_LIST_VALUE_LIST);
 	ast_node* n = ast_pool_at(ctx->pool, yylhsminor.yy97);
@@ -3606,11 +3657,11 @@ static YYACTIONTYPE yy_reduce(
 	n->u.list_seg.count = 1;
 	n->u.list_seg.inverted = yymsp[-3].minor.yy142;
 }
-#line 3609 "ael_parser.c"
+#line 3660 "ael_parser.c"
   yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 145: /* path_seg ::= bracket_hash_open rank_val TOK_RBRACKET */
-#line 1310 "ael_parser.y"
+#line 1354 "ael_parser.y"
 {
 	if (yymsp[-2].minor.yy142) {
 		uint32_t seg_off;
@@ -3623,11 +3674,11 @@ static YYACTIONTYPE yy_reduce(
 	yylhsminor.yy97 = ast_new(ctx->pool, AST_LIST_RANK);
 	ast_pool_at(ctx->pool, yylhsminor.yy97)->u.seg.operand = yymsp[-1].minor.yy97;
 }
-#line 3626 "ael_parser.c"
+#line 3677 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 146: /* path_seg ::= bracket_hash_open rank_val TOK_COLON rank_val TOK_RBRACKET */
-#line 1322 "ael_parser.y"
+#line 1366 "ael_parser.y"
 {
 	uint32_t seg_off;
 	uint32_t seg_sz;
@@ -3645,20 +3696,20 @@ static YYACTIONTYPE yy_reduce(
 		if (yymsp[-4].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.range_seg.inverted = true; }
 	}
 }
-#line 3648 "ael_parser.c"
+#line 3699 "ael_parser.c"
   yymsp[-4].minor.yy97 = yylhsminor.yy97;
         break;
       case 147: /* path_seg ::= bracket_hash_open rank_val TOK_COLON TOK_RBRACKET */
-#line 1339 "ael_parser.y"
+#line 1383 "ael_parser.y"
 {
 	yylhsminor.yy97 = ast_new_range_seg(ctx->pool, AST_LIST_RANK_RANGE, yymsp[-2].minor.yy97, AST_REF_NULL);
 	if (yymsp[-3].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.range_seg.inverted = true; }
 }
-#line 3657 "ael_parser.c"
+#line 3708 "ael_parser.c"
   yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 148: /* path_seg ::= bracket_hash_open TOK_COLON rank_val TOK_RBRACKET */
-#line 1343 "ael_parser.y"
+#line 1387 "ael_parser.y"
 {
 	uint32_t seg_off;
 	uint32_t seg_sz;
@@ -3676,11 +3727,11 @@ static YYACTIONTYPE yy_reduce(
 		if (yymsp[-3].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.range_seg.inverted = true; }
 	}
 }
-#line 3679 "ael_parser.c"
+#line 3730 "ael_parser.c"
   yymsp[-3].minor.yy97 = yylhsminor.yy97;
         break;
       case 149: /* path_seg ::= bracket_hash_open rank_val TOK_COLON rank_val TOK_TILDE key_val TOK_RBRACKET */
-#line 1363 "ael_parser.y"
+#line 1407 "ael_parser.y"
 {
 	if (! ael_rel_range_count_ok(ctx, yymsp[-5].minor.yy97, yymsp[-3].minor.yy97)) {
 		yylhsminor.yy97 = AST_REF_NULL;
@@ -3692,17 +3743,17 @@ static YYACTIONTYPE yy_reduce(
 		}
 	}
 }
-#line 3695 "ael_parser.c"
+#line 3746 "ael_parser.c"
   yymsp[-6].minor.yy97 = yylhsminor.yy97;
         break;
       case 150: /* path_seg ::= bracket_hash_open rank_val TOK_COLON TOK_TILDE key_val TOK_RBRACKET */
-#line 1374 "ael_parser.y"
+#line 1418 "ael_parser.y"
 {
 	yylhsminor.yy97 = ast_new_rel_range_seg(ctx->pool, AST_LIST_RANK_REL_RANGE, yymsp[-4].minor.yy97,
 			AST_REF_NULL, yymsp[-1].minor.yy97);
 	if (yymsp[-5].minor.yy142) { ast_pool_at(ctx->pool, yylhsminor.yy97)->u.rel_range_seg.inverted = true; }
 }
-#line 3705 "ael_parser.c"
+#line 3756 "ael_parser.c"
   yymsp[-5].minor.yy97 = yylhsminor.yy97;
         break;
       case 153: /* brace_open ::= TOK_LBRACE */
@@ -3712,9 +3763,9 @@ static YYACTIONTYPE yy_reduce(
       case 161: /* bracket_open ::= TOK_LBRACKET */ yytestcase(yyruleno==161);
       case 163: /* bracket_eq_open ::= TOK_LBRACKET_EQ */ yytestcase(yyruleno==163);
       case 165: /* bracket_hash_open ::= TOK_LBRACKET_HASH */ yytestcase(yyruleno==165);
-#line 1402 "ael_parser.y"
+#line 1446 "ael_parser.y"
 { yymsp[0].minor.yy142 = 0; }
-#line 3717 "ael_parser.c"
+#line 3768 "ael_parser.c"
         break;
       case 154: /* brace_open ::= TOK_LBRACE_BANG */
       case 156: /* brace_eq_open ::= TOK_LBRACE_BANG_EQ */ yytestcase(yyruleno==156);
@@ -3723,111 +3774,111 @@ static YYACTIONTYPE yy_reduce(
       case 162: /* bracket_open ::= TOK_LBRACKET_BANG */ yytestcase(yyruleno==162);
       case 164: /* bracket_eq_open ::= TOK_LBRACKET_BANG_EQ */ yytestcase(yyruleno==164);
       case 166: /* bracket_hash_open ::= TOK_LBRACKET_BANG_HASH */ yytestcase(yyruleno==166);
-#line 1403 "ael_parser.y"
+#line 1447 "ael_parser.y"
 { yymsp[0].minor.yy142 = 1; }
-#line 3728 "ael_parser.c"
+#line 3779 "ael_parser.c"
         break;
       case 174: /* key_val ::= TOK_INF */
-#line 1433 "ael_parser.y"
+#line 1477 "ael_parser.y"
 { yylhsminor.yy97 = ast_new_inf(ctx->pool); STAMP(yylhsminor.yy97, yymsp[0].minor.yy0); }
-#line 3733 "ael_parser.c"
+#line 3784 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 175: /* key_list ::= key_val */
-#line 1438 "ael_parser.y"
+#line 1482 "ael_parser.y"
 {
 	yylhsminor.yy97 = ast_new(ctx->pool, AST_LIST);
 
 	AST_LIST_PUSH_TAIL(ctx->pool, yylhsminor.yy97, yymsp[0].minor.yy97);
 }
-#line 3743 "ael_parser.c"
+#line 3794 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 176: /* key_list ::= key_list TOK_COMMA key_val */
       case 193: /* expr_list ::= expr_list TOK_COMMA expr */ yytestcase(yyruleno==193);
       case 198: /* list_body ::= list_body TOK_COMMA list_elem */ yytestcase(yyruleno==198);
-#line 1443 "ael_parser.y"
+#line 1487 "ael_parser.y"
 {
 	AST_LIST_PUSH_TAIL(ctx->pool, yymsp[-2].minor.yy97, yymsp[0].minor.yy97);
 	yylhsminor.yy97 = yymsp[-2].minor.yy97;
 }
-#line 3754 "ael_parser.c"
+#line 3805 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 177: /* key_list ::= key_list TOK_COMMA */
-#line 1447 "ael_parser.y"
+#line 1491 "ael_parser.y"
 {
 	yylhsminor.yy97 = yymsp[-1].minor.yy97;
 }
-#line 3762 "ael_parser.c"
+#line 3813 "ael_parser.c"
   yymsp[-1].minor.yy97 = yylhsminor.yy97;
         break;
       case 180: /* operand ::= type_name */
-#line 1489 "ael_parser.y"
+#line 1533 "ael_parser.y"
 {
 	yylhsminor.yy97 = ast_new_int(ctx->pool, ael_etype_to_particle_type(yymsp[0].minor.yy142));
 	// type_name reductions snapshot the TOK_TNAME_* span into postfix_token_*.
 	ast_set_span(ctx->pool, yylhsminor.yy97, ctx->postfix_token_offset, ctx->postfix_token_sz);
 }
-#line 3772 "ael_parser.c"
+#line 3823 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 181: /* type_name ::= TOK_TNAME_INT */
-#line 1501 "ael_parser.y"
+#line 1545 "ael_parser.y"
 { yylhsminor.yy142 = AST_ETYPE_INT;     ctx->postfix_token_offset = yymsp[0].minor.yy0.str.offset; ctx->postfix_token_sz = yymsp[0].minor.yy0.str.sz; }
-#line 3778 "ael_parser.c"
+#line 3829 "ael_parser.c"
   yymsp[0].minor.yy142 = yylhsminor.yy142;
         break;
       case 182: /* type_name ::= TOK_TNAME_STRING */
-#line 1502 "ael_parser.y"
+#line 1546 "ael_parser.y"
 { yylhsminor.yy142 = AST_ETYPE_STR;     ctx->postfix_token_offset = yymsp[0].minor.yy0.str.offset; ctx->postfix_token_sz = yymsp[0].minor.yy0.str.sz; }
-#line 3784 "ael_parser.c"
+#line 3835 "ael_parser.c"
   yymsp[0].minor.yy142 = yylhsminor.yy142;
         break;
       case 183: /* type_name ::= TOK_TNAME_LIST */
-#line 1503 "ael_parser.y"
+#line 1547 "ael_parser.y"
 { yylhsminor.yy142 = AST_ETYPE_LIST;    ctx->postfix_token_offset = yymsp[0].minor.yy0.str.offset; ctx->postfix_token_sz = yymsp[0].minor.yy0.str.sz; }
-#line 3790 "ael_parser.c"
+#line 3841 "ael_parser.c"
   yymsp[0].minor.yy142 = yylhsminor.yy142;
         break;
       case 184: /* type_name ::= TOK_TNAME_MAP */
-#line 1504 "ael_parser.y"
+#line 1548 "ael_parser.y"
 { yylhsminor.yy142 = AST_ETYPE_MAP;     ctx->postfix_token_offset = yymsp[0].minor.yy0.str.offset; ctx->postfix_token_sz = yymsp[0].minor.yy0.str.sz; }
-#line 3796 "ael_parser.c"
+#line 3847 "ael_parser.c"
   yymsp[0].minor.yy142 = yylhsminor.yy142;
         break;
       case 185: /* type_name ::= TOK_TNAME_BLOB */
-#line 1505 "ael_parser.y"
+#line 1549 "ael_parser.y"
 { yylhsminor.yy142 = AST_ETYPE_BLOB;    ctx->postfix_token_offset = yymsp[0].minor.yy0.str.offset; ctx->postfix_token_sz = yymsp[0].minor.yy0.str.sz; }
-#line 3802 "ael_parser.c"
+#line 3853 "ael_parser.c"
   yymsp[0].minor.yy142 = yylhsminor.yy142;
         break;
       case 186: /* type_name ::= TOK_TNAME_FLOAT */
-#line 1506 "ael_parser.y"
+#line 1550 "ael_parser.y"
 { yylhsminor.yy142 = AST_ETYPE_FLOAT;   ctx->postfix_token_offset = yymsp[0].minor.yy0.str.offset; ctx->postfix_token_sz = yymsp[0].minor.yy0.str.sz; }
-#line 3808 "ael_parser.c"
+#line 3859 "ael_parser.c"
   yymsp[0].minor.yy142 = yylhsminor.yy142;
         break;
       case 187: /* type_name ::= TOK_TNAME_GEO */
-#line 1507 "ael_parser.y"
+#line 1551 "ael_parser.y"
 { yylhsminor.yy142 = AST_ETYPE_GEOJSON; ctx->postfix_token_offset = yymsp[0].minor.yy0.str.offset; ctx->postfix_token_sz = yymsp[0].minor.yy0.str.sz; }
-#line 3814 "ael_parser.c"
+#line 3865 "ael_parser.c"
   yymsp[0].minor.yy142 = yylhsminor.yy142;
         break;
       case 188: /* type_name ::= TOK_TNAME_HLL */
-#line 1508 "ael_parser.y"
+#line 1552 "ael_parser.y"
 { yylhsminor.yy142 = AST_ETYPE_HLL;     ctx->postfix_token_offset = yymsp[0].minor.yy0.str.offset; ctx->postfix_token_sz = yymsp[0].minor.yy0.str.sz; }
-#line 3820 "ael_parser.c"
+#line 3871 "ael_parser.c"
   yymsp[0].minor.yy142 = yylhsminor.yy142;
         break;
       case 189: /* type_name ::= TOK_TNAME_BOOL */
-#line 1509 "ael_parser.y"
+#line 1553 "ael_parser.y"
 { yylhsminor.yy142 = AST_ETYPE_TRILEAN; ctx->postfix_token_offset = yymsp[0].minor.yy0.str.offset; ctx->postfix_token_sz = yymsp[0].minor.yy0.str.sz; }
-#line 3826 "ael_parser.c"
+#line 3877 "ael_parser.c"
   yymsp[0].minor.yy142 = yylhsminor.yy142;
         break;
       case 190: /* type_name ::= TOK_TNAME_VECTOR */
-#line 1517 "ael_parser.y"
+#line 1561 "ael_parser.y"
 {
 	ael_diag_add(&ctx->diags, AEL_SEV_ERROR, yymsp[0].minor.yy0.str.offset, yymsp[0].minor.yy0.str.sz,
 			"VECTOR is a reserved type name; not yet supported");
@@ -3835,53 +3886,53 @@ static YYACTIONTYPE yy_reduce(
 	ctx->postfix_token_offset = yymsp[0].minor.yy0.str.offset;
 	ctx->postfix_token_sz = yymsp[0].minor.yy0.str.sz;
 }
-#line 3838 "ael_parser.c"
+#line 3889 "ael_parser.c"
   yymsp[0].minor.yy142 = yylhsminor.yy142;
         break;
       case 191: /* prop_flag ::= TOK_NAME */
-#line 1534 "ael_parser.y"
+#line 1578 "ael_parser.y"
 {
 	yylhsminor.yy250 = ael_resolve_prop_flag(ctx, yymsp[0].minor.yy0.str.offset, yymsp[0].minor.yy0.str.sz);
 	ctx->postfix_token_offset = yymsp[0].minor.yy0.str.offset;
 	ctx->postfix_token_sz = yymsp[0].minor.yy0.str.sz;
 }
-#line 3848 "ael_parser.c"
+#line 3899 "ael_parser.c"
   yymsp[0].minor.yy250 = yylhsminor.yy250;
         break;
       case 192: /* expr_list ::= expr TOK_COMMA expr */
-#line 1547 "ael_parser.y"
+#line 1591 "ael_parser.y"
 {
 	yylhsminor.yy97 = ast_new(ctx->pool, AST_LIST);
 
 	AST_LIST_PUSH_TAIL(ctx->pool, yylhsminor.yy97, yymsp[-2].minor.yy97);
 	AST_LIST_PUSH_TAIL(ctx->pool, yylhsminor.yy97, yymsp[0].minor.yy97);
 }
-#line 3859 "ael_parser.c"
+#line 3910 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 195: /* list_elem ::= TOK_INF */
-#line 1561 "ael_parser.y"
+#line 1605 "ael_parser.y"
 { yymsp[0].minor.yy97 = ast_new_inf(ctx->pool); }
-#line 3865 "ael_parser.c"
+#line 3916 "ael_parser.c"
         break;
       case 196: /* list_elem ::= TOK_STAR */
-#line 1562 "ael_parser.y"
+#line 1606 "ael_parser.y"
 { yymsp[0].minor.yy97 = ast_new_wildcard(ctx->pool); }
-#line 3870 "ael_parser.c"
+#line 3921 "ael_parser.c"
         break;
       case 197: /* list_body ::= list_elem */
-#line 1564 "ael_parser.y"
+#line 1608 "ael_parser.y"
 {
 	yylhsminor.yy97 = ast_new(ctx->pool, AST_LIST);
 	ast_pool_at(ctx->pool, yylhsminor.yy97)->etype = AST_ETYPE_LIST;
 
 	AST_LIST_PUSH_TAIL(ctx->pool, yylhsminor.yy97, yymsp[0].minor.yy97);
 }
-#line 3880 "ael_parser.c"
+#line 3931 "ael_parser.c"
   yymsp[0].minor.yy97 = yylhsminor.yy97;
         break;
       case 199: /* map_body ::= map_key TOK_COLON literal */
-#line 1577 "ael_parser.y"
+#line 1621 "ael_parser.y"
 {
 	ast_pool_at(ctx->pool, yymsp[-2].minor.yy97)->next = yymsp[0].minor.yy97;
 	ast_pool_at(ctx->pool, yymsp[0].minor.yy97)->next = AST_REF_NULL;
@@ -3892,11 +3943,11 @@ static YYACTIONTYPE yy_reduce(
 	n->u.list.tail = yymsp[0].minor.yy97;
 	n->u.list.count = 1;
 }
-#line 3895 "ael_parser.c"
+#line 3946 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 200: /* map_body ::= map_body TOK_COMMA map_key TOK_COLON literal */
-#line 1587 "ael_parser.y"
+#line 1631 "ael_parser.y"
 {
 	ast_pool_at(ctx->pool, yymsp[-2].minor.yy97)->next = yymsp[0].minor.yy97;
 	ast_pool_at(ctx->pool, yymsp[0].minor.yy97)->next = AST_REF_NULL;
@@ -3906,19 +3957,19 @@ static YYACTIONTYPE yy_reduce(
 	n->u.list.count++;
 	yylhsminor.yy97 = yymsp[-4].minor.yy97;
 }
-#line 3909 "ael_parser.c"
+#line 3960 "ael_parser.c"
   yymsp[-4].minor.yy97 = yylhsminor.yy97;
         break;
       case 201: /* var_def_list ::= TOK_NAME TOK_ASSIGN expr */
-#line 1600 "ael_parser.y"
+#line 1644 "ael_parser.y"
 {
 	yylhsminor.yy97 = ast_new_let_scope(ctx, yymsp[-2].minor.yy0.str.offset, yymsp[-2].minor.yy0.str.sz, yymsp[0].minor.yy97);
 }
-#line 3917 "ael_parser.c"
+#line 3968 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 202: /* var_def_list ::= var_def_list TOK_COMMA TOK_NAME TOK_ASSIGN expr */
-#line 1603 "ael_parser.y"
+#line 1647 "ael_parser.y"
 {
 	ast_ref def = ast_new_var_def(ctx, yymsp[-2].minor.yy0.str.offset, yymsp[-2].minor.yy0.str.sz, yymsp[0].minor.yy97);
 
@@ -3928,11 +3979,11 @@ static YYACTIONTYPE yy_reduce(
 
 	yylhsminor.yy97 = yymsp[-4].minor.yy97;
 }
-#line 3931 "ael_parser.c"
+#line 3982 "ael_parser.c"
   yymsp[-4].minor.yy97 = yylhsminor.yy97;
         break;
       case 203: /* case_list ::= expr TOK_ARROW expr */
-#line 1614 "ael_parser.y"
+#line 1658 "ael_parser.y"
 {
 	ael_check_when_cond(ctx, yymsp[-2].minor.yy97);
 	ast_ref m = ast_new(ctx->pool, AST_CASE);
@@ -3944,11 +3995,11 @@ static YYACTIONTYPE yy_reduce(
 
 	AST_LIST_PUSH_TAIL(ctx->pool, yylhsminor.yy97, m);
 }
-#line 3947 "ael_parser.c"
+#line 3998 "ael_parser.c"
   yymsp[-2].minor.yy97 = yylhsminor.yy97;
         break;
       case 204: /* case_list ::= case_list TOK_COMMA expr TOK_ARROW expr */
-#line 1625 "ael_parser.y"
+#line 1669 "ael_parser.y"
 {
 	ael_check_when_cond(ctx, yymsp[-2].minor.yy97);
 	ast_ref m = ast_new(ctx->pool, AST_CASE);
@@ -3960,7 +4011,7 @@ static YYACTIONTYPE yy_reduce(
 	AST_LIST_PUSH_TAIL(ctx->pool, yymsp[-4].minor.yy97, m);
 	yylhsminor.yy97 = yymsp[-4].minor.yy97;
 }
-#line 3963 "ael_parser.c"
+#line 4014 "ael_parser.c"
   yymsp[-4].minor.yy97 = yylhsminor.yy97;
         break;
       default:
@@ -4005,11 +4056,11 @@ static void yy_parse_failed(
   /* Here code is inserted which will be executed whenever the
   ** parser fails */
 /************ Begin %parse_failure code ***************************************/
-#line 156 "ael_parser.y"
+#line 157 "ael_parser.y"
 
 	ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ctx->last_token_offset,
 			ctx->last_token_sz, "parse failure");
-#line 4012 "ael_parser.c"
+#line 4063 "ael_parser.c"
 /************ End %parse_failure code *****************************************/
   ParseARG_STORE /* Suppress warning about unused %extra_argument variable */
   ParseCTX_STORE
@@ -4028,7 +4079,7 @@ static void yy_syntax_error(
   ParseCTX_FETCH
 #define TOKEN yyminor
 /************ Begin %syntax_error code ****************************************/
-#line 130 "ael_parser.y"
+#line 131 "ael_parser.y"
 
 	(void)TOKEN;
 
@@ -4053,7 +4104,7 @@ static void yy_syntax_error(
 
 	ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ctx->last_token_offset,
 			ctx->last_token_sz, msg);
-#line 4056 "ael_parser.c"
+#line 4107 "ael_parser.c"
 /************ End %syntax_error code ******************************************/
   ParseARG_STORE /* Suppress warning about unused %extra_argument variable */
   ParseCTX_STORE
@@ -4329,10 +4380,10 @@ int ParseFallback(int iToken){
   return 0;
 #endif
 }
-#line 1641 "ael_parser.y"
+#line 1685 "ael_parser.y"
 
 void
-ael_run_parser(parse_context* ctx, uint32_t input_sz)
+ael_run_parser(ael_context* ctx, uint32_t input_sz)
 {
 	lexer_t lex;
 	lexer_init(&lex, ctx->input, input_sz);
@@ -4492,4 +4543,4 @@ ael_num_tokens(void)
 }
 
 #endif // AEL_ORACLE
-#line 4495 "ael_parser.c"
+#line 4546 "ael_parser.c"

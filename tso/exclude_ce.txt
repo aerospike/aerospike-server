@@ -106,7 +106,18 @@ bin_ce.c
 bin.c
 cdt.c
 exp.c
+exp_rt.c
 expop.c
+# exp/ AEL sources - same request-local expression subsystem as
+# exp.c/exp_rt.c/expop.c above, so likewise exempt from TSO ordering.
+ael_actions.c
+ael_codegen.c
+ael_diag.c
+ael_func_table.c
+ael_lexer.c
+ael_parser.c
+ael_string.c
+ast.c
 index_ce.c
 index.c
 mrt_monitor_ce.c

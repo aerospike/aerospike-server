@@ -1,5 +1,5 @@
 /*
- * codegen.c
+ * ael_codegen.c
  *
  * Copyright (C) 2026 Aerospike, Inc.
  *
@@ -24,7 +24,7 @@
 // Includes.
 //
 
-#include "exp/codegen.h"
+#include "exp/ael_codegen.h"
 
 #include <stdlib.h>
 
@@ -101,7 +101,7 @@ static uint64_t prop_to_ctx_create(ast_prop_bits props);
 //
 
 // Iterative (not recursive) so it adds no C-stack depth on top of the
-// codegen_emit frame already descending this left-deep chain.
+// ael_codegen_emit frame already descending this left-deep chain.
 static uint32_t
 count_left_fold(ast_pool* pool, ast_ref node, ast_node_t type)
 {
@@ -242,10 +242,10 @@ emit_left_fold(as_packer* pk, ast_pool* pool, const char* input, ast_ref node,
 	if (np->type == type) {
 		rc = emit_left_fold(pk, pool, input, np->u.binary.left, type);
 		RC_RET_ON_ERR();
-		return codegen_emit(pk, pool, input, np->u.binary.right);
+		return ael_codegen_emit(pk, pool, input, np->u.binary.right);
 	}
 
-	return codegen_emit(pk, pool, input, node);
+	return ael_codegen_emit(pk, pool, input, node);
 }
 
 static int
@@ -264,7 +264,7 @@ emit_nary(as_packer* pk, ast_pool* pool, const char* input, ast_ref node)
 	ast_ref e = np->u.list.head;
 
 	for (uint32_t i = 0; i < np->u.list.count; i++) {
-		rc = codegen_emit(pk, pool, input, e);
+		rc = ael_codegen_emit(pk, pool, input, e);
 		RC_RET_ON_ERR();
 		e = ast_pool_at(pool, e)->next;
 	}
@@ -289,7 +289,7 @@ emit_nmath(as_packer* pk, ast_pool* pool, const char* input, ast_ref node)
 	ast_ref e = head;
 
 	for (uint32_t i = 0; i < np->u.nmath.count; i++) {
-		rc = codegen_emit(pk, pool, input, e);
+		rc = ael_codegen_emit(pk, pool, input, e);
 		RC_RET_ON_ERR();
 		e = ast_pool_at(pool, e)->next;
 	}
@@ -309,9 +309,9 @@ emit_binary(as_packer* pk, ast_pool* pool, const char* input, ast_ref node)
 
 	int rc = emit_cmd(pk, cmd, 2);
 	RC_RET_ON_ERR();
-	rc = codegen_emit(pk, pool, input, np->u.binary.left);
+	rc = ael_codegen_emit(pk, pool, input, np->u.binary.left);
 	RC_RET_ON_ERR();
-	return codegen_emit(pk, pool, input, np->u.binary.right);
+	return ael_codegen_emit(pk, pool, input, np->u.binary.right);
 }
 
 static int
@@ -326,7 +326,7 @@ emit_func1(as_packer* pk, ast_pool* pool, const char* input, ast_ref node)
 
 	int rc = emit_cmd(pk, cmd, 1);
 	RC_RET_ON_ERR();
-	return codegen_emit(pk, pool, input, np->u.func1.arg);
+	return ael_codegen_emit(pk, pool, input, np->u.func1.arg);
 }
 
 static int
@@ -341,9 +341,9 @@ emit_func2(as_packer* pk, ast_pool* pool, const char* input, ast_ref node)
 
 	int rc = emit_cmd(pk, cmd, 2);
 	RC_RET_ON_ERR();
-	rc = codegen_emit(pk, pool, input, np->u.func2.arg1);
+	rc = ael_codegen_emit(pk, pool, input, np->u.func2.arg1);
 	RC_RET_ON_ERR();
-	return codegen_emit(pk, pool, input, np->u.func2.arg2);
+	return ael_codegen_emit(pk, pool, input, np->u.func2.arg2);
 }
 
 static int
@@ -401,7 +401,7 @@ emit_list(as_packer* pk, ast_pool* pool, const char* input, ast_ref node)
 	ast_ref e = np->u.list.head;
 
 	for (uint32_t i = 0; i < ele_count; i++) {
-		rc = codegen_emit(pk, pool, input, e);
+		rc = ael_codegen_emit(pk, pool, input, e);
 		RC_RET_ON_ERR();
 		if (i + 1 < ele_count) {
 			e = ast_pool_at(pool, e)->next;
@@ -411,8 +411,8 @@ emit_list(as_packer* pk, ast_pool* pool, const char* input, ast_ref node)
 	if (ordered && pk->buffer != NULL && ele_count >= 2 &&
 			! list_buf_check_ordered(pk->buffer + start, pk->offset - start)) {
 		if (pool->diags != NULL) {
-			ael_diag_add(pool->diags, AEL_SEV_ERROR, np->offset, np->sz,
-					":ORDERED list literal is not in ascending order");
+			ael_diag_add(pool->diags, AEL_SEV_ERROR, ast_disp_offset(np),
+					np->sz, ":ORDERED list literal is not in ascending order");
 		}
 
 		return -1;
@@ -447,9 +447,9 @@ emit_map(as_packer* pk, ast_pool* pool, const char* input, ast_ref node)
 		ast_node* kp = ast_pool_at(pool, key);
 		ast_ref val = kp->next;
 
-		rc = codegen_emit(pk, pool, input, key);
+		rc = ael_codegen_emit(pk, pool, input, key);
 		RC_RET_ON_ERR();
-		rc = codegen_emit(pk, pool, input, val);
+		rc = ael_codegen_emit(pk, pool, input, val);
 		RC_RET_ON_ERR();
 		key = (i + 1 < ele_count) ? ast_map_literal_next_key(pool, key)
 								  : AST_REF_NULL;
@@ -458,8 +458,8 @@ emit_map(as_packer* pk, ast_pool* pool, const char* input, ast_ref node)
 	if (ordered && pk->buffer != NULL && ele_count >= 2 &&
 			! map_buf_sort_in_place(pk->buffer + start, pk->offset - start)) {
 		if (pool->diags != NULL) {
-			ael_diag_add(pool->diags, AEL_SEV_ERROR, np->offset, np->sz,
-					"map literal has duplicate keys");
+			ael_diag_add(pool->diags, AEL_SEV_ERROR, ast_disp_offset(np),
+					np->sz, "map literal has duplicate keys");
 		}
 
 		return -1;
@@ -481,15 +481,14 @@ emit_with(as_packer* pk, ast_pool* pool, const char* input, ast_ref node)
 
 	for (uint32_t i = 0; i < defs_count; i++) {
 		ast_node* dp = ast_pool_at(pool, def);
-		rc = emit_raw_string(pk, input + dp->u.var_def.name_offset,
-				dp->u.var_def.name_sz);
+		rc = emit_raw_string(pk, input + dp->offset, dp->u.var_def.name_sz);
 		RC_RET_ON_ERR();
-		rc = codegen_emit(pk, pool, input, dp->u.var_def.value);
+		rc = ael_codegen_emit(pk, pool, input, dp->u.var_def.value);
 		RC_RET_ON_ERR();
 		def = dp->next;
 	}
 
-	return codegen_emit(pk, pool, input, np->u.list.tail);
+	return ael_codegen_emit(pk, pool, input, np->u.list.tail);
 }
 
 static int
@@ -504,14 +503,14 @@ emit_when(as_packer* pk, ast_pool* pool, const char* input, ast_ref node)
 
 	for (uint32_t i = 0; i < mappings_count; i++) {
 		ast_node* mp = ast_pool_at(pool, m);
-		rc = codegen_emit(pk, pool, input, mp->u.when_case.cond);
+		rc = ael_codegen_emit(pk, pool, input, mp->u.when_case.cond);
 		RC_RET_ON_ERR();
-		rc = codegen_emit(pk, pool, input, mp->u.when_case.result);
+		rc = ael_codegen_emit(pk, pool, input, mp->u.when_case.result);
 		RC_RET_ON_ERR();
 		m = mp->next;
 	}
 
-	return codegen_emit(pk, pool, input, np->u.list.tail);
+	return ael_codegen_emit(pk, pool, input, np->u.list.tail);
 }
 
 // Pack the inner CDT op blob (no ctx wrapper). The param chain is in
@@ -592,7 +591,7 @@ ael_emit_cdt_op_blob(as_packer* pk, ast_pool* pool, const char* input, int cdt_o
 			rc = emit_list(pk, pool, input, e);
 		}
 		else {
-			rc = codegen_emit(pk, pool, input, e);
+			rc = ael_codegen_emit(pk, pool, input, e);
 		}
 
 		RC_RET_ON_ERR();
@@ -634,8 +633,8 @@ emit_path_call(as_packer* pk, ast_pool* pool, const char* input, ast_ref node)
 	// return modifiers have resolved etypes (NIL / INT) and pass.
 	if (! ast_type_resolved(np->etype)) {
 		if (pool->diags != NULL) {
-			ael_diag_add(pool->diags, AEL_SEV_ERROR, np->offset, np->sz,
-					"cannot infer type — pin with :T");
+			ael_diag_add(pool->diags, AEL_SEV_ERROR, ast_disp_offset(np),
+					np->sz, "cannot infer type — pin with :T");
 		}
 		return -1;
 	}
@@ -694,7 +693,7 @@ emit_path_call(as_packer* pk, ast_pool* pool, const char* input, ast_ref node)
 			ast_cdt_op_head(op), ast_cdt_op_count(op), ast_cdt_op_props(op));
 	RC_RET_ON_ERR();
 
-	return codegen_emit(pk, pool, input, bin_ref);
+	return ael_codegen_emit(pk, pool, input, bin_ref);
 }
 
 // AST_PROP_* → wire AS_BITS_FLAG_*. Returns 0 for read-op props (their
@@ -875,7 +874,7 @@ emit_bit_call(as_packer* pk, ast_pool* pool, const char* input, ast_ref node)
 			rc = as_pack_int64(pk, fnode->u.ival | (int64_t)wire_flags);
 		}
 		else {
-			rc = codegen_emit(pk, pool, input, a);
+			rc = ael_codegen_emit(pk, pool, input, a);
 		}
 		RC_RET_ON_ERR();
 		idx++;
@@ -886,7 +885,7 @@ emit_bit_call(as_packer* pk, ast_pool* pool, const char* input, ast_ref node)
 		RC_RET_ON_ERR();
 	}
 
-	return codegen_emit(pk, pool, input, np->u.call.ctx);
+	return ael_codegen_emit(pk, pool, input, np->u.call.ctx);
 }
 
 // AST_PROP_* → wire AS_HLL_FLAG_*.
@@ -943,7 +942,7 @@ emit_hll_call(as_packer* pk, ast_pool* pool, const char* input, ast_ref node)
 
 	for (ast_ref a = ast_cdt_op_head(op); a != AST_REF_NULL;
 			a = ast_pool_at(pool, a)->next) {
-		rc = codegen_emit(pk, pool, input, a);
+		rc = ael_codegen_emit(pk, pool, input, a);
 		RC_RET_ON_ERR();
 	}
 
@@ -952,7 +951,7 @@ emit_hll_call(as_packer* pk, ast_pool* pool, const char* input, ast_ref node)
 		RC_RET_ON_ERR();
 	}
 
-	return codegen_emit(pk, pool, input, np->u.call.ctx);
+	return ael_codegen_emit(pk, pool, input, np->u.call.ctx);
 }
 
 // Pack a single ctx-pair: (ctx_type, value). Reached from two contexts: the
@@ -974,7 +973,7 @@ emit_hll_call(as_packer* pk, ast_pool* pool, const char* input, ast_ref node)
 // well-formed but our msgpack is wrong), append a generic fallback at
 // body_offset.
 static void
-codegen_slow_path_diag(ast_pool* pool, const char* input, const ast_node* seg)
+ael_codegen_slow_path_diag(ast_pool* pool, const char* input, const ast_node* seg)
 {
 	if (pool->diags == NULL) {
 		return;
@@ -1030,12 +1029,18 @@ validate_sub_program(as_packer* pk, ast_pool* pool, const char* input,
 	uint32_t sub_sz = pk->offset - start;
 	as_exp* sub = as_exp_build_buf(pk->buffer + start, sub_sz, false, NULL);
 
+	// The probe re-enters the public builder, which resets and records into
+	// the thread-local build-error accumulator against transient sub-program
+	// bytes. Clear it: a leftover record would suppress the caller's
+	// AEL-positioned record and leave the accumulator's payload dangling.
+	as_exp_build_err_reset();
+
 	if (sub != NULL) {
 		as_exp_destroy(sub);
 		return 0;
 	}
 
-	codegen_slow_path_diag(pool, input, seg);
+	ael_codegen_slow_path_diag(pool, input, seg);
 	return -1;
 }
 
@@ -1097,7 +1102,7 @@ ael_pack_ctx_seg_pair(as_packer* pk, ast_pool* pool, const char* input,
 		}
 
 		uint32_t start = pk->offset;
-		rc = codegen_emit(pk, pool, input, seg->u.by_exp_seg.filter);
+		rc = ael_codegen_emit(pk, pool, input, seg->u.by_exp_seg.filter);
 		RC_RET_ON_ERR();
 		return validate_sub_program(pk, pool, input, seg, start);
 	}
@@ -1107,7 +1112,7 @@ ael_pack_ctx_seg_pair(as_packer* pk, ast_pool* pool, const char* input,
 		RC_RET_ON_ERR();
 
 		uint32_t start = pk->offset;
-		rc = codegen_emit(pk, pool, input, seg->u.by_exp_seg.filter);
+		rc = ael_codegen_emit(pk, pool, input, seg->u.by_exp_seg.filter);
 		RC_RET_ON_ERR();
 		return validate_sub_program(pk, pool, input, seg, start);
 	}
@@ -1144,18 +1149,18 @@ ael_pack_ctx_seg_pair(as_packer* pk, ast_pool* pool, const char* input,
 
 			rc = as_pack_list_header(pk, 3);
 			RC_RET_ON_ERR();
-			rc = codegen_emit(pk, pool, input, pivot);
+			rc = ael_codegen_emit(pk, pool, input, pivot);
 			RC_RET_ON_ERR();
-			rc = codegen_emit(pk, pool, input, start);
+			rc = ael_codegen_emit(pk, pool, input, start);
 			RC_RET_ON_ERR();
 			return as_pack_int64(pk, e_v - s_v + 1);
 		}
 
 		rc = as_pack_list_header(pk, 2);
 		RC_RET_ON_ERR();
-		rc = codegen_emit(pk, pool, input, pivot);
+		rc = ael_codegen_emit(pk, pool, input, pivot);
 		RC_RET_ON_ERR();
-		return codegen_emit(pk, pool, input, start);
+		return ael_codegen_emit(pk, pool, input, start);
 	}
 
 	if ((flags & AST_NF_LIST_SEG) != 0) {
@@ -1166,7 +1171,7 @@ ael_pack_ctx_seg_pair(as_packer* pk, ast_pool* pool, const char* input,
 
 		for (ast_ref er = seg->u.list_seg.head; er != AST_REF_NULL;
 				er = ast_pool_at(pool, er)->next) {
-			rc = codegen_emit(pk, pool, input, er);
+			rc = ael_codegen_emit(pk, pool, input, er);
 			RC_RET_ON_ERR();
 		}
 
@@ -1180,7 +1185,7 @@ ael_pack_ctx_seg_pair(as_packer* pk, ast_pool* pool, const char* input,
 		if (end != AST_REF_NULL) {
 			rc = as_pack_list_header(pk, 2);
 			RC_RET_ON_ERR();
-			rc = codegen_emit(pk, pool, input, start);
+			rc = ael_codegen_emit(pk, pool, input, start);
 			RC_RET_ON_ERR();
 
 			int16_t ct = ctx_type & 0x0F;
@@ -1194,15 +1199,15 @@ ael_pack_ctx_seg_pair(as_packer* pk, ast_pool* pool, const char* input,
 				return as_pack_int64(pk, e_v - s_v);
 			}
 
-			return codegen_emit(pk, pool, input, end);
+			return ael_codegen_emit(pk, pool, input, end);
 		}
 
 		rc = as_pack_list_header(pk, 1);
 		RC_RET_ON_ERR();
-		return codegen_emit(pk, pool, input, start);
+		return ael_codegen_emit(pk, pool, input, start);
 	}
 
-	return codegen_emit(pk, pool, input, ast_seg_operand(seg));
+	return ael_codegen_emit(pk, pool, input, ast_seg_operand(seg));
 }
 
 static int
@@ -1306,7 +1311,7 @@ emit_select_call(as_packer* pk, ast_pool* pool, const char* input, ast_ref node)
 
 	if (is_apply) {
 		if (apply_expr != AST_REF_NULL) {
-			rc = codegen_emit(pk, pool, input, apply_expr);
+			rc = ael_codegen_emit(pk, pool, input, apply_expr);
 		}
 		else {
 			// PSELECT_REMOVE: synthesize [EXP_RESULT_REMOVE] — the
@@ -1316,23 +1321,23 @@ emit_select_call(as_packer* pk, ast_pool* pool, const char* input, ast_ref node)
 		RC_RET_ON_ERR();
 	}
 
-	return codegen_emit(pk, pool, input, bin_ref);
+	return ael_codegen_emit(pk, pool, input, bin_ref);
 }
 
 //==========================================================
-// codegen_emit -- recursive AST-to-msgpack dispatcher.
+// ael_codegen_emit -- recursive AST-to-msgpack dispatcher.
 //
 
 // Depth guard (mirrors ael_count_sz): a left-deep chain is rejected at
 // EXP_MAX_DEPTH before C-stack overflow. The sizer pass fails first, so emit
 // never sees a too-deep tree. __thread: per-thread, balanced inc/dec.
 int
-codegen_emit(as_packer* pk, ast_pool* pool, const char* input, ast_ref ref)
+ael_codegen_emit(as_packer* pk, ast_pool* pool, const char* input, ast_ref ref)
 {
 	static __thread uint32_t depth;
 
 	if (depth >= EXP_MAX_DEPTH) {
-		return -1; // surfaced by codegen_pack as a "codegen failed" diag
+		return -1; // surfaced by ael_codegen_pack as a "codegen failed" diag
 	}
 
 	depth++;
@@ -1498,7 +1503,7 @@ codegen_emit(as_packer* pk, ast_pool* pool, const char* input, ast_ref ref)
 	case AST_PATH_FUNC_CAST_STRING:
 		rc = emit_cmd(pk, ast_node_table[node->type].exp_cmd, 1);
 		RC_RET_ON_ERR();
-		return codegen_emit(pk, pool, input, node->u.unary.operand);
+		return ael_codegen_emit(pk, pool, input, node->u.unary.operand);
 
 	case AST_FUNC_ABS:
 	case AST_FUNC_CEIL:
@@ -1543,10 +1548,10 @@ codegen_emit(as_packer* pk, ast_pool* pool, const char* input, ast_ref ref)
 // Public API.
 //
 
-codegen_result
-codegen_pack(ast_pool* pool, const char* input, ast_ref root)
+ael_codegen_result
+ael_codegen_pack(ast_pool* pool, const char* input, ast_ref root)
 {
-	codegen_result result = { .buf = NULL, .buf_sz = 0 };
+	ael_codegen_result result = { .buf = NULL, .buf_sz = 0 };
 
 	// Sizer pass — buffer-dependent validation (ordered lists, dup keys) is
 	// dormant with no buffer, so run it with diags off. A failure here is a
@@ -1557,11 +1562,11 @@ codegen_pack(ast_pool* pool, const char* input, ast_ref root)
 	as_packer sizer = { 0 };
 	pool->diags = NULL;
 
-	if (codegen_emit(&sizer, pool, input, root) != 0) {
+	if (ael_codegen_emit(&sizer, pool, input, root) != 0) {
 		as_packer diag_sizer = { 0 };
 
 		pool->diags = &result.diags;
-		codegen_emit(&diag_sizer, pool, input, root);
+		ael_codegen_emit(&diag_sizer, pool, input, root);
 		pool->diags = NULL;
 
 		if (! ael_diag_has_error(&result.diags)) {
@@ -1581,7 +1586,7 @@ codegen_pack(ast_pool* pool, const char* input, ast_ref root)
 	// pool->diags. Cleared after to avoid stale pointer.
 	pool->diags = &result.diags;
 
-	int rc = codegen_emit(&pk, pool, input, root);
+	int rc = ael_codegen_emit(&pk, pool, input, root);
 
 	pool->diags = NULL;
 
@@ -1601,11 +1606,11 @@ codegen_pack(ast_pool* pool, const char* input, ast_ref root)
 	return result;
 }
 
-// Release a codegen_result's heap buffer (cf_malloc'd by codegen_pack). Safe on
+// Release a ael_codegen_result's heap buffer (cf_malloc'd by ael_codegen_pack). Safe on
 // a failed result (buf == NULL — cf_free(NULL) is a no-op). Callers use this
 // rather than free()-ing buf directly.
 void
-codegen_result_destroy(codegen_result* r)
+ael_codegen_result_destroy(ael_codegen_result* r)
 {
 	cf_free(r->buf);
 	r->buf = NULL;

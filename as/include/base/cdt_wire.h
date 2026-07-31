@@ -28,7 +28,7 @@
 // CDT wire-format constants.
 //
 // Shared by the runtime CDT code paths (cdt.c, particle_list.c,
-// particle_map.c) and the AEL compiler (ael_actions.c, codegen.c,
+// particle_map.c) and the AEL compiler (ael_actions.c, ael_codegen.c,
 // exp.c). Kept separate from the broader client protocol in proto.h
 // so non-CDT consumers don't transitively pull these enums in.
 //

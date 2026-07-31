@@ -391,10 +391,12 @@ typedef enum ast_etype_e {
 	AST_ETYPE_AUTO_KEY = AST_ETYPE_INT | AST_ETYPE_STR | AST_ETYPE_BLOB,
 	AST_ETYPE_FLOAT = 1 << EXP_RTYPE_FLOAT,
 	AST_ETYPE_AUTO_NUMERIC = AST_ETYPE_INT | AST_ETYPE_FLOAT,
-	// The `+` operand/result set: numeric add OR string concat. Resolved by
-	// inference (a STRING operand -> concat; numeric -> add); if it stays
-	// multi-bit (all-bin chain, no pin) it errors at finalize like any
-	// unresolved type. A resolved-STR AST_ADD is lowered to the concat fold.
+	// The scalar STRING-or-numeric set, with two clients. (1) `+`: numeric add
+	// OR string concat — a resolved-STR AST_ADD is lowered to the concat fold.
+	// (2) toInt() / toFloat(): the polymorphic cast operand — a resolved-STR
+	// operand parses, a numeric one casts (ael_dispatch_to_cast). Either way,
+	// inference resolves it; if it stays multi-bit (all-bin chain, no pin) it
+	// errors at finalize like any unresolved type.
 	AST_ETYPE_AUTO_ADD = AST_ETYPE_STR | AST_ETYPE_INT | AST_ETYPE_FLOAT,
 	// toString() receiver set (per spec): INT / FLOAT / BLOB. REPR eval
 	// dispatches on the runtime particle type, so pinning to this mask only
@@ -607,7 +609,10 @@ typedef struct ast_node_s {
 			bool has_escape : 1;
 		} str;
 
-		// AST_BIN: canonical bin node. name is at node.offset in input.
+		// AST_BIN: canonical bin node. The name is at node.offset (see
+		// disp_pre in the node header - the display span reaches back over
+		// the '$.' prefix), and name_sz is stored because node.sz covers
+		// the whole reference.
 		// bin_next chains all distinct bins from ctx->bin_root.
 		// ref_root is the head of the AST_BIN_REF stack for this bin.
 		// allow_unresolved=true marks bins used only by name (.exists()
@@ -631,8 +636,9 @@ typedef struct ast_node_s {
 			bool allow_unresolved : 1; // e.g. left of IN
 		} bin_ref;
 
-		// AST_BIN_TYPE / AST_BIN_EXISTS: bin queries.
-		// name is at node.offset in input. No chain linkage.
+		// AST_BIN_TYPE / AST_BIN_EXISTS: bin queries. The name is at
+		// node.offset / name_sz, and the display span (offset/disp_pre/sz)
+		// is copied whole from the bin reference. No chain linkage.
 		struct {
 			uint8_t name_sz;
 		} bin_type;
@@ -746,9 +752,11 @@ typedef struct ast_node_s {
 			uint32_t order_override : 2; // ael_order_override (AST_LIST/AST_MAP)
 		} list;
 
-		// AST_VAR_DEF: name offset into input + value ref; sibling chain is node->next.
+		// AST_VAR_DEF: value ref; sibling chain is node->next. The name
+		// starts at node.offset (ast_new_var_def spans the node from the
+		// name); name_sz is stored because node.sz covers the whole
+		// `name = value` binding.
 		struct {
-			uint32_t name_offset;
 			uint32_t name_sz;
 			ast_ref value;
 		} var_def;
@@ -763,8 +771,8 @@ typedef struct ast_node_s {
 			ast_ref value;
 		} arg;
 
-		// AST_VAR: resolved variable reference.
-		// name_offset is node.offset (into input, for codegen wire format).
+		// AST_VAR: resolved variable reference. The name is at node.offset
+		// (into input, for codegen wire format) / name_sz.
 		struct {
 			uint32_t var_idx;
 			uint32_t name_sz;
@@ -893,8 +901,24 @@ typedef struct ast_node_s {
 	ast_etype etype : 13; // 16-bit type code, 1 bit per type
 	bool is_free : 1;
 	bool has_deferable : 1;
-	uint32_t padding : 17;
+	// How many bytes BEFORE offset the display span starts, so the display
+	// span is [offset - disp_pre, offset - disp_pre + sz). Set when the
+	// displayed construct reaches back past the node's own anchor -- over a
+	// bin's '$.' / '$."' prefix, or out over an enclosing paren, which can
+	// wrap a node of any kind. It exists so that widening never has to move
+	// `offset`, which for a bin or variable is the name codegen puts on the
+	// wire (see u.bin / u.var / u.var_def). Written only by
+	// ast_set_display_span, read only via ast_disp_offset.
+	uint32_t disp_pre : 8;
+	uint32_t padding : 9;
 } __attribute__((packed)) ast_node;
+
+// The union is budgeted at 12 bytes (see the per-variant packing notes above);
+// with the 12 header bytes that's a 24-byte node. Keep it that way -- the pool
+// sizing and the per-variant bit budgets depend on it. A 32-bit offset added
+// to a union variant (rather than derived, as disp_pre is) silently blows the
+// budget: it compiles, and every AST node grows.
+COMPILER_ASSERT(sizeof(ast_node) == 24);
 
 // Kind-asserted accessors for type-punned union members. Reading
 // u.seg.* on a non-NK_SEG_S node (or u.cdt_op.* on a non-NK_CDT_OP
@@ -1066,18 +1090,27 @@ typedef struct ast_pool_s {
 			__attribute__((aligned(16)));
 } ast_pool;
 
-typedef struct parse_context_s parse_context;
+typedef struct ael_context_s ael_context;
 
 // Get head of circular nmath list: tail->next == head.
 ast_ref ast_nmath_head(ast_pool* pool, const ast_node* np);
 
 void ast_pool_init(ast_pool* pool);
 ast_ref ast_pool_alloc(ast_pool* pool);
+// An ast_node* stays valid for the pool's lifetime: dynmem grows by appending a
+// new block (dynmem_grow) and never reallocates the ones already handed out. So
+// a node pointer held across an ast_new* / ast_pool_alloc call is safe, and code
+// may keep one rather than re-deriving it from the ref.
 ast_node* ast_pool_at(ast_pool* pool, ast_ref r);
 
 // Stamp a node's source span, overriding ast_new's lookahead-based default.
 // offset is a 24-bit field, sz an 8-bit field (clamped) -- both always fit the
 // EXP_MAX_AEL_SRC_SIZE-capped input. No-op on AST_REF_NULL (a failed subparse).
+//
+// This MOVES the node's anchor, so on a node whose offset is a name locator
+// (bin / variable) it must be given the NAME's position -- ast_set_display_span
+// is how such a node's displayed span is then widened over its prefix. Resets
+// disp_pre: a re-stamp replaces the whole span, it doesn't extend one.
 static inline void
 ast_set_span(ast_pool* pool, ast_ref ref, uint32_t offset, uint32_t sz)
 {
@@ -1089,6 +1122,106 @@ ast_set_span(ast_pool* pool, ast_ref ref, uint32_t offset, uint32_t sz)
 
 	n->offset = offset;
 	n->sz = sz > 255 ? 255 : (uint8_t)sz;
+	n->disp_pre = 0;
+}
+
+// Where a node's displayed source span starts -- what a diagnostic caret, a
+// snippet focus, a composite parent span, or the runtime source map wants.
+// Differs from node.offset only where offset is pinned to a name (disp_pre).
+//
+// EVERY read of a node's displayed span goes through this -- any kind can carry
+// a reach-back, since a parenthesized group widens whatever node it wraps. The
+// one exception is a read deliberately paired with a NAME size (u.*.name_sz):
+// that is caret-ing the name, so it wants node.offset.
+//
+// Note `offset + sz` is NOT the span end on a node with a reach-back; it
+// overshoots by disp_pre. Ends are ast_disp_offset(n) + n->sz.
+static inline uint32_t
+ast_disp_offset(const ast_node* n)
+{
+	return n->offset - n->disp_pre;
+}
+
+// Widen a node's DISPLAYED span to [start, end) without moving its anchor. Use
+// for the syntax that surrounds a node's own text: the '$.' / '$."' prefix, an
+// enclosing paren.
+//
+// This never writes node.offset, for ANY kind -- that is the whole point. A
+// node's offset can be a semantic locator (a bin's or variable's name, which
+// codegen puts on the wire), and widening a display span must not be able to
+// move one. There is deliberately no list of kinds to keep in step here.
+//
+// pre: start <= node's current offset <= end.
+// A prefix is syntax-determined and tiny ('$.' 2, '$."' 3, '${' 2, paren 1 +
+// whitespace), but whitespace is unbounded -- '(' + 300 spaces + '$.x' + ')'
+// would need a 301-byte reach-back. Past disp_pre's 8-bit range the widening is
+// REFUSED rather than clamped: clamping the delta would drag the name locator
+// along with it, so an absurdly padded source loses a paren from its highlight
+// instead of corrupting the name on the wire.
+static inline void
+ast_set_display_span(ast_pool* pool, ast_ref ref, uint32_t start, uint32_t end)
+{
+	if (ref == AST_REF_NULL) {
+		return;
+	}
+
+	ast_node* n = ast_pool_at(pool, ref);
+
+	if (start > n->offset || n->offset - start > 255) {
+		return;
+	}
+
+	uint32_t sz = end > start ? end - start : 0;
+
+	n->disp_pre = n->offset - start;
+	n->sz = sz > 255 ? 255 : (uint8_t)sz;
+}
+
+// A node's whole span as a value. For the post-parse lowerings that must
+// capture a span BEFORE a splice invalidates the node it came from, then put it
+// back on the replacement -- carrying offset/sz alone would drop the reach-back
+// and shift the focus onto a bare name or inside a paren.
+typedef struct ast_span_s {
+	uint32_t offset;
+	uint8_t sz;
+	uint8_t disp_pre;
+} ast_span;
+
+static inline ast_span
+ast_get_span(ast_pool* pool, ast_ref ref)
+{
+	const ast_node* n = ast_pool_at(pool, ref);
+
+	return (ast_span){
+		.offset = n->offset, .sz = n->sz, .disp_pre = (uint8_t)n->disp_pre
+	};
+}
+
+static inline void
+ast_put_span(ast_pool* pool, ast_ref ref, ast_span s)
+{
+	if (ref == AST_REF_NULL) {
+		return;
+	}
+
+	ast_node* n = ast_pool_at(pool, ref);
+
+	n->offset = s.offset;
+	n->sz = s.sz;
+	n->disp_pre = s.disp_pre;
+}
+
+// Copy src's whole span -- display start, extent, and anchor pinning -- onto
+// dst. For a lowering that splices a new node in over an existing construct
+// and must present the same source text.
+static inline void
+ast_copy_span(ast_pool* pool, ast_ref dst, ast_ref src)
+{
+	if (dst == AST_REF_NULL || src == AST_REF_NULL) {
+		return;
+	}
+
+	ast_put_span(pool, dst, ast_get_span(pool, src));
 }
 void ast_pool_release(ast_pool* pool, ast_ref r);
 void ast_pool_reset(ast_pool* pool);
@@ -1285,12 +1418,14 @@ ast_ref ast_new_wildcard(ast_pool* pool);
 ast_ref ast_new_int(ast_pool* pool, int64_t val);
 ast_ref ast_new_float(ast_pool* pool, double val);
 // Unary minus: builds AST_SUB(AST_ZERO, operand) so the negation reuses
-// SUB and the zero adopts the operand's numeric type.
-ast_ref ast_new_neg(parse_context* ctx, ast_ref operand);
+// SUB and the zero adopts the operand's numeric type. minus_end (one past
+// the '-' token) stamps the synthesized zero so the SUB's child-derived
+// span stays anchored at the operand, not the parser lookahead.
+ast_ref ast_new_neg(ael_context* ctx, ast_ref operand, uint32_t minus_end);
 ast_ref ast_new_bool(ast_pool* pool, bool val);
 ast_ref ast_new_string(ast_pool* pool, const char* s, uint32_t sz,
 		bool has_escape);
-ast_ref ast_new_string_token(parse_context* ctx, uint32_t name_offset,
+ast_ref ast_new_string_token(ael_context* ctx, uint32_t name_offset,
 		uint32_t name_sz);
 ast_ref ast_new_blob_from_hex(ast_pool* pool, const char* hex, uint32_t hex_sz);
 ast_ref ast_new_blob_from_b64(ast_pool* pool, const char* b64, uint32_t b64_sz);
@@ -1301,13 +1436,18 @@ ast_ref ast_new_blob_from_b64(ast_pool* pool, const char* b64, uint32_t b64_sz);
 // (as position) and the inner read (to navigate). Returns AST_REF_NULL
 // if the node type isn't trivially cloneable; the caller errors out.
 ast_ref ast_clone_simple(ast_pool* pool, ast_ref src);
-ast_ref ast_new_bin(parse_context* ctx, uint32_t name_offset, uint32_t name_sz);
-ast_ref ast_new_local_bin(parse_context* ctx, uint32_t name_offset,
-		uint32_t name_sz, ast_etype etype);
-ast_ref ast_new_bcmp(parse_context* ctx, ast_node_t type, ast_ref left,
+// ref_offset/ref_end span the whole reference ('$.' through the end of the
+// name or its closing quote) - the node's display span. name_offset/name_sz
+// locate the NAME's bytes in the input (string-form: the content between the
+// quotes) - the node's anchor, with the '$.' prefix carried as disp_pre.
+ast_ref ast_new_bin(ael_context* ctx, uint32_t ref_offset, uint32_t ref_end,
+		uint32_t name_offset, uint32_t name_sz);
+ast_ref ast_new_local_bin(ael_context* ctx, uint32_t ref_offset, uint32_t ref_end,
+		uint32_t name_offset, uint32_t name_sz, ast_etype etype);
+ast_ref ast_new_bcmp(ael_context* ctx, ast_node_t type, ast_ref left,
 		ast_ref right);
-ast_ref ast_new_in(parse_context* ctx, ast_ref left, ast_ref right);
-ast_ref ast_new_bmath(parse_context* ctx, ast_node_t type, ast_ref left,
+ast_ref ast_new_in(ael_context* ctx, ast_ref left, ast_ref right);
+ast_ref ast_new_bmath(ael_context* ctx, ast_node_t type, ast_ref left,
 		ast_ref right, ast_etype operand_etype);
 ast_ref ast_new_binary(ast_pool* pool, ast_node_t type, ast_ref left,
 		ast_ref right);
@@ -1315,28 +1455,27 @@ ast_ref ast_new_range_seg(ast_pool* pool, ast_node_t type, ast_ref start,
 		ast_ref end);
 ast_ref ast_new_rel_range_seg(ast_pool* pool, ast_node_t type, ast_ref start,
 		ast_ref end, ast_ref relative_to);
-ast_ref ast_new_nary(parse_context* ctx, ast_node_t type, ast_ref left,
+ast_ref ast_new_nary(ael_context* ctx, ast_node_t type, ast_ref left,
 		ast_ref right, ast_etype etype);
 ast_ref ast_new_unary(ast_pool* pool, ast_node_t type, ast_ref operand);
-ast_ref ast_new_func1(parse_context* ctx, ast_node_t type, ast_ref arg,
+ast_ref ast_new_func1(ael_context* ctx, ast_node_t type, ast_ref arg,
 		ast_etype etype);
-ast_ref ast_new_func2(parse_context* ctx, ast_node_t type, ast_ref a, ast_ref b,
+ast_ref ast_new_func2(ael_context* ctx, ast_node_t type, ast_ref a, ast_ref b,
 		ast_etype a_etype, ast_etype b_etype, ast_etype result_etype);
 ast_ref ast_new_meta(ast_pool* pool, exp_op_code op_code, int64_t param);
 
 // Resolve a ${name} variable reference — looks up idx and etype from scope.
 // Returns AST_REF_NULL with diagnostic if variable is undefined.
-ast_ref ast_new_var_ref(parse_context* ctx, uint32_t name_offset,
-		uint32_t name_sz);
+ast_ref ast_new_var_ref(ael_context* ctx, uint32_t name_offset, uint32_t name_sz);
 
 // Variable definition — checks for duplicate name and unresolved value type.
 // Returns AST_REF_NULL on error (diagnostic added to ctx).
-ast_ref ast_new_var_def(parse_context* ctx, uint32_t name_offset,
+ast_ref ast_new_var_def(ael_context* ctx, uint32_t name_offset,
 		uint32_t name_sz, ast_ref value);
 
 // Create a new let scope and push it. Returns the AST_LET_LIST ref.
 // The let_scope is at the head, followed by the first var_def.
-ast_ref ast_new_let_scope(parse_context* ctx, uint32_t name_offset,
+ast_ref ast_new_let_scope(ael_context* ctx, uint32_t name_offset,
 		uint32_t name_sz, ast_ref value);
 
 // Path context list with bin as sole segment (empty context chain).
@@ -1364,20 +1503,38 @@ ast_ref ast_new_cdt_op(ast_pool* pool, ast_node_t pf_type);
 // Since val->next is always the sibling link, this is just key->next->next.
 ast_ref ast_map_literal_next_key(ast_pool* pool, ast_ref key);
 
+// Child iteration -- the single definition of "what are a node's children".
+//
+// Every walker over the AST descends through this, so a node type added to
+// ast_node_table inherits correct descent from the 'kind' its entry must
+// already declare (the table macros take kind positionally, so it cannot be
+// omitted). A hand-enumerated descent is how a missed AST_VAR_DEF child once
+// left a polymorphic toInt()/toFloat() unresolved, which then mis-emitted as a
+// numeric op over a string operand.
+//
+// cb is invoked once per child slot, including slots holding AST_REF_NULL --
+// callbacks must tolerate it (ast_free and the rewrite walk both no-op on it).
+// A child's sibling link is read before its callback runs, so cb may free or
+// splice the child it is handed.
+typedef void (*ast_child_cb)(ast_pool* pool, ast_ref child, void* arg);
+
+void ast_children_foreach(ast_pool* pool, ast_ref ref, ast_child_cb cb,
+		void* arg);
+
 // Destruction -- releases nodes back to pool, recursively frees children.
 void ast_free(ast_pool* pool, ast_ref node);
 
-ast_ref ast_nary_merge(parse_context* ctx, ast_node_t type, ast_ref A,
-		ast_ref B, ast_etype etype);
+ast_ref ast_nary_merge(ael_context* ctx, ast_node_t type, ast_ref A, ast_ref B,
+		ast_etype etype);
 
-ast_etype ast_set_implicit_type_lr(parse_context* ctx, ast_node_t op,
+ast_etype ast_set_implicit_type_lr(ael_context* ctx, ast_node_t op,
 		ast_ref left, ast_ref right, ast_etype etype);
 // Set etype on the implicit GET at the leaf of an AST_PATH_CALL, or on a
 // bare bin reference.
-void ast_set_implicit_type(parse_context* ctx, ast_ref node, ast_etype etype);
+void ast_set_implicit_type(ael_context* ctx, ast_ref node, ast_etype etype);
 
 // Narrow a bin's type and propagate to all references and their parents.
-void ast_bin_set_implicit_type(parse_context* ctx, ast_ref bin_or_ref,
+void ast_bin_set_implicit_type(ael_context* ctx, ast_ref bin_or_ref,
 		ast_etype etype);
 
 // Debug print.

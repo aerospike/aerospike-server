@@ -71,81 +71,80 @@ static void cdtprm_push_leaf_elems(ast_pool* pool, ast_ref cdt_op_ref,
 		ast_ref leaf);
 
 // ctx — path-context list
-static ast_ref ctx_pop_tail(parse_context* ctx, ast_ref ctx_ref);
+static ast_ref ctx_pop_tail(ael_context* ctx, ast_ref ctx_ref);
 static bool ctx_map_noleaf(ast_pool* pool, ast_ref ctx_ref);
 static ast_etype ctx_bare_bin_etype(ast_pool* pool, ast_ref ctx_ref);
 
 // cdt_pf — path-func morph (phases)
-static void cdt_pf_derive_leaf_ctx(parse_context* ctx, ast_ref ctx_ref,
+static void cdt_pf_derive_leaf_ctx(ael_context* ctx, ast_ref ctx_ref,
 		ast_ref seg_ref, bool is_modify, cdt_pf_leaf_ctx* lc);
-static bool cdt_pf_validate_multi_select(parse_context* ctx, ast_node_t pf_type,
+static bool cdt_pf_validate_multi_select(ael_context* ctx, ast_node_t pf_type,
 		const ast_node* fp, const cdt_pf_leaf_ctx* lc);
-static bool cdt_pf_resolve_op_and_types(parse_context* ctx, ast_node_t pf_type,
+static bool cdt_pf_resolve_op_and_types(ael_context* ctx, ast_node_t pf_type,
 		bool is_modify, ast_node* fp, const cdt_pf_leaf_ctx* lc,
 		cdt_pf_resolved* rs);
-static void cdt_pf_finalize_wire_chain(parse_context* ctx, ast_node* fp,
+static void cdt_pf_finalize_wire_chain(ael_context* ctx, ast_node* fp,
 		ast_ref pf, ast_ref seg_ref, bool is_mod_target, bool wire_is_read,
 		bool consume_leaf, bool inverted, int cdt_ret_type);
-static bool ctx_list_has_plural(parse_context* ctx, ast_ref ctx_ref);
+static bool ctx_list_has_plural(ael_context* ctx, ast_ref ctx_ref);
 
 // method-call construction — bit / hll / str / regex
 static uint64_t ael_bits_wire_flags(ast_prop_bits props);
 static uint64_t ael_hll_wire_flags(ast_prop_bits props);
-static void ael_bit_materialize_flags(parse_context* ctx, ast_ref bit_op);
-static void ael_hll_materialize_flags(parse_context* ctx, ast_ref hll_op);
-static ast_ref ael_finalize_str_call(parse_context* ctx, ast_ref recv,
+static void ael_bit_materialize_flags(ael_context* ctx, ast_ref bit_op);
+static void ael_hll_materialize_flags(ael_context* ctx, ast_ref hll_op);
+static ast_ref ael_finalize_str_call(ael_context* ctx, ast_ref recv,
 		ast_ref str_fn);
-static bool ael_regex_parse_flags(parse_context* ctx, uint32_t flag_off,
+static bool ael_regex_parse_flags(ael_context* ctx, uint32_t flag_off,
 		uint32_t flag_sz, uint64_t* out);
-static ast_ref clone_single_select_ctx(parse_context* ctx, ast_ref src_ctx);
+static ast_ref clone_single_select_ctx(ael_context* ctx, ast_ref src_ctx);
 static ast_etype hll_result_etype(ast_node_t pf_type);
 
 // func-call resolution — arg binding + builders
-static bool ael_arg_bool(parse_context* ctx, ast_ref ref, int* out);
-static bool ael_bind_args(parse_context* ctx, const ael_func_spec_t* spec,
+static bool ael_arg_bool(ael_context* ctx, ast_ref ref, int* out);
+static bool ael_bind_args(ael_context* ctx, const ael_func_spec_t* spec,
 		uint32_t fname_off, uint32_t fname_sz, ast_ref arg_list, ast_ref* slots);
-static ast_ref ael_build_scalar(parse_context* ctx, const ael_func_spec_t* spec,
+static ast_ref ael_build_scalar(ael_context* ctx, const ael_func_spec_t* spec,
 		ast_ref* slots);
-static ast_ref ael_build_variadic(parse_context* ctx, const ael_func_spec_t* spec,
+static ast_ref ael_build_variadic(ael_context* ctx, const ael_func_spec_t* spec,
 		uint32_t fname_off, uint32_t fname_sz, ast_ref arg_list);
-static ast_ref ael_build_bit(parse_context* ctx, const ael_func_spec_t* spec,
+static ast_ref ael_build_bit(ael_context* ctx, const ael_func_spec_t* spec,
 		ast_ref* slots);
-static ast_ref ael_build_hll(parse_context* ctx, const ael_func_spec_t* spec,
+static ast_ref ael_build_hll(ael_context* ctx, const ael_func_spec_t* spec,
 		ast_ref* slots);
-static ast_ref ael_resolve_geo_fn(parse_context* ctx, const ael_func_spec_t* spec,
+static ast_ref ael_resolve_geo_fn(ael_context* ctx, const ael_func_spec_t* spec,
 		uint32_t name_off, uint32_t name_sz, ast_ref arg_list);
-static ast_ref ael_concat_append(parse_context* ctx, ast_ref acc, ast_ref arg);
-static void ael_diag_unknown_func(parse_context* ctx, uint32_t name_off,
+static ast_ref ael_concat_append(ael_context* ctx, ast_ref acc, ast_ref arg);
+static void ael_diag_unknown_func(ael_context* ctx, uint32_t name_off,
 		uint32_t name_sz);
-static ast_ref ael_build_str(parse_context* ctx, const ael_func_spec_t* spec,
+static ast_ref ael_build_str(ael_context* ctx, const ael_func_spec_t* spec,
 		uint32_t name_off, uint32_t name_sz, ast_ref* slots);
-static ast_ref ael_build_str_list(parse_context* ctx, const ael_func_spec_t* spec,
+static ast_ref ael_build_str_list(ael_context* ctx, const ael_func_spec_t* spec,
 		uint32_t name_off, uint32_t name_sz, ast_ref* slots);
-static ast_ref ael_build_regex_replace(parse_context* ctx,
+static ast_ref ael_build_regex_replace(ael_context* ctx,
 		const ael_func_spec_t* spec, uint32_t name_off, uint32_t name_sz,
 		ast_ref* slots);
-static ast_ref ael_resolve_path_fn(parse_context* ctx,
-		const ael_func_spec_t* spec, uint32_t name_off, uint32_t name_sz,
-		ast_ref arg_list);
-static ast_ref ael_resolve_modify_fn(parse_context* ctx,
+static ast_ref ael_resolve_path_fn(ael_context* ctx, const ael_func_spec_t* spec,
+		uint32_t name_off, uint32_t name_sz, ast_ref arg_list);
+static ast_ref ael_resolve_modify_fn(ael_context* ctx,
 		const ael_func_spec_t* spec, uint32_t name_off, uint32_t name_sz,
 		ast_ref arg_list);
 
 // path / value — finalize, cdt-call, cast
-static ast_ref ael_finalize_path_on_ctx(parse_context* ctx, ast_ref ctx_ref,
+static ast_ref ael_finalize_path_on_ctx(ael_context* ctx, ast_ref ctx_ref,
 		ast_ref pf);
-static ast_ref build_value_cdt_call(parse_context* ctx, ast_ref recv,
-		ast_ref pf, int cdt_op_code, bool is_modify, ast_etype recv_etype,
+static ast_ref build_value_cdt_call(ael_context* ctx, ast_ref recv, ast_ref pf,
+		int cdt_op_code, bool is_modify, ast_etype recv_etype,
 		ast_etype result_etype);
-static ast_ref finish_cast(parse_context* ctx, ast_ref recv, ast_ref pf,
+static ast_ref finish_cast(ael_context* ctx, ast_ref recv, ast_ref pf,
 		bool is_bin);
 
 // loop var
-static void loop_var_chain_push(parse_context* ctx, as_exp_builtin builtin,
+static void loop_var_chain_push(ael_context* ctx, as_exp_builtin builtin,
 		ast_ref r);
 
 // parse driver
-static void ael_finalize_parse(parse_context* ctx);
+static void ael_finalize_parse(ael_context* ctx);
 
 //==========================================================
 // Static helpers.
@@ -362,7 +361,7 @@ cdtprm_push_leaf_elems(ast_pool* pool, ast_ref cdt_op_ref, ast_ref leaf)
 // post: the tail seg, unlinked, with the list's count-- and last_is_multi
 //       cleared; AST_REF_NULL when only the bin head remains (nothing to pop).
 static ast_ref
-ctx_pop_tail(parse_context* ctx, ast_ref ctx_ref)
+ctx_pop_tail(ael_context* ctx, ast_ref ctx_ref)
 {
 	cf_assert(ctx_ref != AST_REF_NULL, AS_EXP, "ctx_pop_tail: null operand");
 
@@ -448,7 +447,7 @@ ctx_bare_bin_etype(ast_pool* pool, ast_ref ctx_ref)
 //       inverted from the seg (defaults when leafless), and map_ctx +
 //       bare_bin_etype from the receiver. Pure derivation, no diagnostics.
 static void
-cdt_pf_derive_leaf_ctx(parse_context* ctx, ast_ref ctx_ref, ast_ref seg_ref,
+cdt_pf_derive_leaf_ctx(ael_context* ctx, ast_ref ctx_ref, ast_ref seg_ref,
 		bool is_modify, cdt_pf_leaf_ctx* lc)
 {
 	lc->consume_leaf = seg_ref != AST_REF_NULL;
@@ -476,7 +475,7 @@ cdt_pf_derive_leaf_ctx(parse_context* ctx, ast_ref ctx_ref, ast_ref seg_ref,
 // post: false + a diagnostic when a plural leaf feeds set / insert / update /
 //       insertItems / increment; true otherwise.
 static bool
-cdt_pf_validate_multi_select(parse_context* ctx, ast_node_t pf_type,
+cdt_pf_validate_multi_select(ael_context* ctx, ast_node_t pf_type,
 		const ast_node* fp, const cdt_pf_leaf_ctx* lc)
 {
 	if (lc->consume_leaf && lc->leaf_is_multi &&
@@ -484,7 +483,7 @@ cdt_pf_validate_multi_select(parse_context* ctx, ast_node_t pf_type,
 					pf_type == AST_PATH_FUNC_UPDATE ||
 					pf_type == AST_PATH_FUNC_INSERT_ITEMS ||
 					pf_type == AST_PATH_FUNC_INCREMENT)) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, fp->offset, fp->sz,
+		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(fp), fp->sz,
 				"multi-select segment not allowed for this path function");
 		return false;
 	}
@@ -499,13 +498,12 @@ cdt_pf_validate_multi_select(parse_context* ctx, ast_node_t pf_type,
 //       args); on an unsupported verb / dimension / container, returns false
 //       after a tailored diagnostic.
 static bool
-cdt_pf_resolve_op_and_types(parse_context* ctx, ast_node_t pf_type,
-		bool is_modify, ast_node* fp, const cdt_pf_leaf_ctx* lc,
-		cdt_pf_resolved* rs)
+cdt_pf_resolve_op_and_types(ael_context* ctx, ast_node_t pf_type, bool is_modify,
+		ast_node* fp, const cdt_pf_leaf_ctx* lc, cdt_pf_resolved* rs)
 {
 	if (is_modify) {
 		if (! lc->consume_leaf && pf_modify_needs_leaf(pf_type)) {
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, fp->offset, fp->sz,
+			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(fp), fp->sz,
 					lc->map_ctx
 							? "this function needs a map key leaf, e.g. $.bin.key.setTo(v)"
 							: "this function needs an index leaf, e.g. $.bin.[0].setTo(v)");
@@ -520,7 +518,7 @@ cdt_pf_resolve_op_and_types(parse_context* ctx, ast_node_t pf_type,
 		// cdt_pf_validate_multi_select. Mirrors ael_finalize_bit_mod_path.
 		if (pf_modify_needs_leaf(pf_type) && lc->leaf_type != AST_MAP_KEY &&
 				lc->leaf_type != AST_LIST_INDEX) {
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, fp->offset, fp->sz,
+			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(fp), fp->sz,
 					"this function needs a single map key or list index leaf");
 			return false;
 		}
@@ -533,7 +531,8 @@ cdt_pf_resolve_op_and_types(parse_context* ctx, ast_node_t pf_type,
 				whole_collection_wrong_container(pf_type, lc->bare_bin_etype);
 
 		if (wc_msg != NULL) {
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, fp->offset, fp->sz, wc_msg);
+			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(fp),
+					fp->sz, wc_msg);
 			return false;
 		}
 
@@ -554,7 +553,8 @@ cdt_pf_resolve_op_and_types(parse_context* ctx, ast_node_t pf_type,
 				break;
 			}
 
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, fp->offset, fp->sz, msg);
+			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(fp),
+					fp->sz, msg);
 			return false;
 		}
 
@@ -630,7 +630,7 @@ cdt_pf_resolve_op_and_types(parse_context* ctx, ast_node_t pf_type,
 	// element — reject with a hint pointing at the bare-path form.
 	if (pf_type == AST_PATH_FUNC_GET_KEYS) {
 		if (! lc->consume_leaf || ! lc->leaf_is_multi) {
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, fp->offset, fp->sz,
+			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(fp), fp->sz,
 					".getKeys() requires a multi-select segment — use the bare path for a single navigated value");
 			return false;
 		}
@@ -651,13 +651,13 @@ cdt_pf_resolve_op_and_types(parse_context* ctx, ast_node_t pf_type,
 	// there (the SELECT_LEAF_MAP_* shapes are deferred — ael-TODO).
 	if (pf_type == AST_PATH_FUNC_GET_MAPS) {
 		if (! lc->consume_leaf || ! lc->leaf_is_multi) {
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, fp->offset, fp->sz,
+			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(fp), fp->sz,
 					".getMaps() requires a multi-select segment — use the bare path for a single navigated value");
 			return false;
 		}
 
 		if (! lc->map_ctx) {
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, fp->offset, fp->sz,
+			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(fp), fp->sz,
 					".getMaps() requires a map selector ({...}) — a list selector has no keys to return as a map");
 			return false;
 		}
@@ -679,7 +679,7 @@ cdt_pf_resolve_op_and_types(parse_context* ctx, ast_node_t pf_type,
 	if (pf_type == AST_PATH_FUNC_GET_INDEXES ||
 			pf_type == AST_PATH_FUNC_GET_RANKS) {
 		if (! lc->consume_leaf) {
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, fp->offset, fp->sz,
+			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(fp), fp->sz,
 					"getIndexes() / getRanks() require a path segment selecting element(s)");
 			return false;
 		}
@@ -734,7 +734,7 @@ cdt_pf_resolve_op_and_types(parse_context* ctx, ast_node_t pf_type,
 //       modify-target HEAD-pushes the leaf's single operand; unused seg nodes
 //       are released.
 static void
-cdt_pf_finalize_wire_chain(parse_context* ctx, ast_node* fp, ast_ref pf,
+cdt_pf_finalize_wire_chain(ael_context* ctx, ast_node* fp, ast_ref pf,
 		ast_ref seg_ref, bool is_mod_target, bool wire_is_read,
 		bool consume_leaf, bool inverted, int cdt_ret_type)
 {
@@ -796,7 +796,7 @@ cdt_pf_finalize_wire_chain(parse_context* ctx, ast_node* fp, ast_ref pf,
 // nor codegen ever computes the overflow. Callers guarantee both endpoints
 // are AST_INT.
 bool
-ael_rel_range_count_ok(parse_context* ctx, ast_ref start, ast_ref end)
+ael_rel_range_count_ok(ael_context* ctx, ast_ref start, ast_ref end)
 {
 	int64_t start_v = ast_pool_at(ctx->pool, start)->u.ival;
 	int64_t end_v = ast_pool_at(ctx->pool, end)->u.ival;
@@ -807,9 +807,11 @@ ael_rel_range_count_ok(parse_context* ctx, ast_ref start, ast_ref end)
 		// Anchor on the start..end operand span, not the parser lookahead.
 		const ast_node* sp = ast_pool_at(ctx->pool, start);
 		const ast_node* ep = ast_pool_at(ctx->pool, end);
-		uint32_t off = sp->offset < ep->offset ? sp->offset : ep->offset;
-		uint32_t s_end = sp->offset + sp->sz;
-		uint32_t e_end = ep->offset + ep->sz;
+		uint32_t s_off = ast_disp_offset(sp);
+		uint32_t e_off = ast_disp_offset(ep);
+		uint32_t off = s_off < e_off ? s_off : e_off;
+		uint32_t s_end = s_off + sp->sz;
+		uint32_t e_end = e_off + ep->sz;
 
 		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, off,
 				(e_end > s_end ? e_end : s_end) - off,
@@ -854,7 +856,7 @@ ael_etype_to_particle_type(ast_etype etype)
 // mutual-exclusion within group masks (one CR_LIST_* per seg,
 // one CR_MAP_* per seg). On success, ORs the bit into *dst.
 bool
-ael_apply_prop(parse_context* ctx, ast_prop_bits valid, ast_prop_bits* dst,
+ael_apply_prop(ael_context* ctx, ast_prop_bits valid, ast_prop_bits* dst,
 		ast_prop_bits bit, uint32_t prop_offset, uint32_t prop_sz)
 {
 	if ((bit & valid) == 0) {
@@ -885,7 +887,7 @@ ael_apply_prop(parse_context* ctx, ast_prop_bits valid, ast_prop_bits* dst,
 // AST_LIST / AST_MAP node's order_override; the packer resolves the default per
 // kind (map -> ordered, list -> unordered).
 void
-ael_apply_literal_order(parse_context* ctx, ast_ref ref, uint32_t off, uint32_t sz)
+ael_apply_literal_order(ael_context* ctx, ast_ref ref, uint32_t off, uint32_t sz)
 {
 	const char* s = ctx->input + off;
 
@@ -906,7 +908,7 @@ ael_apply_literal_order(parse_context* ctx, ast_ref ref, uint32_t off, uint32_t 
 // checked later in ael_apply_prop. Returns 0 (and emits a diagnostic) for an
 // unknown name.
 ast_prop_bits
-ael_resolve_prop_flag(parse_context* ctx, uint32_t off, uint32_t sz)
+ael_resolve_prop_flag(ael_context* ctx, uint32_t off, uint32_t sz)
 {
 	static const struct {
 		const char* name;
@@ -946,7 +948,7 @@ ael_resolve_prop_flag(parse_context* ctx, uint32_t off, uint32_t sz)
 // metadata function. has_param is true for the `$.NAME(INT)` form (only
 // digestModulo). Emits a diagnostic + returns a nil node on any mismatch.
 ast_ref
-ael_resolve_meta_call(parse_context* ctx, uint32_t off, uint32_t sz,
+ael_resolve_meta_call(ael_context* ctx, uint32_t off, uint32_t sz,
 		int64_t param, bool has_param)
 {
 	const char* s = ctx->input + off;
@@ -1035,7 +1037,7 @@ ael_resolve_meta_call(parse_context* ctx, uint32_t off, uint32_t sz,
 // x_cdt_fn / modify_fn / path_seg — so the table row matches the
 // actual op or seg kind.
 ast_ref
-ael_node_apply_postfix(parse_context* ctx, ast_ref ref, ael_postfix_kind kind,
+ael_node_apply_postfix(ael_context* ctx, ast_ref ref, ael_postfix_kind kind,
 		uint32_t bit)
 {
 	if (ref == AST_REF_NULL) {
@@ -1139,7 +1141,7 @@ ael_node_apply_postfix(parse_context* ctx, ast_ref ref, ael_postfix_kind kind,
 }
 
 ast_ref
-ael_ctx_list_append(parse_context* ctx, ast_ref ctx_ref, ast_ref seg)
+ael_ctx_list_append(ael_context* ctx, ast_ref ctx_ref, ast_ref seg)
 {
 	if (ctx_ref == AST_REF_NULL || seg == AST_REF_NULL) {
 		return AST_REF_NULL;
@@ -1149,7 +1151,7 @@ ael_ctx_list_append(parse_context* ctx, ast_ref ctx_ref, ast_ref seg)
 	ast_node* cxn = ast_pool_at(ctx->pool, ctx_ref);
 
 	if ((uint32_t)cxn->u.ctx_list.count + 1 > AST_PATH_CTX_MAX) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, sp->offset, sp->sz,
+		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(sp), sp->sz,
 				"path context exceeds maximum depth");
 		return AST_REF_NULL;
 	}
@@ -1160,7 +1162,7 @@ ael_ctx_list_append(parse_context* ctx, ast_ref ctx_ref, ast_ref seg)
 	if (ast_node_table[sp->type].kind == NK_SEG_S &&
 			(ast_seg_props(sp) & AST_PROP_PERSIST_INDEX) != 0 &&
 			cxn->u.ctx_list.count > 1) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, sp->offset, sp->sz,
+		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(sp), sp->sz,
 				"PERSIST_INDEX only allowed on the first path segment after a bin");
 		return AST_REF_NULL;
 	}
@@ -1178,7 +1180,7 @@ ael_ctx_list_append(parse_context* ctx, ast_ref ctx_ref, ast_ref seg)
 }
 
 ast_ref
-ael_ctx_list_pop(parse_context* ctx, ast_ref ctx_ref)
+ael_ctx_list_pop(ael_context* ctx, ast_ref ctx_ref)
 {
 	if (ctx_ref == AST_REF_NULL) {
 		return AST_REF_NULL;
@@ -1191,7 +1193,7 @@ ael_ctx_list_pop(parse_context* ctx, ast_ref ctx_ref)
 		ast_ref bin = cxn->u.ctx_list.head;
 		const ast_node* bp = ast_pool_at(ctx->pool, bin);
 
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, bp->offset, bp->sz,
+		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(bp), bp->sz,
 				"path function requires a leaf segment");
 	}
 
@@ -1201,8 +1203,7 @@ ael_ctx_list_pop(parse_context* ctx, ast_ref ctx_ref)
 // morph — path func → cdt op
 
 bool
-ael_cdt_op_from_fn(parse_context* ctx, ast_ref ctx_ref, ast_ref seg_ref,
-		ast_ref pf)
+ael_cdt_op_from_fn(ael_context* ctx, ast_ref ctx_ref, ast_ref seg_ref, ast_ref pf)
 {
 	ast_node* fp = ast_pool_at(ctx->pool, pf);
 	ast_node_t pf_type = fp->type;
@@ -1236,8 +1237,38 @@ ael_cdt_op_from_fn(parse_context* ctx, ast_ref ctx_ref, ast_ref seg_ref,
 
 // path — path-call finalize / operands
 
+// Span a just-created AST_PATH_CALL over its whole construct: from the
+// receiver's start to the parser's current lookahead, which at the wrapping
+// reduce is the first token AFTER the call (whitespace-trimmed). The wrapper
+// is created mid-reduce, so ast_new's default stamp is that same lookahead —
+// a zero-width end anchor that left call-op runtime traces (string / CDT /
+// bit / HLL faults and explains) without a source focus.
+static void
+ael_span_call(ael_context* ctx, ast_ref pc_ref, ast_ref recv)
+{
+	const ast_node* rp = ast_pool_at(ctx->pool, recv);
+	const char* in = ctx->input;
+	// The receiver is usually a bin, whose offset is its name -- span the call
+	// from where the reference is DISPLAYED ('$.'), not from the name.
+	uint32_t start = ast_disp_offset(rp);
+	uint32_t end = ctx->pool->cur_offset;
+
+	while (end > start &&
+			(in[end - 1] == ' ' || in[end - 1] == '\t' || in[end - 1] == '\n' ||
+					in[end - 1] == '\r')) {
+		end--;
+	}
+
+	if (end > start) {
+		ast_set_span(ctx->pool, pc_ref, start, end - start);
+	}
+	else {
+		ast_set_span(ctx->pool, pc_ref, start, rp->sz);
+	}
+}
+
 ast_ref
-ael_finalize_path_call_wrap(parse_context* ctx, ast_ref ctx_ref, ast_ref pf)
+ael_finalize_path_call_wrap(ael_context* ctx, ast_ref ctx_ref, ast_ref pf)
 {
 	cf_assert(ctx_ref != AST_REF_NULL && pf != AST_REF_NULL, AS_EXP,
 			"ael_finalize_path_call_wrap: null operand");
@@ -1249,7 +1280,7 @@ ael_finalize_path_call_wrap(parse_context* ctx, ast_ref ctx_ref, ast_ref pf)
 	if (cxn->u.ctx_list.is_multi || cxn->u.ctx_list.last_is_multi) {
 		const ast_node* bp = ast_pool_at(ctx->pool, bin);
 
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, bp->offset, bp->sz,
+		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(bp), bp->sz,
 				"multi-select segment not allowed in path context");
 		return AST_REF_NULL;
 	}
@@ -1307,6 +1338,8 @@ ael_finalize_path_call_wrap(parse_context* ctx, ast_ref ctx_ref, ast_ref pf)
 	pcp->etype = pfp->etype;
 	pcp->has_deferable = ast_pool_at(ctx->pool, bin)->has_deferable;
 
+	ael_span_call(ctx, pc_ref, ctx_ref);
+
 	return pc_ref;
 }
 
@@ -1321,7 +1354,7 @@ ael_finalize_path_call_wrap(parse_context* ctx, ast_ref ctx_ref, ast_ref pf)
 // post: true if any seg after the bin head is a wildcard / AND_EXP / plural
 //       selector -- a mid-path multi-select that forces SELECT routing.
 static bool
-ctx_list_has_plural(parse_context* ctx, ast_ref ctx_ref)
+ctx_list_has_plural(ael_context* ctx, ast_ref ctx_ref)
 {
 	ast_node* cxn = ast_pool_at(ctx->pool, ctx_ref);
 
@@ -1339,7 +1372,7 @@ ctx_list_has_plural(parse_context* ctx, ast_ref ctx_ref)
 }
 
 ast_ref
-ael_consume_leaf_then_finalize(parse_context* ctx, ast_ref ctx_ref, ast_ref pf,
+ael_consume_leaf_then_finalize(ael_context* ctx, ast_ref ctx_ref, ast_ref pf,
 		ast_ref leaf)
 {
 	if (ctx_ref == AST_REF_NULL || pf == AST_REF_NULL) {
@@ -1392,7 +1425,8 @@ ael_consume_leaf_then_finalize(parse_context* ctx, ast_ref ctx_ref, ast_ref pf,
 			// — or a plural mid-path. A single navigated value has no key
 			// collection.
 			if (! (leaf_requires_select || leaf_is_multi || is_plural)) {
-				ael_diag_add(&ctx->diags, AEL_SEV_ERROR, pfp->offset, pfp->sz,
+				ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(pfp),
+						pfp->sz,
 						".getKeyValues() requires a multi-select segment — use the bare path for a single navigated value");
 				return AST_REF_NULL;
 			}
@@ -1414,7 +1448,8 @@ ael_consume_leaf_then_finalize(parse_context* ctx, ast_ref ctx_ref, ast_ref pf,
 			// selectors (the BY_* op carries the return-type byte). Wildcard /
 			// filter leaves and inner-multi-select route here and need the
 			// SELECT_LEAF_INDEX/_RANK runtime shapes — deferred (docs/ael-TODO).
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, pfp->offset, pfp->sz,
+			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(pfp),
+					pfp->sz,
 					"getIndexes() / getRanks() support single-select and leaf range/list selectors only this release — not wildcard/filter or inner-multi-select paths");
 			return AST_REF_NULL;
 		}
@@ -1423,12 +1458,14 @@ ael_consume_leaf_then_finalize(parse_context* ctx, ast_ref ctx_ref, ast_ref pf,
 			// carries the RESULT_TYPE_*_MAP byte directly, but wildcard /
 			// filter / inner-multi-select need the SELECT_LEAF_MAP_*
 			// runtime shapes — deferred (docs/ael-TODO).
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, pfp->offset, pfp->sz,
+			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(pfp),
+					pfp->sz,
 					"getMaps() supports leaf map range/list selectors only this release — not wildcard/filter or inner-multi-select paths");
 			return AST_REF_NULL;
 		}
 		else {
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, pfp->offset, pfp->sz,
+			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(pfp),
+					pfp->sz,
 					"path function does not accept wildcard segments — use modify()");
 			return AST_REF_NULL;
 		}
@@ -1451,18 +1488,20 @@ ael_consume_leaf_then_finalize(parse_context* ctx, ast_ref ctx_ref, ast_ref pf,
 	return ael_finalize_path_call_wrap(ctx, ctx_ref, pf);
 }
 
-// Source (receiver) and result etypes for the three casts: asInt (FLOAT ->
-// INT), asFloat (INT -> FLOAT), toString (INT | FLOAT | BLOB -> STR).
+// Source (operand) and result etypes for the casts. toInt / toFloat are
+// polymorphic: the operand is INT | FLOAT | STRING (AUTO_ADD) and the concrete
+// op is chosen from its resolved type post-inference (ael_dispatch_to_cast).
+// toString takes INT | FLOAT | BLOB -> STR.
 static void
 ael_cast_types(ast_node_t cast_type, ast_etype* src, ast_etype* result)
 {
 	switch (cast_type) {
-	case AST_PATH_FUNC_CAST_INT:
-		*src = AST_ETYPE_FLOAT;
+	case AST_PATH_FUNC_CAST_INT: // toInt
+		*src = AST_ETYPE_AUTO_ADD;
 		*result = AST_ETYPE_INT;
 		break;
-	case AST_PATH_FUNC_CAST_FLOAT:
-		*src = AST_ETYPE_INT;
+	case AST_PATH_FUNC_CAST_FLOAT: // toFloat
+		*src = AST_ETYPE_AUTO_ADD;
 		*result = AST_ETYPE_FLOAT;
 		break;
 	default: // AST_PATH_FUNC_CAST_STRING
@@ -1473,7 +1512,7 @@ ael_cast_types(ast_node_t cast_type, ast_etype* src, ast_etype* result)
 }
 
 ast_ref
-ael_finalize_cast(parse_context* ctx, ast_ref ctx_ref, ast_ref cast)
+ael_finalize_cast(ael_context* ctx, ast_ref ctx_ref, ast_ref cast)
 {
 	cf_assert(ctx_ref != AST_REF_NULL && cast != AST_REF_NULL, AS_EXP,
 			"ael_finalize_cast: null operand");
@@ -1487,7 +1526,7 @@ ael_finalize_cast(parse_context* ctx, ast_ref ctx_ref, ast_ref cast)
 
 	// Pin the leaf to the cast's required source type so untyped leaves narrow
 	// and conflicting `:T` pins surface as AST_ETYPE_ERROR at the post-parse
-	// check (asInt FLOAT->INT, asFloat INT->FLOAT, toString INT|FLOAT|BLOB->STR).
+	// check (toInt / toFloat: INT|FLOAT|STRING operand; toString: INT|FLOAT|BLOB).
 	ast_node* wp = ast_pool_at(ctx->pool, cast);
 	ast_etype src_type;
 	ast_etype result_type;
@@ -1526,7 +1565,7 @@ ael_finalize_cast(parse_context* ctx, ast_ref ctx_ref, ast_ref cast)
 // stype = EXP_CALL_BITS.
 
 ast_ref
-ael_new_bit_fn(parse_context* ctx, ast_node_t pf_type, ast_ref offset,
+ael_new_bit_fn(ael_context* ctx, ast_node_t pf_type, ast_ref offset,
 		ast_ref size, ast_ref opt_arg)
 {
 	cf_assert(offset != AST_REF_NULL && size != AST_REF_NULL, AS_EXP,
@@ -1588,7 +1627,7 @@ ael_new_bit_fn(parse_context* ctx, ast_node_t pf_type, ast_ref offset,
 // Default policy flags = 0. When `signed: false` the parser uses the
 // 3-arg ael_new_bit_fn variant (no flags/subflags written).
 ast_ref
-ael_new_bit_arith(parse_context* ctx, ast_node_t pf_type, ast_ref offset,
+ael_new_bit_arith(ael_context* ctx, ast_node_t pf_type, ast_ref offset,
 		ast_ref size, ast_ref value, int signed_flag)
 {
 	cf_assert(offset != AST_REF_NULL && size != AST_REF_NULL &&
@@ -1617,7 +1656,7 @@ ael_new_bit_arith(parse_context* ctx, ast_node_t pf_type, ast_ref offset,
 
 // bitResize(byteSize:) — single-arg modify.
 ast_ref
-ael_new_bit_resize(parse_context* ctx, ast_ref byte_size)
+ael_new_bit_resize(ael_context* ctx, ast_ref byte_size)
 {
 	cf_assert(byte_size != AST_REF_NULL, AS_EXP,
 			"ael_new_bit_resize: null operand");
@@ -1633,7 +1672,7 @@ ael_new_bit_resize(parse_context* ctx, ast_ref byte_size)
 
 // bitInsert(byteOffset:, value:) — 2-arg modify with BLOB value.
 ast_ref
-ael_new_bit_insert(parse_context* ctx, ast_ref byte_offset, ast_ref value)
+ael_new_bit_insert(ael_context* ctx, ast_ref byte_offset, ast_ref value)
 {
 	cf_assert(byte_offset != AST_REF_NULL && value != AST_REF_NULL, AS_EXP,
 			"ael_new_bit_insert: null operand");
@@ -1651,7 +1690,7 @@ ael_new_bit_insert(parse_context* ctx, ast_ref byte_offset, ast_ref value)
 
 // bitRemove(byteOffset:, byteSize:) — 2-arg modify.
 ast_ref
-ael_new_bit_remove(parse_context* ctx, ast_ref byte_offset, ast_ref byte_size)
+ael_new_bit_remove(ael_context* ctx, ast_ref byte_offset, ast_ref byte_size)
 {
 	cf_assert(byte_offset != AST_REF_NULL && byte_size != AST_REF_NULL, AS_EXP,
 			"ael_new_bit_remove: null operand");
@@ -1668,7 +1707,7 @@ ael_new_bit_remove(parse_context* ctx, ast_ref byte_offset, ast_ref byte_size)
 }
 
 ast_ref
-ael_bit_recv_from_ctx(parse_context* ctx, ast_ref ctx_ref)
+ael_bit_recv_from_ctx(ael_context* ctx, ast_ref ctx_ref)
 {
 	cf_assert(ctx_ref != AST_REF_NULL, AS_EXP,
 			"ael_bit_recv_from_ctx: null operand");
@@ -1750,7 +1789,7 @@ ael_hll_wire_flags(ast_prop_bits props)
 // post: the flags are folded into the wire chain (OR'd into the signed-flags
 //       slot when present, else appended) and props is cleared.
 static void
-ael_bit_materialize_flags(parse_context* ctx, ast_ref bit_op)
+ael_bit_materialize_flags(ael_context* ctx, ast_ref bit_op)
 {
 	ast_node* op = ast_pool_at(ctx->pool, bit_op);
 	uint64_t wf = ael_bits_wire_flags(op->u.cdt_op.props);
@@ -1785,7 +1824,7 @@ ael_bit_materialize_flags(parse_context* ctx, ast_ref bit_op)
 // pre:  hll_op is an AST_HLL_OP whose props hold its :PROPERTY postfix flags.
 // post: a non-zero flag word is appended as one arg and props is cleared.
 static void
-ael_hll_materialize_flags(parse_context* ctx, ast_ref hll_op)
+ael_hll_materialize_flags(ael_context* ctx, ast_ref hll_op)
 {
 	ast_node* op = ast_pool_at(ctx->pool, hll_op);
 	uint64_t wf = ael_hll_wire_flags(op->u.cdt_op.props);
@@ -1799,7 +1838,7 @@ ael_hll_materialize_flags(parse_context* ctx, ast_ref hll_op)
 }
 
 ast_ref
-ael_finalize_bit_call(parse_context* ctx, ast_ref recv, ast_ref bit_fn)
+ael_finalize_bit_call(ael_context* ctx, ast_ref recv, ast_ref bit_fn)
 {
 	cf_assert(recv != AST_REF_NULL && bit_fn != AST_REF_NULL, AS_EXP,
 			"ael_finalize_bit_call: null operand");
@@ -1826,8 +1865,7 @@ ael_finalize_bit_call(parse_context* ctx, ast_ref recv, ast_ref bit_fn)
 	fp->u.cdt_op.is_modify = is_modify;
 	fp->etype = result_etype;
 
-	// Fold any :PROPERTY flags into the wire chain now (fp may move on the
-	// pool realloc inside this call — don't touch fp afterwards).
+	// Fold any :PROPERTY flags into the wire chain now.
 	ael_bit_materialize_flags(ctx, bit_fn);
 
 	// Wrap in AST_PATH_CALL with stype = EXP_CALL_BITS (| MODIFY_LOCAL
@@ -1848,6 +1886,8 @@ ael_finalize_bit_call(parse_context* ctx, ast_ref recv, ast_ref bit_fn)
 	pcp->etype = result_etype;
 	pcp->has_deferable = ast_pool_at(ctx->pool, recv)->has_deferable;
 
+	ael_span_call(ctx, pc_ref, recv);
+
 	return pc_ref;
 }
 
@@ -1860,7 +1900,7 @@ ael_finalize_bit_call(parse_context* ctx, ast_ref recv, ast_ref bit_fn)
 //       AST_PATH_CTX list), so the emitters take the no-ctx value shape -- ctx
 //       navigation isn't wired.
 static ast_ref
-ael_finalize_str_call(parse_context* ctx, ast_ref recv, ast_ref str_fn)
+ael_finalize_str_call(ael_context* ctx, ast_ref recv, ast_ref str_fn)
 {
 	cf_assert(recv != AST_REF_NULL && str_fn != AST_REF_NULL, AS_EXP,
 			"ael_finalize_str_call: null operand");
@@ -1891,6 +1931,8 @@ ael_finalize_str_call(parse_context* ctx, ast_ref recv, ast_ref str_fn)
 	pcp->etype = result_etype;
 	pcp->has_deferable = ast_pool_at(ctx->pool, recv)->has_deferable;
 
+	ael_span_call(ctx, pc_ref, recv);
+
 	return pc_ref;
 }
 
@@ -1899,7 +1941,7 @@ ael_finalize_str_call(parse_context* ctx, ast_ref recv, ast_ref str_fn)
 // post: i/m/s -> *out (true); x/w are lexer-admitted but have no wire bit, so
 //       they diagnose and return false.
 static bool
-ael_regex_parse_flags(parse_context* ctx, uint32_t flag_off, uint32_t flag_sz,
+ael_regex_parse_flags(ael_context* ctx, uint32_t flag_off, uint32_t flag_sz,
 		uint64_t* out)
 {
 	uint64_t flags = 0;
@@ -1932,7 +1974,7 @@ ael_regex_parse_flags(parse_context* ctx, uint32_t flag_off, uint32_t flag_sz,
 // pre:  pat_* / flag_* are source spans into ctx->input.
 // post: flags i/m/s -> wire; unsupported x/w -> diagnostic + AST_REF_NULL.
 ast_ref
-ael_new_regex_match(parse_context* ctx, ast_ref lhs, uint32_t pat_off,
+ael_new_regex_match(ael_context* ctx, ast_ref lhs, uint32_t pat_off,
 		uint32_t pat_sz, uint32_t flag_off, uint32_t flag_sz)
 {
 	if (lhs == AST_REF_NULL) {
@@ -1964,7 +2006,7 @@ ael_new_regex_match(parse_context* ctx, ast_ref lhs, uint32_t pat_off,
 // pre:  pat_* / flag_* are source spans into ctx->input.
 // post: flags i/m/s -> wire; unsupported x/w -> diagnostic + AST_REF_NULL.
 ast_ref
-ael_new_regex_operand(parse_context* ctx, uint32_t pat_off, uint32_t pat_sz,
+ael_new_regex_operand(ael_context* ctx, uint32_t pat_off, uint32_t pat_sz,
 		uint32_t flag_off, uint32_t flag_sz)
 {
 	uint64_t flags;
@@ -2000,7 +2042,7 @@ ael_new_regex_operand(parse_context* ctx, uint32_t pat_off, uint32_t pat_sz,
 //       operands) as a new AST_PATH_CTX; AST_REF_NULL if any seg is not a
 //       single-select primitive-literal selector.
 static ast_ref
-clone_single_select_ctx(parse_context* ctx, ast_ref src_ctx)
+clone_single_select_ctx(ael_context* ctx, ast_ref src_ctx)
 {
 	ast_pool* pool = ctx->pool;
 	ast_node* src_cxn = ast_pool_at(pool, src_ctx);
@@ -2015,9 +2057,19 @@ clone_single_select_ctx(parse_context* ctx, ast_ref src_ctx)
 	const ast_node* canon = (src_bin->type == AST_BIN_REF)
 			? ast_pool_at(pool, src_bin->u.bin_ref.bin)
 			: src_bin;
-	ast_ref new_bin = ast_new_bin(ctx, canon->offset, canon->u.bin.name_sz);
+	uint32_t ref_offset = ast_disp_offset(src_bin);
+	ast_ref new_bin = ast_new_bin(ctx, ref_offset, ref_offset + src_bin->sz,
+			canon->offset, canon->u.bin.name_sz);
 
 	AST_REF_CHECK_RET(new_bin, AST_REF_NULL);
+
+	// ast_new_bin anchors the ref on the NAME, then widens to the reference
+	// span -- but the widen is refused when the widen's start sits after the
+	// name (start > n->offset in ast_set_display_span), which is exactly the
+	// case here when src_bin is a later reference than the canonical mention.
+	// Stamp src_bin's span on directly: the clone stands in for src_bin, so it
+	// should highlight where src_bin was written.
+	ast_copy_span(pool, new_bin, src_cxn->u.ctx_list.head);
 
 	ast_ref dst_ctx = ast_new_path_ctx_bin(pool, new_bin);
 
@@ -2059,7 +2111,7 @@ clone_single_select_ctx(parse_context* ctx, ast_ref src_ctx)
 // alias. Rejects multi-select paths and non-primitive-literal operands
 // (dynamic positions need the future BIT_EVAL wire op).
 ast_ref
-ael_finalize_bit_mod_path(parse_context* ctx, ast_ref ctx_ref, ast_ref bit_fn)
+ael_finalize_bit_mod_path(ael_context* ctx, ast_ref ctx_ref, ast_ref bit_fn)
 {
 	cf_assert(ctx_ref != AST_REF_NULL && bit_fn != AST_REF_NULL, AS_EXP,
 			"ael_finalize_bit_mod_path: null operand");
@@ -2070,7 +2122,7 @@ ael_finalize_bit_mod_path(parse_context* ctx, ast_ref ctx_ref, ast_ref bit_fn)
 
 	if (cxn->u.ctx_list.count <= 1) {
 		ast_node* fp = ast_pool_at(ctx->pool, bit_fn);
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, fp->offset, fp->sz,
+		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(fp), fp->sz,
 				"bit-modify path must have at least one segment before the call");
 		return AST_REF_NULL;
 	}
@@ -2082,7 +2134,7 @@ ael_finalize_bit_mod_path(parse_context* ctx, ast_ref ctx_ref, ast_ref bit_fn)
 
 	if (! is_list_idx && ! is_map_key) {
 		ast_node* fp = ast_pool_at(ctx->pool, bit_fn);
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, fp->offset, fp->sz,
+		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(fp), fp->sz,
 				"bit-modify path leaf must be a single list index or map key — multi-select and non-position segs are not supported");
 		return AST_REF_NULL;
 	}
@@ -2094,7 +2146,7 @@ ael_finalize_bit_mod_path(parse_context* ctx, ast_ref ctx_ref, ast_ref bit_fn)
 
 	if (outer_pos == AST_REF_NULL) {
 		ast_node* fp = ast_pool_at(ctx->pool, bit_fn);
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, fp->offset, fp->sz,
+		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(fp), fp->sz,
 				"bit-modify path simulation requires a literal index or key (dynamic positions need the future BIT_EVAL op)");
 		return AST_REF_NULL;
 	}
@@ -2106,7 +2158,7 @@ ael_finalize_bit_mod_path(parse_context* ctx, ast_ref ctx_ref, ast_ref bit_fn)
 
 	if (inner_ctx == AST_REF_NULL) {
 		ast_node* fp = ast_pool_at(ctx->pool, bit_fn);
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, fp->offset, fp->sz,
+		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(fp), fp->sz,
 				"bit-modify path simulation requires single-select segs with literal positions (deeper / dynamic paths need the future BIT_EVAL op)");
 		return AST_REF_NULL;
 	}
@@ -2158,7 +2210,7 @@ ael_finalize_bit_mod_path(parse_context* ctx, ast_ref ctx_ref, ast_ref bit_fn)
 
 // Generic 0-3 arg builder. a1/a2/a3 may be AST_REF_NULL.
 ast_ref
-ael_new_hll_fn(parse_context* ctx, ast_node_t pf_type, ast_ref a1, ast_ref a2,
+ael_new_hll_fn(ael_context* ctx, ast_node_t pf_type, ast_ref a1, ast_ref a2,
 		ast_ref a3)
 {
 	ast_ref r = ast_new_cdt_op(ctx->pool, pf_type);
@@ -2182,7 +2234,7 @@ ael_new_hll_fn(parse_context* ctx, ast_node_t pf_type, ast_ref a1, ast_ref a2,
 // hll_parse_hlls accepts either a list or a single HLL value. For
 // MAY_CONTAIN, the operand is a list of arbitrary values — pin to LIST.
 ast_ref
-ael_new_hll_set_fn(parse_context* ctx, ast_node_t pf_type, ast_ref arg)
+ael_new_hll_set_fn(ael_context* ctx, ast_node_t pf_type, ast_ref arg)
 {
 	cf_assert(arg != AST_REF_NULL, AS_EXP, "ael_new_hll_set_fn: null operand");
 
@@ -2218,7 +2270,7 @@ ael_new_hll_set_fn(parse_context* ctx, ast_node_t pf_type, ast_ref arg)
 
 // hllInit(indexBits: INT [, minHashBits: INT])
 ast_ref
-ael_new_hll_init(parse_context* ctx, ast_ref index_bits, ast_ref min_hash_bits)
+ael_new_hll_init(ael_context* ctx, ast_ref index_bits, ast_ref min_hash_bits)
 {
 	cf_assert(index_bits != AST_REF_NULL, AS_EXP,
 			"ael_new_hll_init: null operand");
@@ -2235,7 +2287,7 @@ ael_new_hll_init(parse_context* ctx, ast_ref index_bits, ast_ref min_hash_bits)
 
 // hllAdd(list [, indexBits: INT [, minHashBits: INT]])
 ast_ref
-ael_new_hll_add(parse_context* ctx, ast_ref list, ast_ref index_bits,
+ael_new_hll_add(ael_context* ctx, ast_ref list, ast_ref index_bits,
 		ast_ref min_hash_bits)
 {
 	cf_assert(list != AST_REF_NULL, AS_EXP, "ael_new_hll_add: null operand");
@@ -2280,7 +2332,7 @@ hll_result_etype(ast_node_t pf_type)
 }
 
 ast_ref
-ael_finalize_hll_call(parse_context* ctx, ast_ref recv, ast_ref hll_fn)
+ael_finalize_hll_call(ael_context* ctx, ast_ref recv, ast_ref hll_fn)
 {
 	cf_assert(recv != AST_REF_NULL && hll_fn != AST_REF_NULL, AS_EXP,
 			"ael_finalize_hll_call: null operand");
@@ -2300,8 +2352,7 @@ ael_finalize_hll_call(parse_context* ctx, ast_ref recv, ast_ref hll_fn)
 	fp->u.cdt_op.is_modify = is_modify;
 	fp->etype = result_etype;
 
-	// Fold any :PROPERTY flags into the wire chain now (fp may move on the
-	// pool realloc inside this call — don't touch fp afterwards).
+	// Fold any :PROPERTY flags into the wire chain now.
 	ael_hll_materialize_flags(ctx, hll_fn);
 
 	// Wrap in AST_PATH_CALL{stype=EXP_CALL_HLL [|MODIFY_LOCAL]}.
@@ -2316,6 +2367,8 @@ ael_finalize_hll_call(parse_context* ctx, ast_ref recv, ast_ref hll_fn)
 	pcp->u.call.call_op = hll_fn;
 	pcp->etype = result_etype;
 	pcp->has_deferable = ast_pool_at(ctx->pool, recv)->has_deferable;
+
+	ael_span_call(ctx, pc_ref, recv);
 
 	return pc_ref;
 }
@@ -2336,7 +2389,7 @@ ael_finalize_hll_call(parse_context* ctx, ast_ref recv, ast_ref hll_fn)
 // --- argument-list construction (grammar actions) ---
 
 ast_ref
-ael_new_named_arg(parse_context* ctx, uint32_t name_offset, uint32_t name_sz,
+ael_new_named_arg(ael_context* ctx, uint32_t name_offset, uint32_t name_sz,
 		ast_ref value)
 {
 	ast_ref r = ast_new(ctx->pool, AST_ARG);
@@ -2350,14 +2403,14 @@ ael_new_named_arg(parse_context* ctx, uint32_t name_offset, uint32_t name_sz,
 }
 
 ast_ref
-ael_new_positional_arg(parse_context* ctx, ast_ref value)
+ael_new_positional_arg(ael_context* ctx, ast_ref value)
 {
 	// name_sz == 0 marks a positional argument.
 	return ael_new_named_arg(ctx, 0, 0, value);
 }
 
 ast_ref
-ael_new_arg_list(parse_context* ctx, ast_ref arg)
+ael_new_arg_list(ael_context* ctx, ast_ref arg)
 {
 	ast_ref r = ast_new(ctx->pool, AST_ARG_LIST);
 	ast_node* n = ast_pool_at(ctx->pool, r);
@@ -2370,13 +2423,13 @@ ael_new_arg_list(parse_context* ctx, ast_ref arg)
 }
 
 ast_ref
-ael_new_empty_arg_list(parse_context* ctx)
+ael_new_empty_arg_list(ael_context* ctx)
 {
 	return ael_new_arg_list(ctx, AST_REF_NULL);
 }
 
 ast_ref
-ael_append_arg(parse_context* ctx, ast_ref list, ast_ref arg)
+ael_append_arg(ael_context* ctx, ast_ref list, ast_ref arg)
 {
 	if (list == AST_REF_NULL || arg == AST_REF_NULL) {
 		return list;
@@ -2405,12 +2458,12 @@ ael_append_arg(parse_context* ctx, ast_ref list, ast_ref arg)
 // pre:  ref is a bound arg operand (the bit `signed:` slot).
 // post: *out = 0/1 and true for a bool literal; else false + a diagnostic.
 static bool
-ael_arg_bool(parse_context* ctx, ast_ref ref, int* out)
+ael_arg_bool(ael_context* ctx, ast_ref ref, int* out)
 {
 	ast_node* n = ast_pool_at(ctx->pool, ref);
 
 	if (n->type != AST_BOOL) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, n->offset, n->sz,
+		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(n), n->sz,
 				"signed must be a boolean literal (true or false)");
 		return false;
 	}
@@ -2431,8 +2484,8 @@ ael_arg_bool(parse_context* ctx, ast_ref ref, int* out)
 //       returns true; else false + a diagnostic on an arity / naming /
 //       ordering error.
 static bool
-ael_bind_args(parse_context* ctx, const ael_func_spec_t* spec,
-		uint32_t fname_off, uint32_t fname_sz, ast_ref arg_list, ast_ref* slots)
+ael_bind_args(ael_context* ctx, const ael_func_spec_t* spec, uint32_t fname_off,
+		uint32_t fname_sz, ast_ref arg_list, ast_ref* slots)
 {
 	// slots[] is AEL_MAX_PARAMS deep and every loop below indexes by
 	// param_count — a table row wider than that would overrun it. The table
@@ -2498,7 +2551,7 @@ ael_bind_args(parse_context* ctx, const ael_func_spec_t* spec,
 				const ast_node* vp = ast_pool_at(ctx->pool, an->u.arg.value);
 				const ast_node* anchor = vp != NULL ? vp : an;
 
-				ael_diag_add(&ctx->diags, AEL_SEV_ERROR, anchor->offset,
+				ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(anchor),
 						anchor->sz, "positional argument after named argument");
 				return false;
 			}
@@ -2554,7 +2607,7 @@ ael_bind_args(parse_context* ctx, const ael_func_spec_t* spec,
 // post: an AST func node (func1 for arity 1, func2 for arity 2) with the
 //       spec's param / result etypes.
 static ast_ref
-ael_build_scalar(parse_context* ctx, const ael_func_spec_t* spec, ast_ref* slots)
+ael_build_scalar(ael_context* ctx, const ael_func_spec_t* spec, ast_ref* slots)
 {
 	if (spec->param_count == 1) {
 		return ast_new_func1(ctx, spec->ast_type, slots[0],
@@ -2572,7 +2625,7 @@ ael_build_scalar(parse_context* ctx, const ael_func_spec_t* spec, ast_ref* slots
 // post: an n-ary fold of the args (all pinned params[0].etype); AST_REF_NULL +
 //       a diagnostic on a named arg or too few args.
 static ast_ref
-ael_build_variadic(parse_context* ctx, const ael_func_spec_t* spec,
+ael_build_variadic(ael_context* ctx, const ael_func_spec_t* spec,
 		uint32_t fname_off, uint32_t fname_sz, ast_ref arg_list)
 {
 	// The seed below merges the first two args, so a variadic spec must
@@ -2626,7 +2679,7 @@ ael_build_variadic(parse_context* ctx, const ael_func_spec_t* spec,
 // post: the AST_PATH_FUNC_BIT_* transient (via ael_new_bit_*); AST_REF_NULL +
 //       a diagnostic on a bad `signed:` literal.
 static ast_ref
-ael_build_bit(parse_context* ctx, const ael_func_spec_t* spec, ast_ref* slots)
+ael_build_bit(ael_context* ctx, const ael_func_spec_t* spec, ast_ref* slots)
 {
 	switch (spec->ast_type) {
 	case AST_PATH_FUNC_BIT_GET:
@@ -2690,7 +2743,7 @@ ael_build_bit(parse_context* ctx, const ael_func_spec_t* spec, ast_ref* slots)
 // post: the AST_PATH_FUNC_HLL_* transient (via ael_new_hll_*); AST_REF_NULL +
 //       a diagnostic on minHashBits without indexBits.
 static ast_ref
-ael_build_hll(parse_context* ctx, const ael_func_spec_t* spec, ast_ref* slots)
+ael_build_hll(ael_context* ctx, const ael_func_spec_t* spec, ast_ref* slots)
 {
 	switch (spec->ast_type) {
 	case AST_PATH_FUNC_HLL_COUNT:
@@ -2714,8 +2767,8 @@ ael_build_hll(parse_context* ctx, const ael_func_spec_t* spec, ast_ref* slots)
 		if (slots[2] != AST_REF_NULL && slots[1] == AST_REF_NULL) {
 			ast_node* mh = ast_pool_at(ctx->pool, slots[2]);
 
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, mh->offset, mh->sz,
-					"minHashBits requires indexBits");
+			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(mh),
+					mh->sz, "minHashBits requires indexBits");
 			return AST_REF_NULL;
 		}
 
@@ -2735,7 +2788,7 @@ ael_build_hll(parse_context* ctx, const ael_func_spec_t* spec, ast_ref* slots)
 //       compile-time GEOJSON const; AST_REF_NULL + a diagnostic on a bind
 //       error or a non-literal geoJson arg.
 static ast_ref
-ael_resolve_geo_fn(parse_context* ctx, const ael_func_spec_t* spec,
+ael_resolve_geo_fn(ael_context* ctx, const ael_func_spec_t* spec,
 		uint32_t name_off, uint32_t name_sz, ast_ref arg_list)
 {
 	ast_ref slots[AEL_MAX_PARAMS];
@@ -2771,7 +2824,7 @@ ael_resolve_geo_fn(parse_context* ctx, const ael_func_spec_t* spec,
 // pre:  acc / arg are AST refs; a failed sub-expr is null -> bail.
 // post: the append AST_PATH_CALL, or AST_REF_NULL to propagate a failure.
 static ast_ref
-ael_concat_append(parse_context* ctx, ast_ref acc, ast_ref arg)
+ael_concat_append(ael_context* ctx, ast_ref acc, ast_ref arg)
 {
 	if (acc == AST_REF_NULL || arg == AST_REF_NULL) {
 		return AST_REF_NULL;
@@ -2791,7 +2844,7 @@ ael_concat_append(parse_context* ctx, ast_ref acc, ast_ref arg)
 // post: emits "unknown function '<name>'", plus a "did you mean '<near>'?"
 //       hint when ael_func_suggest finds a close match.
 static void
-ael_diag_unknown_func(parse_context* ctx, uint32_t name_off, uint32_t name_sz)
+ael_diag_unknown_func(ael_context* ctx, uint32_t name_off, uint32_t name_sz)
 {
 	const char* suggest = ael_func_suggest(ctx->input + name_off, name_sz);
 
@@ -2807,7 +2860,7 @@ ael_diag_unknown_func(parse_context* ctx, uint32_t name_off, uint32_t name_sz)
 }
 
 ast_ref
-ael_resolve_func_call(parse_context* ctx, uint32_t name_off, uint32_t name_sz,
+ael_resolve_func_call(ael_context* ctx, uint32_t name_off, uint32_t name_sz,
 		ast_ref arg_list)
 {
 	const ael_func_spec_t* spec = ael_func_lookup(ctx->input + name_off, name_sz);
@@ -2847,8 +2900,8 @@ ael_resolve_func_call(parse_context* ctx, uint32_t name_off, uint32_t name_sz,
 //       optional, so skipping NULLs preserves wire order.
 // post: node etype = spec->result_etype, for ael_finalize_str_call.
 static ast_ref
-ael_build_str(parse_context* ctx, const ael_func_spec_t* spec,
-		uint32_t name_off, uint32_t name_sz, ast_ref* slots)
+ael_build_str(ael_context* ctx, const ael_func_spec_t* spec, uint32_t name_off,
+		uint32_t name_sz, ast_ref* slots)
 {
 	ast_ref r = ast_new_cdt_op(ctx->pool, spec->ast_type);
 
@@ -2867,8 +2920,7 @@ ael_build_str(parse_context* ctx, const ael_func_spec_t* spec,
 	ast_node* np = ast_pool_at(ctx->pool, r);
 
 	np->etype = spec->result_etype;
-	np->offset = name_off;
-	np->sz = (uint8_t)(name_sz > 255 ? 255 : name_sz);
+	ast_set_span(ctx->pool, r, name_off, name_sz);
 
 	return r;
 }
@@ -2880,7 +2932,7 @@ ael_build_str(parse_context* ctx, const ael_func_spec_t* spec,
 // pre:  slots[0..param_count) are all present (these ops have no optionals).
 // post: node etype = spec->result_etype, for ael_finalize_str_call.
 static ast_ref
-ael_build_str_list(parse_context* ctx, const ael_func_spec_t* spec,
+ael_build_str_list(ael_context* ctx, const ael_func_spec_t* spec,
 		uint32_t name_off, uint32_t name_sz, ast_ref* slots)
 {
 	ast_ref r = ast_new_cdt_op(ctx->pool, spec->ast_type);
@@ -2904,8 +2956,7 @@ ael_build_str_list(parse_context* ctx, const ael_func_spec_t* spec,
 	ast_node* np = ast_pool_at(ctx->pool, r);
 
 	np->etype = spec->result_etype;
-	np->offset = name_off;
-	np->sz = (uint8_t)(name_sz > 255 ? 255 : name_sz);
+	ast_set_span(ctx->pool, r, name_off, name_sz);
 
 	return r;
 }
@@ -2919,13 +2970,14 @@ ael_build_str_list(parse_context* ctx, const ael_func_spec_t* spec,
 // post: node etype = STR (modify); AST_REF_NULL + diag if pattern isn't a
 //       literal.
 static ast_ref
-ael_build_regex_replace(parse_context* ctx, const ael_func_spec_t* spec,
+ael_build_regex_replace(ael_context* ctx, const ael_func_spec_t* spec,
 		uint32_t name_off, uint32_t name_sz, ast_ref* slots)
 {
 	ast_node* pat_arg = ast_pool_at(ctx->pool, slots[0]);
 
 	if (pat_arg->type != AST_REGEX_LIT) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, pat_arg->offset, pat_arg->sz,
+		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(pat_arg),
+				pat_arg->sz,
 				"regexReplace pattern must be a regex literal (/pattern/flags)");
 		return AST_REF_NULL;
 	}
@@ -2954,15 +3006,14 @@ ael_build_regex_replace(parse_context* ctx, const ael_func_spec_t* spec,
 	ast_node* np = ast_pool_at(ctx->pool, r);
 
 	np->etype = spec->result_etype;
-	np->offset = name_off;
-	np->sz = (uint8_t)(name_sz > 255 ? 255 : name_sz);
+	ast_set_span(ctx->pool, r, name_off, name_sz);
 
 	ast_pool_release(ctx->pool, slots[0]); // AST_REGEX_LIT consumed
 
 	return r;
 }
 
-// CDT path functions (getKeys / set / count / asInt / ...) resolved by name
+// CDT path functions (getKeys / set / count / toInt / ...) resolved by name
 // from the func table. Builds the same AST_PATH_FUNC_* node the former keyword
 // rules built; the receiver attaches in the path finalizers. ael_bind_args
 // enforces arity and rejects named args (path rows are positional-only).
@@ -2970,7 +3021,7 @@ ael_build_regex_replace(parse_context* ctx, const ael_func_spec_t* spec,
 // post: the transient AST_PATH_FUNC_* node (cast wrapper or CDT op) stamped
 //       with the name span; AST_REF_NULL + a diagnostic on a bind error.
 static ast_ref
-ael_resolve_path_fn(parse_context* ctx, const ael_func_spec_t* spec,
+ael_resolve_path_fn(ael_context* ctx, const ael_func_spec_t* spec,
 		uint32_t name_off, uint32_t name_sz, ast_ref arg_list)
 {
 	ast_ref slots[AEL_MAX_PARAMS];
@@ -2980,9 +3031,7 @@ ael_resolve_path_fn(parse_context* ctx, const ael_func_spec_t* spec,
 	}
 
 	// Casts are NK_UNARY wrappers (ast_new); the rest are CDT ops.
-	ast_ref r = (spec->ast_type == AST_PATH_FUNC_CAST_INT ||
-						spec->ast_type == AST_PATH_FUNC_CAST_FLOAT ||
-						spec->ast_type == AST_PATH_FUNC_CAST_STRING)
+	ast_ref r = AEL_IS_CAST_TYPE(spec->ast_type)
 			? ast_new(ctx->pool, spec->ast_type)
 			: ast_new_cdt_op(ctx->pool, spec->ast_type);
 
@@ -2990,10 +3039,7 @@ ael_resolve_path_fn(parse_context* ctx, const ael_func_spec_t* spec,
 		AST_CHAIN_PUSH_TAIL(ctx->pool, r, slots[0]);
 	}
 
-	ast_node* np = ast_pool_at(ctx->pool, r);
-
-	np->offset = name_off;
-	np->sz = (uint8_t)(name_sz > 255 ? 255 : name_sz);
+	ast_set_span(ctx->pool, r, name_off, name_sz);
 
 	return r;
 }
@@ -3010,7 +3056,7 @@ ael_resolve_path_fn(parse_context* ctx, const ael_func_spec_t* spec,
 //       node stamped with the name span; AST_REF_NULL + a diagnostic on a
 //       bind error (scope still popped).
 static ast_ref
-ael_resolve_modify_fn(parse_context* ctx, const ael_func_spec_t* spec,
+ael_resolve_modify_fn(ael_context* ctx, const ael_func_spec_t* spec,
 		uint32_t name_off, uint32_t name_sz, ast_ref arg_list)
 {
 	ael_filter_scope_pop(ctx);
@@ -3022,10 +3068,8 @@ ael_resolve_modify_fn(parse_context* ctx, const ael_func_spec_t* spec,
 	}
 
 	ast_ref r = ael_new_modify(ctx, slots[0], false);
-	ast_node* np = ast_pool_at(ctx->pool, r);
 
-	np->offset = name_off;
-	np->sz = (uint8_t)(name_sz > 255 ? 255 : name_sz);
+	ast_set_span(ctx->pool, r, name_off, name_sz);
 
 	return r;
 }
@@ -3034,7 +3078,7 @@ ael_resolve_modify_fn(parse_context* ctx, const ael_func_spec_t* spec,
 // MODIFY functions to a transient op node; the receiver attaches in
 // ael_finalize_method_call*. SCALAR names error here.
 ast_ref
-ael_resolve_method_fn(parse_context* ctx, uint32_t name_off, uint32_t name_sz,
+ael_resolve_method_fn(ael_context* ctx, uint32_t name_off, uint32_t name_sz,
 		ast_ref arg_list)
 {
 	const ael_func_spec_t* spec = ael_func_lookup(ctx->input + name_off, name_sz);
@@ -3095,7 +3139,7 @@ ael_resolve_method_fn(parse_context* ctx, uint32_t name_off, uint32_t name_sz,
 // func/method-chain result); ael_build_value_func enforces the value-recv
 // restrictions (rejects .exists() / .type() / multi-select getters).
 ast_ref
-ael_finalize_method_call(parse_context* ctx, ast_ref recv, ast_ref method_fn)
+ael_finalize_method_call(ael_context* ctx, ast_ref recv, ast_ref method_fn)
 {
 	if (recv == AST_REF_NULL || method_fn == AST_REF_NULL) {
 		return AST_REF_NULL;
@@ -3110,7 +3154,7 @@ ael_finalize_method_call(parse_context* ctx, ast_ref recv, ast_ref method_fn)
 	// path to select over, so reject. Was a syntax error under the keyword
 	// grammar; now a clearer semantic diagnostic.
 	if (t == AST_PATH_FUNC_MODIFY) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, fp->offset, fp->sz,
+		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(fp), fp->sz,
 				"modify requires a path with at least one segment");
 		return AST_REF_NULL;
 	}
@@ -3136,7 +3180,7 @@ ael_finalize_method_call(parse_context* ctx, ast_ref recv, ast_ref method_fn)
 // grammar keeps bin_base distinct from value receivers because parens are
 // transparent ($.x vs ($.x) reduce to the same node) yet must differ here.
 ast_ref
-ael_finalize_method_call_bin(parse_context* ctx, ast_ref recv, ast_ref method_fn)
+ael_finalize_method_call_bin(ael_context* ctx, ast_ref recv, ast_ref method_fn)
 {
 	if (recv == AST_REF_NULL || method_fn == AST_REF_NULL) {
 		return AST_REF_NULL;
@@ -3160,7 +3204,7 @@ ael_finalize_method_call_bin(parse_context* ctx, ast_ref recv, ast_ref method_fn
 //       type to cast / whole-collection / leaf-consuming / SELECT paths);
 //       AST_REF_NULL + a diagnostic on an inapplicable verb (e.g. type()).
 static ast_ref
-ael_finalize_path_on_ctx(parse_context* ctx, ast_ref ctx_ref, ast_ref pf)
+ael_finalize_path_on_ctx(ael_context* ctx, ast_ref ctx_ref, ast_ref pf)
 {
 	ast_node_t t = ast_pool_at(ctx->pool, pf)->type;
 
@@ -3170,14 +3214,13 @@ ael_finalize_path_on_ctx(parse_context* ctx, ast_ref ctx_ref, ast_ref pf)
 	if (t == AST_PATH_FUNC_TYPE) {
 		const ast_node* pfp = ast_pool_at(ctx->pool, pf);
 
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, pfp->offset, pfp->sz,
+		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(pfp), pfp->sz,
 				"type() requires a bare bin reference");
 		return AST_REF_NULL;
 	}
 
-	// asInt() / asFloat() / toString() — wrap the navigated value, no leaf seg.
-	if (t == AST_PATH_FUNC_CAST_INT || t == AST_PATH_FUNC_CAST_FLOAT ||
-			t == AST_PATH_FUNC_CAST_STRING) {
+	// toInt() / toFloat() / toString() — wrap the navigated value, no leaf seg.
+	if (AEL_IS_CAST_TYPE(t)) {
 		return ael_finalize_cast(ctx, ctx_ref, pf);
 	}
 
@@ -3216,8 +3259,7 @@ ael_finalize_path_on_ctx(parse_context* ctx, ast_ref ctx_ref, ast_ref pf)
 // ael_finalize_bit_mod_path; hll-modify on a path is unsupported; bit reads
 // fold the path into a value-producing receiver.
 ast_ref
-ael_finalize_method_call_path(parse_context* ctx, ast_ref ctx_ref,
-		ast_ref method_fn)
+ael_finalize_method_call_path(ael_context* ctx, ast_ref ctx_ref, ast_ref method_fn)
 {
 	if (ctx_ref == AST_REF_NULL || method_fn == AST_REF_NULL) {
 		return AST_REF_NULL;
@@ -3241,7 +3283,7 @@ ael_finalize_method_call_path(parse_context* ctx, ast_ref ctx_ref,
 	// reject rather than fall through to the bit finalizer, which would stamp a
 	// string opcode into a BIT_OP node (corrupt wire).
 	if (AEL_IS_STR_TYPE(fp->type)) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, fp->offset, fp->sz,
+		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(fp), fp->sz,
 				"string functions require a bare bin or value receiver ($.bin.fn() or (expr).fn())");
 		return AST_REF_NULL;
 	}
@@ -3250,7 +3292,7 @@ ael_finalize_method_call_path(parse_context* ctx, ast_ref ctx_ref,
 
 	if (AEL_IS_HLL_TYPE(fp->type)) {
 		if (is_modify) {
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, fp->offset, fp->sz,
+			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(fp), fp->sz,
 					"hll modify on a nested path is not supported — use a bin-direct receiver");
 			return AST_REF_NULL;
 		}
@@ -3279,14 +3321,13 @@ ael_finalize_method_call_path(parse_context* ctx, ast_ref ctx_ref,
 // (NK_BINARY table entry).
 
 ast_ref
-ael_new_geo_literal(parse_context* ctx, uint32_t offset, uint32_t sz)
+ael_new_geo_literal(ael_context* ctx, uint32_t offset, uint32_t sz)
 {
 	ast_ref r = ast_new(ctx->pool, AST_GEO_LITERAL);
 	ast_node* n = ast_pool_at(ctx->pool, r);
 
 	n->etype = AST_ETYPE_GEOJSON;
-	n->offset = offset;
-	n->sz = (sz > 255) ? 255 : (uint8_t)sz;
+	ast_set_span(ctx->pool, r, offset, sz);
 	n->u.str.str = ctx->input + offset;
 	n->u.str.sz = sz;
 
@@ -3294,7 +3335,7 @@ ael_new_geo_literal(parse_context* ctx, uint32_t offset, uint32_t sz)
 }
 
 ast_ref
-ael_new_geo_compare(parse_context* ctx, ast_ref a, ast_ref b)
+ael_new_geo_compare(ael_context* ctx, ast_ref a, ast_ref b)
 {
 	cf_assert(a != AST_REF_NULL && b != AST_REF_NULL, AS_EXP,
 			"ael_new_geo_compare: null operand");
@@ -3311,7 +3352,7 @@ ael_new_geo_compare(parse_context* ctx, ast_ref a, ast_ref b)
 // path expressions — .select() helpers
 
 ast_ref
-ael_new_select(parse_context* ctx, as_cdt_select_flags sel_type, bool nofail)
+ael_new_select(ael_context* ctx, as_cdt_select_flags sel_type, bool nofail)
 {
 	ast_ref r = ast_new(ctx->pool, AST_PATH_FUNC_SELECT);
 	ast_node* n = ast_pool_at(ctx->pool, r);
@@ -3342,7 +3383,7 @@ ael_new_select(parse_context* ctx, as_cdt_select_flags sel_type, bool nofail)
 }
 
 ast_ref
-ael_finalize_select_call(parse_context* ctx, ast_ref ctx_ref, ast_ref pf)
+ael_finalize_select_call(ael_context* ctx, ast_ref ctx_ref, ast_ref pf)
 {
 	cf_assert(ctx_ref != AST_REF_NULL && pf != AST_REF_NULL, AS_EXP,
 			"ael_finalize_select_call: null operand");
@@ -3375,7 +3416,8 @@ ael_finalize_select_call(parse_context* ctx, ast_ref ctx_ref, ast_ref pf)
 		}
 
 		if (! has_plural) {
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, pfp->offset, pfp->sz,
+			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(pfp),
+					pfp->sz,
 					"path expression requires at least one wildcard / range segment");
 			return AST_REF_NULL;
 		}
@@ -3416,6 +3458,8 @@ ael_finalize_select_call(parse_context* ctx, ast_ref ctx_ref, ast_ref pf)
 	pcp->etype = pfp->etype;
 	pcp->has_deferable = ast_pool_at(ctx->pool, bin)->has_deferable;
 
+	ael_span_call(ctx, pc_ref, ctx_ref);
+
 	return pc_ref;
 }
 
@@ -3429,9 +3473,8 @@ ael_finalize_select_call(parse_context* ctx, ast_ref ctx_ref, ast_ref pf)
 //       (u.call.ctx = recv directly, no AST_PATH_CTX); recv pinned to
 //       recv_etype unless AUTO.
 static ast_ref
-build_value_cdt_call(parse_context* ctx, ast_ref recv, ast_ref pf,
-		int cdt_op_code, bool is_modify, ast_etype recv_etype,
-		ast_etype result_etype)
+build_value_cdt_call(ael_context* ctx, ast_ref recv, ast_ref pf, int cdt_op_code,
+		bool is_modify, ast_etype recv_etype, ast_etype result_etype)
 {
 	ast_node* pfp = ast_pool_at(ctx->pool, pf);
 
@@ -3463,19 +3506,22 @@ build_value_cdt_call(parse_context* ctx, ast_ref recv, ast_ref pf,
 	pcp->etype = result_etype;
 	pcp->has_deferable = ast_pool_at(ctx->pool, recv)->has_deferable;
 
+	ael_span_call(ctx, pc_ref, recv);
+
 	return pc_ref;
 }
 
-// .asInt() takes FLOAT, produces INT; .asFloat() takes INT, produces FLOAT.
-// Pin the receiver to the required source type so untyped operands narrow and
-// conflicting `:T` pins surface as AST_ETYPE_ERROR at the post-parse check.
+// toInt() / toFloat() take an INT | FLOAT | STRING operand (the concrete op is
+// picked from the resolved type in ael_dispatch_to_cast); toString() produces a
+// STRING. Pin the receiver to the cast's source type so untyped operands narrow
+// and conflicting `:T` pins surface as AST_ETYPE_ERROR at the post-parse check.
 // is_bin selects the bin-aware setter.
-// pre:  recv is the cast receiver; pf is an asInt / asFloat / toString node;
+// pre:  recv is the cast receiver; pf is a toInt / toFloat / toString node;
 //       is_bin marks a bin receiver (vs a value expr).
 // post: recv pinned to the cast's source type (via ael_cast_types) and pf's
 //       unary operand set to recv; pf etype = the target.
 static ast_ref
-finish_cast(parse_context* ctx, ast_ref recv, ast_ref pf, bool is_bin)
+finish_cast(ael_context* ctx, ast_ref recv, ast_ref pf, bool is_bin)
 {
 	ast_node* pfp = ast_pool_at(ctx->pool, pf);
 	ast_etype src_type;
@@ -3497,7 +3543,7 @@ finish_cast(parse_context* ctx, ast_ref recv, ast_ref pf, bool is_bin)
 }
 
 ast_ref
-ael_build_value_func(parse_context* ctx, ast_ref recv, ast_ref pf)
+ael_build_value_func(ael_context* ctx, ast_ref recv, ast_ref pf)
 {
 	cf_assert(recv != AST_REF_NULL && pf != AST_REF_NULL, AS_EXP,
 			"ael_build_value_func: null operand");
@@ -3507,13 +3553,13 @@ ael_build_value_func(parse_context* ctx, ast_ref recv, ast_ref pf)
 
 	// Bin-specific ops — reject for value-recv with a clear hint.
 	if (pf_type == AST_PATH_FUNC_TYPE) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, pfp->offset, pfp->sz,
+		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(pfp), pfp->sz,
 				".type() requires a bare bin reference");
 		return AST_REF_NULL;
 	}
 
 	if (pf_type == AST_PATH_FUNC_EXISTS) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, pfp->offset, pfp->sz,
+		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(pfp), pfp->sz,
 				".exists() requires a bare bin reference");
 		return AST_REF_NULL;
 	}
@@ -3524,7 +3570,7 @@ ael_build_value_func(parse_context* ctx, ast_ref recv, ast_ref pf)
 			pf_type == AST_PATH_FUNC_GET_KEY_VALUES ||
 			pf_type == AST_PATH_FUNC_GET_TREE ||
 			pf_type == AST_PATH_FUNC_GET_MAPS) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, pfp->offset, pfp->sz,
+		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(pfp), pfp->sz,
 				"this path function requires a multi-select segment");
 		return AST_REF_NULL;
 	}
@@ -3533,14 +3579,13 @@ ael_build_value_func(parse_context* ctx, ast_ref recv, ast_ref pf)
 	// value receiver has none.
 	if (pf_type == AST_PATH_FUNC_GET_INDEXES ||
 			pf_type == AST_PATH_FUNC_GET_RANKS) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, pfp->offset, pfp->sz,
+		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(pfp), pfp->sz,
 				"getIndexes() / getRanks() require a path segment selecting element(s)");
 		return AST_REF_NULL;
 	}
 
-	// .asInt() / .asFloat() / .toString() — wrap recv in the cast unary.
-	if (pf_type == AST_PATH_FUNC_CAST_INT || pf_type == AST_PATH_FUNC_CAST_FLOAT ||
-			pf_type == AST_PATH_FUNC_CAST_STRING) {
+	// .toInt() / .toFloat() / .toString() — wrap recv in the cast unary.
+	if (AEL_IS_CAST_TYPE(pf_type)) {
 		return finish_cast(ctx, recv, pf, false);
 	}
 
@@ -3579,8 +3624,8 @@ ael_build_value_func(parse_context* ctx, ast_ref recv, ast_ref pf)
 		bool is_list = recv_etype == AST_ETYPE_LIST;
 
 		if (! is_map && ! is_list) {
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, pfp->offset, pfp->sz,
-					".clear() requires a LIST or MAP-typed receiver");
+			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(pfp),
+					pfp->sz, ".clear() requires a LIST or MAP-typed receiver");
 			return AST_REF_NULL;
 		}
 
@@ -3590,13 +3635,13 @@ ael_build_value_func(parse_context* ctx, ast_ref recv, ast_ref pf)
 	}
 
 	// Other path-funcs not supported on value-recv — emit a generic diag.
-	ael_diag_add(&ctx->diags, AEL_SEV_ERROR, pfp->offset, pfp->sz,
+	ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(pfp), pfp->sz,
 			"path function not supported on parenthesized-expression receiver");
 	return AST_REF_NULL;
 }
 
 ast_ref
-ael_build_bin_func(parse_context* ctx, ast_ref bin, ast_ref pf)
+ael_build_bin_func(ael_context* ctx, ast_ref bin, ast_ref pf)
 {
 	cf_assert(bin != AST_REF_NULL && pf != AST_REF_NULL, AS_EXP,
 			"ael_build_bin_func: null operand");
@@ -3621,8 +3666,9 @@ ael_build_bin_func(parse_context* ctx, ast_ref bin, ast_ref pf)
 
 		ast_ref bt = ast_new(ctx->pool, AST_BIN_TYPE);
 		ast_node* btp = ast_pool_at(ctx->pool, bt);
-		btp->offset = canon->offset;
-		btp->sz = canon->sz;
+		// Adopt the reference's whole span, prefix reach-back included, so
+		// the query node's own offset lands on the name like the bin's does.
+		ast_copy_span(ctx->pool, bt, bin);
 		btp->u.bin_type.name_sz = canon->u.bin.name_sz;
 		btp->etype = AST_ETYPE_INT;
 
@@ -3630,10 +3676,8 @@ ael_build_bin_func(parse_context* ctx, ast_ref bin, ast_ref pf)
 		return bt;
 	}
 
-	if (pfp->type == AST_PATH_FUNC_CAST_INT ||
-			pfp->type == AST_PATH_FUNC_CAST_FLOAT ||
-			pfp->type == AST_PATH_FUNC_CAST_STRING) {
-		// .asInt() / .asFloat() / .toString() — wrap the bin in the cast unary.
+	if (AEL_IS_CAST_TYPE(pfp->type)) {
+		// .toInt() / .toFloat() / .toString() — wrap the bin in the cast unary.
 		return finish_cast(ctx, bin, pf, true);
 	}
 
@@ -3650,8 +3694,9 @@ ael_build_bin_func(parse_context* ctx, ast_ref bin, ast_ref pf)
 
 		ast_ref be = ast_new(ctx->pool, AST_BIN_EXISTS);
 		ast_node* bep = ast_pool_at(ctx->pool, be);
-		bep->offset = canon->offset;
-		bep->sz = canon->sz;
+		// Adopt the reference's whole span, prefix reach-back included, so
+		// the query node's own offset lands on the name like the bin's does.
+		ast_copy_span(ctx->pool, be, bin);
 		bep->u.bin_type.name_sz = canon->u.bin.name_sz;
 		bep->etype = AST_ETYPE_TRILEAN;
 
@@ -3669,7 +3714,7 @@ ael_build_bin_func(parse_context* ctx, ast_ref bin, ast_ref pf)
 // filter scope, *::field shorthand.
 
 ast_ref
-ael_new_modify(parse_context* ctx, ast_ref apply_expr, bool nofail)
+ael_new_modify(ael_context* ctx, ast_ref apply_expr, bool nofail)
 {
 	ast_ref r = ast_new(ctx->pool, AST_PATH_FUNC_MODIFY);
 	ast_node* n = ast_pool_at(ctx->pool, r);
@@ -3684,7 +3729,7 @@ ael_new_modify(parse_context* ctx, ast_ref apply_expr, bool nofail)
 }
 
 ast_ref
-ael_new_pselect_remove(parse_context* ctx, bool nofail)
+ael_new_pselect_remove(ael_context* ctx, bool nofail)
 {
 	ast_ref r = ast_new(ctx->pool, AST_PATH_FUNC_PSELECT_REMOVE);
 	ast_node* n = ast_pool_at(ctx->pool, r);
@@ -3703,7 +3748,7 @@ ael_new_pselect_remove(parse_context* ctx, bool nofail)
 // post: r is prepended to the matching scope root (at_root for @, key_root
 //       for @key); @index is a no-op (never chains, always pinned INT).
 static void
-loop_var_chain_push(parse_context* ctx, as_exp_builtin builtin, ast_ref r)
+loop_var_chain_push(ael_context* ctx, as_exp_builtin builtin, ast_ref r)
 {
 	ast_node* n = ast_pool_at(ctx->pool, r);
 
@@ -3718,8 +3763,8 @@ loop_var_chain_push(parse_context* ctx, as_exp_builtin builtin, ast_ref r)
 }
 
 ast_ref
-ael_new_loop_var(parse_context* ctx, as_exp_builtin builtin,
-		uint32_t tok_offset, uint32_t tok_sz)
+ael_new_loop_var(ael_context* ctx, as_exp_builtin builtin, uint32_t tok_offset,
+		uint32_t tok_sz)
 {
 	if (ctx->filter_depth == 0) {
 		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, tok_offset, tok_sz,
@@ -3738,7 +3783,7 @@ ael_new_loop_var(parse_context* ctx, as_exp_builtin builtin,
 }
 
 ast_ref
-ael_new_wild_filter_seg(parse_context* ctx, ast_ref filter_expr,
+ael_new_wild_filter_seg(ael_context* ctx, ast_ref filter_expr,
 		uint32_t body_offset, uint32_t body_sz)
 {
 	ast_ref r = ast_new(ctx->pool, AST_WILDCARD_SEG);
@@ -3752,8 +3797,8 @@ ael_new_wild_filter_seg(parse_context* ctx, ast_ref filter_expr,
 }
 
 ast_ref
-ael_extend_with_and_seg(parse_context* ctx, ast_ref ctx_ref,
-		ast_ref filter_expr, uint32_t body_offset, uint32_t body_sz)
+ael_extend_with_and_seg(ael_context* ctx, ast_ref ctx_ref, ast_ref filter_expr,
+		uint32_t body_offset, uint32_t body_sz)
 {
 	if (ctx_ref == AST_REF_NULL || filter_expr == AST_REF_NULL) {
 		return AST_REF_NULL;
@@ -3787,7 +3832,7 @@ ael_extend_with_and_seg(parse_context* ctx, ast_ref ctx_ref,
 }
 
 bool
-ael_filter_scope_push(parse_context* ctx)
+ael_filter_scope_push(ael_context* ctx)
 {
 	// Always increment so push/pop stay balanced even when a nested
 	// scope is rejected — the grammar's reduction action calls pop
@@ -3803,7 +3848,7 @@ ael_filter_scope_push(parse_context* ctx)
 }
 
 void
-ael_filter_scope_pop(parse_context* ctx)
+ael_filter_scope_pop(ael_context* ctx)
 {
 	if (ctx->filter_depth == 0) {
 		return; // shouldn't happen with balanced push/pop
@@ -3824,7 +3869,7 @@ ael_filter_scope_pop(parse_context* ctx)
 }
 
 void
-ael_check_when_cond(parse_context* ctx, ast_ref cond)
+ael_check_when_cond(ael_context* ctx, ast_ref cond)
 {
 	if (cond == AST_REF_NULL) {
 		return;
@@ -3836,7 +3881,7 @@ ael_check_when_cond(parse_context* ctx, ast_ref cond)
 
 	if (ast_type_resolved(cp->etype) && (cp->etype & AST_ETYPE_TRILEAN) == 0 &&
 			! cp->has_deferable) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, cp->offset, cp->sz,
+		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(cp), cp->sz,
 				"when case condition must be a boolean expression");
 	}
 }
@@ -3879,6 +3924,20 @@ ael_lex_error_msg(int tok)
 	}
 }
 
+// Move src's node body into dst's slot, keeping dst's sibling link. The
+// post-inference rewrites replace a node in place because the walk carries no
+// parent edge to repoint -- so the parent's existing downward ref stays valid.
+// src is left orphaned; the pool is bulk-destroyed, and both emitters resolve a
+// bin operand by name (not node identity), so a duplicated body is inert.
+static void
+ael_splice_node(ael_context* ctx, ast_ref dst, ast_ref src)
+{
+	ast_ref saved_next = ast_pool_at(ctx->pool, dst)->next;
+
+	*ast_pool_at(ctx->pool, dst) = *ast_pool_at(ctx->pool, src);
+	ast_pool_at(ctx->pool, dst)->next = saved_next;
+}
+
 // Lower a resolved-STR n-ary AST_ADD (a string `+`) in place to the concat
 // append-fold -- append(append(o1, o2), ...) -- the shape concat() produces, so
 // both emitters need zero string-add-specific emit code.
@@ -3886,10 +3945,26 @@ ael_lex_error_msg(int tok)
 // post: ref's slot holds the fold head, with its `next` preserved -- so the
 //       parent's downward ref still resolves and needs no relink.
 static void
-ael_lower_str_add(parse_context* ctx, ast_ref ref)
+ael_lower_str_add(ael_context* ctx, ast_ref ref)
 {
 	ast_node* np = ast_pool_at(ctx->pool, ref);
 	ast_ref head = ast_nmath_head(ctx->pool, np);
+
+	// ael_concat_append ends in ael_finalize_str_call, whose ael_span_call
+	// anchors a call's end at the parser lookahead. That only holds mid-parse;
+	// here parsing is over and the lookahead sits at end-of-source, so each
+	// fold would be spanned operand..EOF and a fault inside a nested string '+'
+	// would highlight the rest of the expression. Span each fold over the
+	// operand it absorbs, and put the AST_ADD's own span back after the splice.
+	// Capture it now - ael_splice_node overwrites the slot np points into.
+	//
+	// The operand alone, not receiver..operand: ast_nmath_merge flattens
+	// through the paren rule, so by here the source's bracketing is gone and a
+	// run computed from operand offsets can straddle one side of a paren pair.
+	// ('a' + 'b') + '\x80' would span the fold "'a' + 'b') + '\x80'". An
+	// operand's own span is a token or a paren-widened balanced group, so it is
+	// well formed by construction.
+	ast_span add_span = ast_get_span(ctx->pool, ref);
 
 	// Linearize the circular operand list (tail->next == head).
 	ast_pool_at(ctx->pool, np->u.nmath.tail)->next = AST_REF_NULL;
@@ -3900,177 +3975,141 @@ ael_lower_str_add(parse_context* ctx, ast_ref ref)
 	ast_pool_at(ctx->pool, head)->next = AST_REF_NULL; // detach the seed
 
 	while (arg != AST_REF_NULL) {
-		ast_ref next = ast_pool_at(ctx->pool, arg)->next;
+		ast_node* ap = ast_pool_at(ctx->pool, arg);
+		ast_ref next = ap->next;
 
-		ast_pool_at(ctx->pool, arg)->next = AST_REF_NULL;
+		// Read before the append - ael_concat_append allocates, which may move
+		// the pool out from under ap.
+		ast_span arg_span = ast_get_span(ctx->pool, arg);
+
+		ap->next = AST_REF_NULL;
 		acc = ael_concat_append(ctx, acc, arg);
 		cf_assert(acc != AST_REF_NULL, AS_EXP,
 				"string + lowering produced a null fold");
+
+		if (arg_span.sz != 0) {
+			ast_put_span(ctx->pool, acc, arg_span);
+		}
+
 		arg = next;
 	}
 
-	ast_ref saved_next = ast_pool_at(ctx->pool, ref)->next;
-
-	*ast_pool_at(ctx->pool, ref) = *ast_pool_at(ctx->pool, acc);
-	ast_pool_at(ctx->pool, ref)->next = saved_next;
+	ael_splice_node(ctx, ref, acc);
+	ast_put_span(ctx->pool, ref, add_span);
 }
 
-// Descend the live AST post-order and lower each resolved-STR `+` (AST_ADD) to
-// the concat fold. Mirrors ast_print's child descent -- keep the two in sync (a
-// missed child leaves a STR AST_ADD to hit the numeric-only emit). Only the
-// live tree is visited, so orphaned AST_ADD nodes left by n-ary merges (e.g.
-// ("a"+"b")+("c"+"d")) are never touched.
-// pre:  ref is a live-AST node or AST_REF_NULL; depth is the recursion depth.
-// post: every resolved-STR AST_ADD in ref's subtree is lowered in place.
+// Resolve a polymorphic toInt()/toFloat() (CAST_INT / CAST_FLOAT) from its
+// operand's now-final type: STRING parses (the AST_PATH_CALL / AST_STR_OP shape
+// ael_finalize_str_call builds); the cross numeric type casts, keeping CAST_INT
+// / CAST_FLOAT so the EXP_TO_* emit is unchanged; the target type itself is a
+// no-op, spliced away so neither emitter ever sees a pass-through node. A
+// still-multi-bit (unresolved) operand is an error -- an illegal concrete type
+// was already rejected by the AUTO_ADD pin in ael_finalize_cast / finish_cast.
+// pre:  ref is a CAST_INT / CAST_FLOAT node; its operand's etype is final.
+// post: ref's slot holds the resolved form, with its `next` preserved.
 static void
-ael_lower_str_concat(parse_context* ctx, ast_ref ref, uint32_t depth)
+ael_dispatch_to_cast(ael_context* ctx, ast_ref ref)
+{
+	ast_node* np = ast_pool_at(ctx->pool, ref);
+	ast_ref operand = np->u.unary.operand;
+	ast_node* op = ast_pool_at(ctx->pool, operand);
+
+	switch (op->etype) {
+	case AST_ETYPE_STR: {
+		ast_ref str_fn = ast_new_cdt_op(ctx->pool,
+				np->type == AST_PATH_FUNC_CAST_INT ? AST_PATH_FUNC_STR_TO_INT
+												   : AST_PATH_FUNC_STR_TO_FLOAT);
+
+		// The finalizer reads the result type off the transient node and the op
+		// code out of the node table, as it does for every other string method.
+		ast_pool_at(ctx->pool, str_fn)->etype = np->etype;
+		ast_set_span(ctx->pool, str_fn, ast_disp_offset(np), np->sz);
+
+		// ael_span_call, which the finalizer ends with, spans a call from its
+		// receiver to the parser's lookahead. That only holds mid-parse; here
+		// parsing is over and the lookahead sits at end-of-source, which would
+		// focus a fault in this call on the whole expression. Span it over
+		// receiver..cast instead.
+		uint32_t start = ast_disp_offset(ast_pool_at(ctx->pool, operand));
+		uint32_t end = ast_disp_offset(np) + np->sz;
+		ast_ref call = ael_finalize_str_call(ctx, operand, str_fn);
+
+		if (call != AST_REF_NULL && end > start) {
+			ast_set_span(ctx->pool, call, start, end - start);
+		}
+
+		ael_splice_node(ctx, ref, call);
+		break;
+	}
+	case AST_ETYPE_INT:
+	case AST_ETYPE_FLOAT:
+		if (op->etype == np->etype) {
+			ael_splice_node(ctx, ref, operand);
+		}
+		break;
+	default:
+		ael_diag_addf(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(np), np->sz,
+				"unresolved %s operand type, pin it with :INT, :FLOAT, or :STRING",
+				ast_node_table[np->type].name);
+		break;
+	}
+}
+
+// Descend the live AST post-order and apply the two post-inference rewrites
+// keyed on now-final types: resolve each polymorphic toInt()/toFloat() cast
+// (ael_dispatch_to_cast) and lower each resolved-STR `+` (AST_ADD) to the concat
+// fold. Descent comes from ast_children_foreach, so a node type that can carry a
+// subexpression is covered as soon as its table entry declares a kind -- a
+// hand-enumerated walk here previously missed AST_VAR_DEF values and the
+// func1/func2 args, leaving a cast unresolved to mis-emit as a numeric op over a
+// string operand. Only the live tree is visited, so orphaned AST_ADD nodes left
+// by n-ary merges (e.g. ("a"+"b")+("c"+"d")) are never touched.
+// pre:  ref is a live-AST node or AST_REF_NULL; depth is the recursion depth.
+// post: toInt/toFloat casts resolved and resolved-STR AST_ADDs lowered in place.
+static void ael_post_infer_rewrite(ael_context* ctx, ast_ref ref, uint32_t depth);
+
+typedef struct ael_rewrite_ctx_s {
+	ael_context* ctx;
+	uint32_t depth;
+} ael_rewrite_ctx;
+
+static void
+ael_post_infer_rewrite_cb(ast_pool* pool, ast_ref child, void* arg)
+{
+	(void)pool;
+
+	const ael_rewrite_ctx* rc = (const ael_rewrite_ctx*)arg;
+
+	ael_post_infer_rewrite(rc->ctx, child, rc->depth + 1);
+}
+
+static void
+ael_post_infer_rewrite(ael_context* ctx, ast_ref ref, uint32_t depth)
 {
 	if (ref == AST_REF_NULL || depth >= EXP_MAX_DEPTH) {
 		return;
 	}
 
+	// Children first - both rewrites key on an operand's final type.
+	ael_rewrite_ctx rc = { .ctx = ctx, .depth = depth };
+
+	ast_children_foreach(ctx->pool, ref, ael_post_infer_rewrite_cb, &rc);
+
+	// Re-read: read after the descent rather than holding a node pointer across
+	// it, since a rewrite splices over the node slot it replaces.
 	ast_node* np = ast_pool_at(ctx->pool, ref);
 
 	switch (np->type) {
-	case AST_CMP_EQ:
-	case AST_CMP_NE:
-	case AST_CMP_GT:
-	case AST_CMP_GE:
-	case AST_CMP_LT:
-	case AST_CMP_LE:
-	case AST_CMP_IN:
-	case AST_CMP_GEO:
-	case AST_SUB:
-	case AST_DIV:
-	case AST_MOD:
-	case AST_POW:
-	case AST_LSHIFT:
-	case AST_RSHIFT_ARITH:
-	case AST_RSHIFT_LOGIC:
-	case AST_MAP_KEY_RANGE:
-	case AST_MAP_INDEX_RANGE:
-	case AST_MAP_VALUE_RANGE:
-	case AST_MAP_RANK_RANGE:
-	case AST_LIST_INDEX_RANGE:
-	case AST_LIST_VALUE_RANGE:
-	case AST_LIST_RANK_RANGE:
-		ael_lower_str_concat(ctx, np->u.binary.left, depth + 1);
-		ael_lower_str_concat(ctx, np->u.binary.right, depth + 1);
-		break;
-
-	case AST_NOT:
-	case AST_BIT_NOT:
 	case AST_PATH_FUNC_CAST_INT:
 	case AST_PATH_FUNC_CAST_FLOAT:
-	case AST_PATH_FUNC_CAST_STRING:
-	case AST_PATH_FUNC_TYPE:
-		ael_lower_str_concat(ctx, np->u.unary.operand, depth + 1);
+		ael_dispatch_to_cast(ctx, ref);
 		break;
-
 	case AST_ADD:
-	case AST_MUL:
-	case AST_FUNC_MAX:
-	case AST_FUNC_MIN: {
-		ast_ref e = ast_nmath_head(ctx->pool, np);
-
-		for (uint32_t i = 0; i < np->u.nmath.count; i++) {
-			ast_ref next = ast_pool_at(ctx->pool, e)->next;
-
-			ael_lower_str_concat(ctx, e, depth + 1);
-			e = next;
-		}
-
-		if (np->type == AST_ADD && np->etype == AST_ETYPE_STR) {
+		if (np->etype == AST_ETYPE_STR) {
 			ael_lower_str_add(ctx, ref);
 		}
-
 		break;
-	}
-
-	case AST_AND:
-	case AST_OR:
-	case AST_BIT_AND:
-	case AST_BIT_OR:
-	case AST_BIT_XOR:
-	case AST_EXCLUSIVE:
-	case AST_LIST:
-	case AST_LET:
-	case AST_WHEN:
-		for (ast_ref e = np->u.list.head; e != AST_REF_NULL;
-				e = ast_pool_at(ctx->pool, e)->next) {
-			ael_lower_str_concat(ctx, e, depth + 1);
-		}
-		break;
-
-	case AST_MAP: {
-		ast_ref key = np->u.list.head;
-
-		for (uint32_t i = 0; i < np->u.list.count; i++) {
-			ast_ref val = ast_pool_at(ctx->pool, key)->next;
-
-			ael_lower_str_concat(ctx, key, depth + 1);
-			ael_lower_str_concat(ctx, val, depth + 1);
-			key = ast_pool_at(ctx->pool, val)->next;
-		}
-		break;
-	}
-
-	case AST_MAP_KEY_LIST:
-	case AST_MAP_VALUE_LIST:
-	case AST_LIST_VALUE_LIST:
-		for (ast_ref e = np->u.list.head; e != AST_REF_NULL;
-				e = ast_pool_at(ctx->pool, e)->next) {
-			ael_lower_str_concat(ctx, e, depth + 1);
-		}
-		break;
-
-	case AST_PATH_CTX:
-		for (ast_ref e = np->u.ctx_list.head; e != AST_REF_NULL;
-				e = ast_pool_at(ctx->pool, e)->next) {
-			ael_lower_str_concat(ctx, e, depth + 1);
-		}
-		break;
-
-	case AST_PATH_CALL:
-		ael_lower_str_concat(ctx, np->u.call.ctx, depth + 1);
-		ael_lower_str_concat(ctx, np->u.call.call_op, depth + 1);
-		break;
-
-	case AST_CASE:
-		ael_lower_str_concat(ctx, np->u.when_case.cond, depth + 1);
-		ael_lower_str_concat(ctx, np->u.when_case.result, depth + 1);
-		break;
-
-	case AST_MAP_KEY:
-	case AST_MAP_VALUE:
-	case AST_MAP_INDEX:
-	case AST_MAP_RANK:
-	case AST_LIST_INDEX:
-	case AST_LIST_VALUE:
-	case AST_LIST_RANK:
-		ael_lower_str_concat(ctx, ast_seg_operand(np), depth + 1);
-		break;
-
-	case AST_WILDCARD_SEG:
-	case AST_AND_EXP_SEG:
-		ael_lower_str_concat(ctx, np->u.by_exp_seg.filter, depth + 1);
-		break;
-
-	case AST_PATH_FUNC_SELECT:
-	case AST_PATH_FUNC_MODIFY:
-	case AST_PATH_FUNC_PSELECT_REMOVE:
-		ael_lower_str_concat(ctx, np->u.modify.value, depth + 1);
-		break;
-
 	default:
-		// Path-func / CDT / BIT / HLL / STR ops carry their args in the
-		// cdt_op chain; everything else is a leaf (bin / literal / loop var).
-		if (ast_node_table[np->type].kind == NK_CDT_OP) {
-			for (ast_ref e = ast_cdt_op_head(np); e != AST_REF_NULL;
-					e = ast_pool_at(ctx->pool, e)->next) {
-				ael_lower_str_concat(ctx, e, depth + 1);
-			}
-		}
 		break;
 	}
 }
@@ -4083,7 +4122,7 @@ ael_lower_str_concat(parse_context* ctx, ast_ref ref, uint32_t depth)
 // post: an unresolved bin / key adds a diagnostic to ctx->diags; on success
 //       the AST is ready for codegen.
 static void
-ael_finalize_parse(parse_context* ctx)
+ael_finalize_parse(ael_context* ctx)
 {
 	ast_pool* pool = ctx->pool;
 
@@ -4113,29 +4152,29 @@ ael_finalize_parse(parse_context* ctx)
 					// Conflict: surface regardless of allow_unresolved
 					// — a name-only-use exemption must not mask
 					// incompatible cross-narrowings.
-					ael_diag_add(&ctx->diags, AEL_SEV_ERROR, bp->offset,
-							bp->u.bin.name_sz,
+					ael_diag_add(&ctx->diags, AEL_SEV_ERROR,
+							ast_disp_offset(bp), bp->sz,
 							"bin type conflict — incompatible constraints from earlier narrowings");
 				}
 				else if (! bp->u.bin.allow_unresolved) {
 					if (bp->etype == AST_ETYPE_AUTO_NUMERIC) {
-						ael_diag_add(&ctx->diags, AEL_SEV_ERROR, bp->offset,
-								bp->u.bin.name_sz,
+						ael_diag_add(&ctx->diags, AEL_SEV_ERROR,
+								ast_disp_offset(bp), bp->sz,
 								"unresolved bin type, use $.bin:INT or $.bin:FLOAT");
 					}
 					else if (bp->etype == AST_ETYPE_AUTO_CDT) {
-						ael_diag_add(&ctx->diags, AEL_SEV_ERROR, bp->offset,
-								bp->u.bin.name_sz,
+						ael_diag_add(&ctx->diags, AEL_SEV_ERROR,
+								ast_disp_offset(bp), bp->sz,
 								"unresolved bin type, use $.bin:LIST or $.bin:MAP");
 					}
 					else if (bp->etype == AST_ETYPE_AUTO_ADD) {
-						ael_diag_add(&ctx->diags, AEL_SEV_ERROR, bp->offset,
-								bp->u.bin.name_sz,
+						ael_diag_add(&ctx->diags, AEL_SEV_ERROR,
+								ast_disp_offset(bp), bp->sz,
 								"unresolved bin type, use $.bin:STRING, $.bin:INT, or $.bin:FLOAT");
 					}
 					else {
-						ael_diag_add(&ctx->diags, AEL_SEV_ERROR, bp->offset,
-								bp->u.bin.name_sz,
+						ael_diag_add(&ctx->diags, AEL_SEV_ERROR,
+								ast_disp_offset(bp), bp->sz,
 								"unresolved bin type, pin with $.bin:T");
 					}
 				}
@@ -4154,7 +4193,8 @@ ael_finalize_parse(parse_context* ctx)
 			ast_node* kp = ast_pool_at(pool, kr);
 
 			if (! ast_type_resolved(kp->etype)) {
-				ael_diag_add(&ctx->diags, AEL_SEV_ERROR, kp->offset, kp->sz,
+				ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(kp),
+						kp->sz,
 						"unresolved key type, use $.key():INT, :STRING, or :BLOB");
 			}
 
@@ -4162,11 +4202,13 @@ ael_finalize_parse(parse_context* ctx)
 		}
 	}
 
-	// Types are final: lower every resolved-STR `+` (AST_ADD) to the concat
-	// fold. Guarded on no-error so a `+` chain that failed to resolve (and
-	// errored above) is not lowered against a broken tree.
+	// Types are final: run the rewrites that key on a resolved type — resolve
+	// the polymorphic toInt() / toFloat() casts and lower every resolved-STR
+	// `+` to the concat fold. Guarded on no-error so an operand or `+` chain
+	// that failed to resolve (and errored above) is not rewritten against a
+	// broken tree.
 	if (! ael_diag_has_error(&ctx->diags)) {
-		ael_lower_str_concat(ctx, ctx->root, 0);
+		ael_post_infer_rewrite(ctx, ctx->root, 0);
 	}
 }
 
@@ -4175,7 +4217,7 @@ ael_parse_with_depth(ast_pool* pool, const char* input, uint32_t input_sz,
 		uint8_t initial_filter_depth)
 {
 	ael_parse_result result = { .root = AST_REF_NULL };
-	parse_context ctx = {
+	ael_context ctx = {
 		.pool = pool,
 		.input = input,
 		.root = AST_REF_NULL,

@@ -183,7 +183,9 @@ typedef struct exp_op_value_float_s {
 typedef struct exp_rt_value_s {
 	exp_rt_type type;
 	uint8_t do_not_destroy;
-	uint16_t pad1;
+	// Spare header slot - carries the exp_err_reason when
+	// r_trilean == AS_EXP_ERROR (else unused).
+	uint16_t err_reason;
 
 	union {
 		as_bin r_bin;
@@ -200,7 +202,9 @@ typedef struct exp_rt_value_s {
 		exp_geo_compiled r_geo;
 
 		struct {
-			uint32_t pad2;
+			// Spare slot - carries the failing op's index when
+			// r_trilean == AS_EXP_ERROR (else unused).
+			uint32_t err_op_ix;
 
 			union {
 				as_exp_trilean r_trilean;
@@ -236,6 +240,21 @@ typedef struct exp_rt_bin_table_s {
 	exp_bin_name_entry table[];
 } exp_rt_bin_table;
 
+// Transient operand capture for the filter-decision explainer's
+// re-eval. The decisive comparison renders its operand values here (last FALSE
+// wins - a short-circuiting and evaluates only its deciding conjunct, so the
+// last-rendered pair belongs to the deciding comparison); the boundary attaches
+// them only if operands_ix matches the decisive op. Lives on the explainer's
+// stack, pointed at by exp_runtime.explain; NULL for a normal eval.
+typedef struct exp_explain_state_s {
+	bool operands_set;
+	uint32_t operands_ix; // op index the captured operands belong to
+	uint16_t lhs_len;
+	uint16_t rhs_len;
+	char lhs[AS_EXP_TRACE_OPERAND_MAX];
+	char rhs[AS_EXP_TRACE_OPERAND_MAX];
+} exp_explain_state;
+
 typedef struct exp_runtime_s {
 	const as_exp_ctx* ctx;
 	const uint8_t* instr_ptr;
@@ -243,6 +262,15 @@ typedef struct exp_runtime_s {
 	const exp_rt_bin_table* bin_table;
 	exp_rt_value vars_builtin[AS_EXP_BUILTIN_COUNT];
 	uint32_t op_ix;
+	// Output budget for exp_rt_display, in bytes; 0 means unbounded. Set by
+	// callers rendering into a fixed-size buffer (the error-detail snippet).
+	// A single op's render can be proportional to its operands, so nothing
+	// about the op stream bounds the output on its own.
+	uint32_t display_max_sz;
+	// Non-NULL only in the filter-decision explainer's re-eval.
+	// When set, ops record the decisive op index (via rt_mark_decisive) and the
+	// deciding comparison renders its operands here. NULL on the hot path.
+	exp_explain_state* explain;
 } exp_runtime;
 
 //==========================================================
@@ -352,3 +380,32 @@ void exp_rt_display(exp_runtime* rt, cf_dyn_buf* db);
 extern const uint8_t exp_call_eval_token[1];
 
 as_particle_type exp_rtype_to_particle_type(exp_rtype type);
+
+// AEL runtime source map: one entry per emitted op, indexed by the op's
+// preorder ordinal (the runtime op_ix), locating the AST node's [offset,
+// offset+sz) span in the retained AEL source. n_ops comes from the sizing
+// pass and is an upper bound (left-folded chains size per AST node, emit one
+// op); trailing entries stay zeroed and are never indexed - runtime op_ix is
+// always < the root op's instr_end_ix, the emitted count. Laid out in the
+// compiled buffer (as_exp.ael_map) by the build (exp.c) so a runtime
+// error-details trace (exp_rt.c) can render the true source slice instead of
+// an op-stream disassembly. AST offsets are 24-bit and spans clamp to 255
+// (ast_node), so an entry packs into 4 bytes.
+typedef struct ael_src_entry_s {
+	uint32_t offset : 24;
+	uint8_t sz;
+} __attribute__((__packed__)) ael_src_entry;
+
+COMPILER_ASSERT(sizeof(ael_src_entry) == 4);
+
+typedef struct ael_src_map_s {
+	const uint8_t* src; // the retained AEL source (== ael_buf)
+	uint32_t src_sz;
+	uint32_t n_ops;
+	ael_src_entry entries[];
+} ael_src_map;
+
+// Defined in exp.c (build side); exp_rt.c's eval-fault trace renders the
+// focus-marked AEL source slice with it.
+uint16_t exp_render_ael_src_snippet(const uint8_t* src, uint32_t src_sz,
+		uint32_t offset, uint32_t span, char* out, uint32_t cap);

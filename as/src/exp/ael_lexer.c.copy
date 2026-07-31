@@ -606,6 +606,7 @@ yy47:
 	switch (yych) {
 		case 0x00: goto yy41;
 		case 'I': goto yy114;
+		case 'O': goto yy115;
 		default: goto yy40;
 	}
 yy48:
@@ -613,7 +614,7 @@ yy48:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'A': goto yy115;
+		case 'A': goto yy116;
 		default: goto yy40;
 	}
 yy49:
@@ -621,7 +622,7 @@ yy49:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'I': goto yy116;
+		case 'I': goto yy117;
 		default: goto yy40;
 	}
 yy50:
@@ -629,7 +630,7 @@ yy50:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'T': goto yy117;
+		case 'T': goto yy118;
 		default: goto yy40;
 	}
 yy51:
@@ -637,7 +638,7 @@ yy51:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'E': goto yy118;
+		case 'E': goto yy119;
 		default: goto yy40;
 	}
 yy52:
@@ -647,7 +648,7 @@ yy52:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case '\'': goto yy119;
+		case '\'': goto yy120;
 		default: goto yy40;
 	}
 yy53:
@@ -656,32 +657,32 @@ yy53:
 	lex->marker = lex->cursor;
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
-		case '!': goto yy120;
-		case '#': goto yy122;
-		case '=': goto yy123;
-		case '?': goto yy124;
+		case '!': goto yy121;
+		case '#': goto yy123;
+		case '=': goto yy124;
+		case '?': goto yy125;
 		default: goto yy54;
 	}
 yy54:
 #line 373 "exp/ael_lexer.re"
 	{ return TOK_LBRACKET; }
-#line 669 "../../target/Linux-x86_64/gen/ael_lexer.c"
+#line 670 "../../target/Linux-x86_64/gen/ael_lexer.c"
 yy55:
 	++lex->cursor;
 #line 374 "exp/ael_lexer.re"
 	{ return TOK_RBRACKET; }
-#line 674 "../../target/Linux-x86_64/gen/ael_lexer.c"
+#line 675 "../../target/Linux-x86_64/gen/ael_lexer.c"
 yy56:
 	++lex->cursor;
 #line 369 "exp/ael_lexer.re"
 	{ return TOK_CARET; }
-#line 679 "../../target/Linux-x86_64/gen/ael_lexer.c"
+#line 680 "../../target/Linux-x86_64/gen/ael_lexer.c"
 yy57:
 	++lex->cursor;
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'n': goto yy125;
+		case 'n': goto yy126;
 		default: goto yy40;
 	}
 yy58:
@@ -697,7 +698,7 @@ yy59:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'e': goto yy126;
+		case 'e': goto yy127;
 		default: goto yy40;
 	}
 yy60:
@@ -705,8 +706,8 @@ yy60:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'r': goto yy127;
-		case 'x': goto yy128;
+		case 'r': goto yy128;
+		case 'x': goto yy129;
 		default: goto yy40;
 	}
 yy61:
@@ -714,7 +715,7 @@ yy61:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'a': goto yy129;
+		case 'a': goto yy130;
 		default: goto yy40;
 	}
 yy62:
@@ -722,7 +723,7 @@ yy62:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'n': goto yy130;
+		case 'n': goto yy131;
 		default: goto yy40;
 	}
 yy63:
@@ -730,8 +731,7 @@ yy63:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'e': goto yy132;
-		case 'o': goto yy133;
+		case 'e': goto yy133;
 		default: goto yy40;
 	}
 yy64:
@@ -1158,7 +1158,7 @@ yy115:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'P': goto yy175;
+		case 'C': goto yy175;
 		default: goto yy40;
 	}
 yy116:
@@ -1166,7 +1166,7 @@ yy116:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'L': goto yy177;
+		case 'P': goto yy176;
 		default: goto yy40;
 	}
 yy117:
@@ -1174,7 +1174,7 @@ yy117:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'R': goto yy179;
+		case 'L': goto yy178;
 		default: goto yy40;
 	}
 yy118:
@@ -1182,14 +1182,22 @@ yy118:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'C': goto yy180;
+		case 'R': goto yy180;
 		default: goto yy40;
 	}
 yy119:
 	++lex->cursor;
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
-		case '\'': goto yy181;
+		case 0x00: goto yy41;
+		case 'C': goto yy181;
+		default: goto yy40;
+	}
+yy120:
+	++lex->cursor;
+	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
+	switch (yych) {
+		case '\'': goto yy182;
 		case '0':
 		case '1':
 		case '2':
@@ -1211,52 +1219,44 @@ yy119:
 		case 'c':
 		case 'd':
 		case 'e':
-		case 'f': goto yy119;
+		case 'f': goto yy120;
 		default: goto yy77;
 	}
-yy120:
+yy121:
 	++lex->cursor;
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
-		case '#': goto yy182;
-		case '=': goto yy183;
-		default: goto yy121;
+		case '#': goto yy183;
+		case '=': goto yy184;
+		default: goto yy122;
 	}
-yy121:
+yy122:
 #line 355 "exp/ael_lexer.re"
 	{ return TOK_LBRACKET_BANG; }
-#line 1229 "../../target/Linux-x86_64/gen/ael_lexer.c"
-yy122:
+#line 1237 "../../target/Linux-x86_64/gen/ael_lexer.c"
+yy123:
 	++lex->cursor;
 #line 356 "exp/ael_lexer.re"
 	{ return TOK_LBRACKET_HASH; }
-#line 1234 "../../target/Linux-x86_64/gen/ael_lexer.c"
-yy123:
+#line 1242 "../../target/Linux-x86_64/gen/ael_lexer.c"
+yy124:
 	++lex->cursor;
 #line 353 "exp/ael_lexer.re"
 	{ return TOK_LBRACKET_EQ; }
-#line 1239 "../../target/Linux-x86_64/gen/ael_lexer.c"
-yy124:
-	++lex->cursor;
-	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
-	switch (yych) {
-		case '(': goto yy184;
-		default: goto yy77;
-	}
+#line 1247 "../../target/Linux-x86_64/gen/ael_lexer.c"
 yy125:
 	++lex->cursor;
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
-		case 0x00: goto yy41;
-		case 'd': goto yy185;
-		default: goto yy40;
+		case '(': goto yy185;
+		default: goto yy77;
 	}
 yy126:
 	++lex->cursor;
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'f': goto yy187;
+		case 'd': goto yy186;
 		default: goto yy40;
 	}
 yy127:
@@ -1264,7 +1264,7 @@ yy127:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'r': goto yy188;
+		case 'f': goto yy188;
 		default: goto yy40;
 	}
 yy128:
@@ -1272,7 +1272,7 @@ yy128:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'c': goto yy189;
+		case 'r': goto yy189;
 		default: goto yy40;
 	}
 yy129:
@@ -1280,10 +1280,18 @@ yy129:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'l': goto yy190;
+		case 'c': goto yy190;
 		default: goto yy40;
 	}
 yy130:
+	++lex->cursor;
+	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
+	switch (yych) {
+		case 0x00: goto yy41;
+		case 'l': goto yy191;
+		default: goto yy40;
+	}
+yy131:
 	++lex->cursor;
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
@@ -1350,26 +1358,18 @@ yy130:
 		case 'x':
 		case 'y':
 		case 'z': goto yy39;
-		default: goto yy131;
+		default: goto yy132;
 	}
-yy131:
+yy132:
 #line 138 "exp/ael_lexer.re"
 	{ return TOK_IN; }
-#line 1359 "../../target/Linux-x86_64/gen/ael_lexer.c"
-yy132:
-	++lex->cursor;
-	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
-	switch (yych) {
-		case 0x00: goto yy41;
-		case 't': goto yy191;
-		default: goto yy40;
-	}
+#line 1367 "../../target/Linux-x86_64/gen/ael_lexer.c"
 yy133:
 	++lex->cursor;
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'c': goto yy193;
+		case 't': goto yy192;
 		default: goto yy40;
 	}
 yy134:
@@ -2091,165 +2091,173 @@ yy175:
 	++lex->cursor;
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
-		case '0':
-		case '1':
-		case '2':
-		case '3':
-		case '4':
-		case '5':
-		case '6':
-		case '7':
-		case '8':
-		case '9':
-		case 'A':
-		case 'B':
-		case 'C':
-		case 'D':
-		case 'E':
-		case 'F':
-		case 'G':
-		case 'H':
-		case 'I':
-		case 'J':
-		case 'K':
-		case 'L':
-		case 'M':
-		case 'N':
-		case 'O':
-		case 'P':
-		case 'Q':
-		case 'R':
-		case 'S':
-		case 'T':
-		case 'U':
-		case 'V':
-		case 'W':
-		case 'X':
-		case 'Y':
-		case 'Z':
-		case '_':
-		case 'a':
-		case 'b':
-		case 'c':
-		case 'd':
-		case 'e':
-		case 'f':
-		case 'g':
-		case 'h':
-		case 'i':
-		case 'j':
-		case 'k':
-		case 'l':
-		case 'm':
-		case 'n':
-		case 'o':
-		case 'p':
-		case 'q':
-		case 'r':
-		case 's':
-		case 't':
-		case 'u':
-		case 'v':
-		case 'w':
-		case 'x':
-		case 'y':
-		case 'z': goto yy39;
-		default: goto yy176;
-	}
-yy176:
-#line 189 "exp/ael_lexer.re"
-	{ return TOK_TNAME_MAP; }
-#line 2163 "../../target/Linux-x86_64/gen/ael_lexer.c"
-yy177:
-	++lex->cursor;
-	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
-	switch (yych) {
-		case '0':
-		case '1':
-		case '2':
-		case '3':
-		case '4':
-		case '5':
-		case '6':
-		case '7':
-		case '8':
-		case '9':
-		case 'A':
-		case 'B':
-		case 'C':
-		case 'D':
-		case 'E':
-		case 'F':
-		case 'G':
-		case 'H':
-		case 'I':
-		case 'J':
-		case 'K':
-		case 'L':
-		case 'M':
-		case 'N':
-		case 'O':
-		case 'P':
-		case 'Q':
-		case 'R':
-		case 'S':
-		case 'T':
-		case 'U':
-		case 'V':
-		case 'W':
-		case 'X':
-		case 'Y':
-		case 'Z':
-		case '_':
-		case 'a':
-		case 'b':
-		case 'c':
-		case 'd':
-		case 'e':
-		case 'f':
-		case 'g':
-		case 'h':
-		case 'i':
-		case 'j':
-		case 'k':
-		case 'l':
-		case 'm':
-		case 'n':
-		case 'o':
-		case 'p':
-		case 'q':
-		case 'r':
-		case 's':
-		case 't':
-		case 'u':
-		case 'v':
-		case 'w':
-		case 'x':
-		case 'y':
-		case 'z': goto yy39;
-		default: goto yy178;
-	}
-yy178:
-#line 143 "exp/ael_lexer.re"
-	{ return TOK_NIL; }
-#line 2236 "../../target/Linux-x86_64/gen/ael_lexer.c"
-yy179:
-	++lex->cursor;
-	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
-	switch (yych) {
 		case 0x00: goto yy41;
-		case 'I': goto yy216;
+		case 'A': goto yy216;
 		default: goto yy40;
 	}
+yy176:
+	++lex->cursor;
+	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
+	switch (yych) {
+		case '0':
+		case '1':
+		case '2':
+		case '3':
+		case '4':
+		case '5':
+		case '6':
+		case '7':
+		case '8':
+		case '9':
+		case 'A':
+		case 'B':
+		case 'C':
+		case 'D':
+		case 'E':
+		case 'F':
+		case 'G':
+		case 'H':
+		case 'I':
+		case 'J':
+		case 'K':
+		case 'L':
+		case 'M':
+		case 'N':
+		case 'O':
+		case 'P':
+		case 'Q':
+		case 'R':
+		case 'S':
+		case 'T':
+		case 'U':
+		case 'V':
+		case 'W':
+		case 'X':
+		case 'Y':
+		case 'Z':
+		case '_':
+		case 'a':
+		case 'b':
+		case 'c':
+		case 'd':
+		case 'e':
+		case 'f':
+		case 'g':
+		case 'h':
+		case 'i':
+		case 'j':
+		case 'k':
+		case 'l':
+		case 'm':
+		case 'n':
+		case 'o':
+		case 'p':
+		case 'q':
+		case 'r':
+		case 's':
+		case 't':
+		case 'u':
+		case 'v':
+		case 'w':
+		case 'x':
+		case 'y':
+		case 'z': goto yy39;
+		default: goto yy177;
+	}
+yy177:
+#line 189 "exp/ael_lexer.re"
+	{ return TOK_TNAME_MAP; }
+#line 2171 "../../target/Linux-x86_64/gen/ael_lexer.c"
+yy178:
+	++lex->cursor;
+	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
+	switch (yych) {
+		case '0':
+		case '1':
+		case '2':
+		case '3':
+		case '4':
+		case '5':
+		case '6':
+		case '7':
+		case '8':
+		case '9':
+		case 'A':
+		case 'B':
+		case 'C':
+		case 'D':
+		case 'E':
+		case 'F':
+		case 'G':
+		case 'H':
+		case 'I':
+		case 'J':
+		case 'K':
+		case 'L':
+		case 'M':
+		case 'N':
+		case 'O':
+		case 'P':
+		case 'Q':
+		case 'R':
+		case 'S':
+		case 'T':
+		case 'U':
+		case 'V':
+		case 'W':
+		case 'X':
+		case 'Y':
+		case 'Z':
+		case '_':
+		case 'a':
+		case 'b':
+		case 'c':
+		case 'd':
+		case 'e':
+		case 'f':
+		case 'g':
+		case 'h':
+		case 'i':
+		case 'j':
+		case 'k':
+		case 'l':
+		case 'm':
+		case 'n':
+		case 'o':
+		case 'p':
+		case 'q':
+		case 'r':
+		case 's':
+		case 't':
+		case 'u':
+		case 'v':
+		case 'w':
+		case 'x':
+		case 'y':
+		case 'z': goto yy39;
+		default: goto yy179;
+	}
+yy179:
+#line 143 "exp/ael_lexer.re"
+	{ return TOK_NIL; }
+#line 2244 "../../target/Linux-x86_64/gen/ael_lexer.c"
 yy180:
 	++lex->cursor;
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'T': goto yy217;
+		case 'I': goto yy217;
 		default: goto yy40;
 	}
 yy181:
+	++lex->cursor;
+	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
+	switch (yych) {
+		case 0x00: goto yy41;
+		case 'T': goto yy218;
+		default: goto yy40;
+	}
+yy182:
 	++lex->cursor;
 #line 255 "exp/ael_lexer.re"
 	{
@@ -2265,23 +2273,23 @@ yy181:
 		val->str.sz = hex_sz;
 		return TOK_BLOB_LITERAL;
 	}
-#line 2269 "../../target/Linux-x86_64/gen/ael_lexer.c"
-yy182:
+#line 2277 "../../target/Linux-x86_64/gen/ael_lexer.c"
+yy183:
 	++lex->cursor;
 #line 357 "exp/ael_lexer.re"
 	{ return TOK_LBRACKET_BANG_HASH; }
-#line 2274 "../../target/Linux-x86_64/gen/ael_lexer.c"
-yy183:
+#line 2282 "../../target/Linux-x86_64/gen/ael_lexer.c"
+yy184:
 	++lex->cursor;
 #line 354 "exp/ael_lexer.re"
 	{ return TOK_LBRACKET_BANG_EQ; }
-#line 2279 "../../target/Linux-x86_64/gen/ael_lexer.c"
-yy184:
+#line 2287 "../../target/Linux-x86_64/gen/ael_lexer.c"
+yy185:
 	++lex->cursor;
 #line 339 "exp/ael_lexer.re"
 	{ return TOK_LBRACK_QPAREN; }
-#line 2284 "../../target/Linux-x86_64/gen/ael_lexer.c"
-yy185:
+#line 2292 "../../target/Linux-x86_64/gen/ael_lexer.c"
+yy186:
 	++lex->cursor;
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
@@ -2348,26 +2356,18 @@ yy185:
 		case 'x':
 		case 'y':
 		case 'z': goto yy39;
-		default: goto yy186;
+		default: goto yy187;
 	}
-yy186:
+yy187:
 #line 130 "exp/ael_lexer.re"
 	{ return TOK_AND; }
-#line 2357 "../../target/Linux-x86_64/gen/ael_lexer.c"
-yy187:
-	++lex->cursor;
-	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
-	switch (yych) {
-		case 0x00: goto yy41;
-		case 'a': goto yy218;
-		default: goto yy40;
-	}
+#line 2365 "../../target/Linux-x86_64/gen/ael_lexer.c"
 yy188:
 	++lex->cursor;
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'o': goto yy219;
+		case 'a': goto yy219;
 		default: goto yy40;
 	}
 yy189:
@@ -2375,7 +2375,7 @@ yy189:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'l': goto yy220;
+		case 'o': goto yy220;
 		default: goto yy40;
 	}
 yy190:
@@ -2383,10 +2383,18 @@ yy190:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 's': goto yy221;
+		case 'l': goto yy221;
 		default: goto yy40;
 	}
 yy191:
+	++lex->cursor;
+	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
+	switch (yych) {
+		case 0x00: goto yy41;
+		case 's': goto yy222;
+		default: goto yy40;
+	}
+yy192:
 	++lex->cursor;
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
@@ -2453,20 +2461,12 @@ yy191:
 		case 'x':
 		case 'y':
 		case 'z': goto yy39;
-		default: goto yy192;
+		default: goto yy193;
 	}
-yy192:
+yy193:
 #line 134 "exp/ael_lexer.re"
 	{ return TOK_LET; }
-#line 2462 "../../target/Linux-x86_64/gen/ael_lexer.c"
-yy193:
-	++lex->cursor;
-	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
-	switch (yych) {
-		case 0x00: goto yy41;
-		case 'a': goto yy222;
-		default: goto yy40;
-	}
+#line 2470 "../../target/Linux-x86_64/gen/ael_lexer.c"
 yy194:
 	++lex->cursor;
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
@@ -2922,7 +2922,7 @@ yy216:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'N': goto yy235;
+		case 'L': goto yy235;
 		default: goto yy40;
 	}
 yy217:
@@ -2930,7 +2930,7 @@ yy217:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'O': goto yy236;
+		case 'N': goto yy237;
 		default: goto yy40;
 	}
 yy218:
@@ -2938,7 +2938,7 @@ yy218:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'u': goto yy237;
+		case 'O': goto yy238;
 		default: goto yy40;
 	}
 yy219:
@@ -2946,7 +2946,7 @@ yy219:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'r': goto yy238;
+		case 'u': goto yy239;
 		default: goto yy40;
 	}
 yy220:
@@ -2954,7 +2954,7 @@ yy220:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'u': goto yy240;
+		case 'r': goto yy240;
 		default: goto yy40;
 	}
 yy221:
@@ -2962,7 +2962,7 @@ yy221:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'e': goto yy241;
+		case 'u': goto yy242;
 		default: goto yy40;
 	}
 yy222:
@@ -2970,7 +2970,7 @@ yy222:
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
 		case 0x00: goto yy41;
-		case 'l': goto yy243;
+		case 'e': goto yy243;
 		default: goto yy40;
 	}
 yy223:
@@ -3309,11 +3309,84 @@ yy235:
 	++lex->cursor;
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
+		case '0':
+		case '1':
+		case '2':
+		case '3':
+		case '4':
+		case '5':
+		case '6':
+		case '7':
+		case '8':
+		case '9':
+		case 'A':
+		case 'B':
+		case 'C':
+		case 'D':
+		case 'E':
+		case 'F':
+		case 'G':
+		case 'H':
+		case 'I':
+		case 'J':
+		case 'K':
+		case 'L':
+		case 'M':
+		case 'N':
+		case 'O':
+		case 'P':
+		case 'Q':
+		case 'R':
+		case 'S':
+		case 'T':
+		case 'U':
+		case 'V':
+		case 'W':
+		case 'X':
+		case 'Y':
+		case 'Z':
+		case '_':
+		case 'a':
+		case 'b':
+		case 'c':
+		case 'd':
+		case 'e':
+		case 'f':
+		case 'g':
+		case 'h':
+		case 'i':
+		case 'j':
+		case 'k':
+		case 'l':
+		case 'm':
+		case 'n':
+		case 'o':
+		case 'p':
+		case 'q':
+		case 'r':
+		case 's':
+		case 't':
+		case 'u':
+		case 'v':
+		case 'w':
+		case 'x':
+		case 'y':
+		case 'z': goto yy39;
+		default: goto yy236;
+	}
+yy236:
+#line 163 "exp/ael_lexer.re"
+	{ return TOK_LOCAL; }
+#line 3381 "../../target/Linux-x86_64/gen/ael_lexer.c"
+yy237:
+	++lex->cursor;
+	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
+	switch (yych) {
 		case 0x00: goto yy41;
 		case 'G': goto yy248;
 		default: goto yy40;
 	}
-yy236:
+yy238:
 	++lex->cursor;
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
@@ -3321,7 +3394,7 @@ yy236:
 		case 'R': goto yy250;
 		default: goto yy40;
 	}
-yy237:
+yy239:
 	++lex->cursor;
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
@@ -3329,7 +3402,7 @@ yy237:
 		case 'l': goto yy252;
 		default: goto yy40;
 	}
-yy238:
+yy240:
 	++lex->cursor;
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
@@ -3396,13 +3469,13 @@ yy238:
 		case 'x':
 		case 'y':
 		case 'z': goto yy39;
-		default: goto yy239;
+		default: goto yy241;
 	}
-yy239:
+yy241:
 #line 142 "exp/ael_lexer.re"
 	{ return TOK_UNKNOWN; }
-#line 3405 "../../target/Linux-x86_64/gen/ael_lexer.c"
-yy240:
+#line 3478 "../../target/Linux-x86_64/gen/ael_lexer.c"
+yy242:
 	++lex->cursor;
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
 	switch (yych) {
@@ -3410,79 +3483,6 @@ yy240:
 		case 's': goto yy253;
 		default: goto yy40;
 	}
-yy241:
-	++lex->cursor;
-	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
-	switch (yych) {
-		case '0':
-		case '1':
-		case '2':
-		case '3':
-		case '4':
-		case '5':
-		case '6':
-		case '7':
-		case '8':
-		case '9':
-		case 'A':
-		case 'B':
-		case 'C':
-		case 'D':
-		case 'E':
-		case 'F':
-		case 'G':
-		case 'H':
-		case 'I':
-		case 'J':
-		case 'K':
-		case 'L':
-		case 'M':
-		case 'N':
-		case 'O':
-		case 'P':
-		case 'Q':
-		case 'R':
-		case 'S':
-		case 'T':
-		case 'U':
-		case 'V':
-		case 'W':
-		case 'X':
-		case 'Y':
-		case 'Z':
-		case '_':
-		case 'a':
-		case 'b':
-		case 'c':
-		case 'd':
-		case 'e':
-		case 'f':
-		case 'g':
-		case 'h':
-		case 'i':
-		case 'j':
-		case 'k':
-		case 'l':
-		case 'm':
-		case 'n':
-		case 'o':
-		case 'p':
-		case 'q':
-		case 'r':
-		case 's':
-		case 't':
-		case 'u':
-		case 'v':
-		case 'w':
-		case 'x':
-		case 'y':
-		case 'z': goto yy39;
-		default: goto yy242;
-	}
-yy242:
-#line 140 "exp/ael_lexer.re"
-	{ return TOK_FALSE; }
-#line 3486 "../../target/Linux-x86_64/gen/ael_lexer.c"
 yy243:
 	++lex->cursor;
 	yych = ((lex->cursor < lex->limit) ? *lex->cursor : '\0');
@@ -3553,8 +3553,8 @@ yy243:
 		default: goto yy244;
 	}
 yy244:
-#line 163 "exp/ael_lexer.re"
-	{ return TOK_LOCAL; }
+#line 140 "exp/ael_lexer.re"
+	{ return TOK_FALSE; }
 #line 3559 "../../target/Linux-x86_64/gen/ael_lexer.c"
 yy245:
 	++lex->cursor;

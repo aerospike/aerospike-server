@@ -36,8 +36,8 @@
 
 #include <stddef.h>
 
+#include "exp/ael_context.h" // ael_context
 #include "exp/ael_lexer.h" // token_value
-#include "exp/parse_context.h" // parse_context
 
 // Is terminal `tok` (1 .. ael_num_tokens() - 1) a legal next token for the
 // opaque yyParser* `parser` in its current state? Snapshots and probes without
@@ -48,5 +48,5 @@ int ael_num_tokens(void);
 // Lemon's opaque parser entry points, used to drive a check-before-feed parse
 // from outside the generated translation unit.
 void* ParseAlloc(void* (*malloc_fn)(size_t));
-void Parse(void* parser, int major, token_value minor, parse_context* ctx);
+void Parse(void* parser, int major, token_value minor, ael_context* ctx);
 void ParseFree(void* parser, void (*free_fn)(void*));

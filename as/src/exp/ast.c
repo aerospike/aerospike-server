@@ -38,11 +38,11 @@
 #include "base/cdt.h"
 #include "base/datamodel.h"
 #include "base/proto.h"
+#include "exp/ael_context.h"
 #include "exp/ael_diag.h"
 #include "exp/ael_string.h"
 #include "exp/exp.h"
 #include "exp/exp_wire.h"
-#include "exp/parse_context.h"
 
 //==========================================================
 // Typedefs & constants.
@@ -206,8 +206,8 @@ const ast_node_info ast_node_table[AST_NODE_TYPE_COUNT] = {
 	// etype as the value-type hint for ast_etype_to_rtype).
 	N_CDT_OP(AST_PATH_FUNC_EXISTS, "exists()", 0, .valid_types = AST_ETYPE_AUTO),
 	N_CDT_OP(AST_PATH_FUNC_COUNT, "count()", 0, .valid_types = AST_ETYPE_AUTO),
-	N_CMD(AST_PATH_FUNC_CAST_INT, "asInt()", EXP_TO_INT, NK_UNARY),
-	N_CMD(AST_PATH_FUNC_CAST_FLOAT, "asFloat()", EXP_TO_FLOAT, NK_UNARY),
+	N_CMD(AST_PATH_FUNC_CAST_INT, "toInt()", EXP_TO_INT, NK_UNARY),
+	N_CMD(AST_PATH_FUNC_CAST_FLOAT, "toFloat()", EXP_TO_FLOAT, NK_UNARY),
 	N_CMD(AST_PATH_FUNC_CAST_STRING, "toString()", EXP_TO_STRING, NK_UNARY),
 	N_CDT_OP(AST_PATH_FUNC_GET, "get()", 0, .valid_types = AST_ETYPE_AUTO),
 	N_CDT_OP(AST_PATH_FUNC_GET_KEYS, "getKeys()", 0,
@@ -592,6 +592,9 @@ ast_pool_init(ast_pool* pool)
 	pool->free_head = AST_REF_NULL;
 	pool->cur_offset = 0;
 	pool->cur_sz = 0;
+	// Not every pool user arms diagnostics - make "unarmed" a constructor
+	// invariant instead of stack garbage every "diags != NULL" guard reads.
+	pool->diags = NULL;
 	dynmem_init(&pool->dm, (uint32_t)sizeof(ast_node), AST_POOL_DEFAULT_INIT,
 			pool->stack_mem);
 }
@@ -811,12 +814,19 @@ ast_new_zero(ast_pool* pool)
 }
 
 ast_ref
-ast_new_neg(parse_context* ctx, ast_ref operand)
+ast_new_neg(ael_context* ctx, ast_ref operand, uint32_t minus_end)
 {
+	ast_ref zero = ast_new_zero(ctx->pool);
+
+	// Stamp the synthesized zero one past the '-' (sz 0) - ast_new's default
+	// stamp is the lookahead past the whole -x, which would drag the SUB's
+	// child-derived span (ast_span_children) past the construct. One-past-'-'
+	// keeps the union anchored where the operand begins.
+	ast_set_span(ctx->pool, zero, minus_end, 0);
+
 	// -x == 0 - x; the zero adopts the operand's numeric type via the SUB,
 	// so INT and FLOAT both negate (there is no wire negate op).
-	return ast_new_bmath(ctx, AST_SUB, ast_new_zero(ctx->pool), operand,
-			AST_ETYPE_AUTO_NUMERIC);
+	return ast_new_bmath(ctx, AST_SUB, zero, operand, AST_ETYPE_AUTO_NUMERIC);
 }
 
 ast_ref
@@ -847,10 +857,10 @@ ast_new_string(ast_pool* pool, const char* s, uint32_t sz, bool has_escape)
 // AST_UNKNOWN stand-in so the rest of the parse can proceed without
 // NULL-deref. The body bytes still alias the source buffer — decoding
 // is deferred to codegen (ael_count_sz / ael_build_node in exp.c;
-// AST_STRING case in codegen.c). The has_escape flag is captured here
+// AST_STRING case in ael_codegen.c). The has_escape flag is captured here
 // so codegen can skip a rescan for the no-escape common case.
 ast_ref
-ast_new_string_token(parse_context* ctx, uint32_t name_offset, uint32_t name_sz)
+ast_new_string_token(ael_context* ctx, uint32_t name_offset, uint32_t name_sz)
 {
 	const char* s = ctx->input + name_offset;
 	bool has_escape = false;
@@ -931,7 +941,7 @@ ast_clone_simple(ast_pool* pool, ast_ref src)
 // depth gating is the caller's responsibility — it has a different
 // fallback (AST_UNKNOWN, not AST_REF_NULL).
 static bool
-bin_name_check(parse_context* ctx, uint32_t name_offset, uint32_t name_sz)
+bin_name_check(ael_context* ctx, uint32_t name_offset, uint32_t name_sz)
 {
 	const uint8_t* name = (const uint8_t*)(ctx->input + name_offset);
 
@@ -952,10 +962,12 @@ bin_name_check(parse_context* ctx, uint32_t name_offset, uint32_t name_sz)
 }
 
 ast_ref
-ast_new_bin(parse_context* ctx, uint32_t name_offset, uint32_t name_sz)
+ast_new_bin(ael_context* ctx, uint32_t ref_offset, uint32_t ref_end,
+		uint32_t name_offset, uint32_t name_sz)
 {
 	ast_pool* pool = ctx->pool;
 	const char* name = ctx->input + name_offset;
+	uint32_t ref_sz = ref_end > ref_offset ? ref_end - ref_offset : name_sz;
 
 	if (ctx->filter_depth > 0) {
 		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, name_offset, name_sz,
@@ -976,8 +988,9 @@ ast_new_bin(parse_context* ctx, uint32_t name_offset, uint32_t name_sz)
 			// Found — create a bin_ref.
 			ast_ref r = ast_new(pool, AST_BIN_REF);
 			ast_node* n = ast_pool_at(pool, r);
-			n->offset = name_offset;
-			n->sz = (name_sz > 255) ? 255 : (uint8_t)name_sz;
+			// Anchor on the name; the display span reaches back over '$.'.
+			ast_set_span(pool, r, name_offset, name_sz);
+			ast_set_display_span(pool, r, ref_offset, ref_offset + ref_sz);
 			n->has_deferable = true;
 			n->u.bin_ref.bin = br;
 			n->u.bin_ref.parent = AST_REF_NULL;
@@ -1001,8 +1014,9 @@ ast_new_bin(parse_context* ctx, uint32_t name_offset, uint32_t name_sz)
 	// First occurrence — create canonical bin node.
 	ast_ref r = ast_new(pool, AST_BIN);
 	ast_node* n = ast_pool_at(pool, r);
-	n->offset = name_offset;
-	n->sz = (name_sz > 255) ? 255 : (uint8_t)name_sz;
+	// Anchor on the name; the display span reaches back over '$.'.
+	ast_set_span(pool, r, name_offset, name_sz);
+	ast_set_display_span(pool, r, ref_offset, ref_offset + ref_sz);
 	n->has_deferable = true;
 	n->u.bin.name_sz = name_sz;
 	n->u.bin.bin_next = ctx->bin_root;
@@ -1013,9 +1027,11 @@ ast_new_bin(parse_context* ctx, uint32_t name_offset, uint32_t name_sz)
 }
 
 ast_ref
-ast_new_local_bin(parse_context* ctx, uint32_t name_offset, uint32_t name_sz,
-		ast_etype etype)
+ast_new_local_bin(ael_context* ctx, uint32_t ref_offset, uint32_t ref_end,
+		uint32_t name_offset, uint32_t name_sz, ast_etype etype)
 {
+	uint32_t ref_sz = ref_end > ref_offset ? ref_end - ref_offset : name_sz;
+
 	if (ctx->filter_depth > 0) {
 		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, name_offset, name_sz,
 				"$.bin not allowed inside filter / modify body");
@@ -1033,8 +1049,9 @@ ast_new_local_bin(parse_context* ctx, uint32_t name_offset, uint32_t name_sz,
 	// flag needed.
 	ast_ref r = ast_new(ctx->pool, AST_BIN);
 	ast_node* n = ast_pool_at(ctx->pool, r);
-	n->offset = name_offset;
-	n->sz = (name_sz > 255) ? 255 : (uint8_t)name_sz;
+	// Anchor on the name; the display span reaches back over '$.'.
+	ast_set_span(ctx->pool, r, name_offset, name_sz);
+	ast_set_display_span(ctx->pool, r, ref_offset, ref_offset + ref_sz);
 	n->etype = etype;
 	n->u.bin.name_sz = name_sz;
 	n->u.bin.bin_next = ctx->local_bin_root;
@@ -1047,7 +1064,7 @@ ast_new_local_bin(parse_context* ctx, uint32_t name_offset, uint32_t name_sz,
 // Record a "<what>: <A> vs <B>" diagnostic naming both etypes. Centralizes the
 // two-buffer ast_etype_str formatting the type-conflict sites share.
 static void
-ast_diag_type_conflict(parse_context* ctx, uint32_t offset, uint32_t byte_sz,
+ast_diag_type_conflict(ael_context* ctx, uint32_t offset, uint32_t byte_sz,
 		const char* what, ast_etype a, ast_etype b)
 {
 	char a_buf[AEL_ETYPE_STR_SZ];
@@ -1067,9 +1084,11 @@ static void
 ast_operand_pair_span(const ast_node* lp, const ast_node* rp, uint32_t* offset,
 		uint32_t* byte_sz)
 {
-	uint32_t l_end = lp->offset + lp->sz;
-	uint32_t r_end = rp->offset + rp->sz;
-	uint32_t start = lp->offset < rp->offset ? lp->offset : rp->offset;
+	uint32_t l_start = ast_disp_offset(lp);
+	uint32_t r_start = ast_disp_offset(rp);
+	uint32_t l_end = l_start + lp->sz;
+	uint32_t r_end = r_start + rp->sz;
+	uint32_t start = l_start < r_start ? l_start : r_start;
 	uint32_t end = l_end > r_end ? l_end : r_end;
 
 	*offset = start;
@@ -1084,7 +1103,7 @@ ast_operand_pair_span(const ast_node* lp, const ast_node* rp, uint32_t* offset,
 // back to "type mismatch: A vs B" (at the right operand) when both operands
 // satisfy the operator individually but not each other.
 static void
-ast_diag_operand_conflict(parse_context* ctx, ast_node_t op, ast_etype required,
+ast_diag_operand_conflict(ael_context* ctx, ast_node_t op, ast_etype required,
 		const ast_node* n_left, const ast_node* n_right)
 {
 	const ast_node* bad = NULL;
@@ -1097,7 +1116,7 @@ ast_diag_operand_conflict(parse_context* ctx, ast_node_t op, ast_etype required,
 	}
 
 	if (bad == NULL) {
-		ast_diag_type_conflict(ctx, n_right->offset, n_right->sz,
+		ast_diag_type_conflict(ctx, ast_disp_offset(n_right), n_right->sz,
 				"type mismatch", n_left->etype, n_right->etype);
 		return;
 	}
@@ -1105,14 +1124,14 @@ ast_diag_operand_conflict(parse_context* ctx, ast_node_t op, ast_etype required,
 	char req_buf[AEL_ETYPE_STR_SZ];
 	char got_buf[AEL_ETYPE_STR_SZ];
 
-	ael_diag_addf(&ctx->diags, AEL_SEV_ERROR, bad->offset, bad->sz,
+	ael_diag_addf(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(bad), bad->sz,
 			"operand of '%s' must be %s, got %s", ast_node_table[op].name,
 			ast_etype_str(required, req_buf, sizeof req_buf),
 			ast_etype_str(bad->etype, got_buf, sizeof got_buf));
 }
 
 ast_ref
-ast_new_bcmp(parse_context* ctx, ast_node_t ntype, ast_ref left, ast_ref right)
+ast_new_bcmp(ael_context* ctx, ast_node_t ntype, ast_ref left, ast_ref right)
 {
 	// A failed operand sub-parse reduces here as AST_REF_NULL (the
 	// diagnostic is already recorded); don't dereference it.
@@ -1163,7 +1182,7 @@ ast_new_bcmp(parse_context* ctx, ast_node_t ntype, ast_ref left, ast_ref right)
 }
 
 ast_ref
-ast_new_in(parse_context* ctx, ast_ref left, ast_ref right)
+ast_new_in(ael_context* ctx, ast_ref left, ast_ref right)
 {
 	if (left == AST_REF_NULL || right == AST_REF_NULL) {
 		return AST_REF_NULL;
@@ -1220,13 +1239,14 @@ ast_span_children(ast_pool* pool, ast_ref ref, ast_ref a, ast_ref b, ast_ref c)
 		}
 
 		const ast_node* k = ast_pool_at(pool, kids[i]);
+		uint32_t k_start = ast_disp_offset(k);
 
-		if (k->offset < start) {
-			start = k->offset;
+		if (k_start < start) {
+			start = k_start;
 		}
 
-		if (k->offset + k->sz > end) {
-			end = k->offset + k->sz;
+		if (k_start + k->sz > end) {
+			end = k_start + k->sz;
 		}
 	}
 
@@ -1234,10 +1254,7 @@ ast_span_children(ast_pool* pool, ast_ref ref, ast_ref a, ast_ref b, ast_ref c)
 		return;
 	}
 
-	ast_node* n = ast_pool_at(pool, ref);
-
-	n->offset = start;
-	n->sz = (end - start) > 255 ? 255 : (uint8_t)(end - start);
+	ast_set_span(pool, ref, start, end - start);
 }
 
 // Grow R's existing span to also cover child C (union of the two spans). Used
@@ -1246,19 +1263,20 @@ ast_span_children(ast_pool* pool, ast_ref ref, ast_ref a, ast_ref b, ast_ref c)
 static void
 ast_span_extend(ast_pool* pool, ast_ref ref, ast_ref child)
 {
-	ast_node* n = ast_pool_at(pool, ref);
+	const ast_node* n = ast_pool_at(pool, ref);
 	const ast_node* c = ast_pool_at(pool, child);
-	uint32_t start = n->offset < c->offset ? n->offset : c->offset;
-	uint32_t n_end = n->offset + n->sz;
-	uint32_t c_end = c->offset + c->sz;
+	uint32_t n_start = ast_disp_offset(n);
+	uint32_t c_start = ast_disp_offset(c);
+	uint32_t start = n_start < c_start ? n_start : c_start;
+	uint32_t n_end = n_start + n->sz;
+	uint32_t c_end = c_start + c->sz;
 	uint32_t end = n_end > c_end ? n_end : c_end;
 
-	n->offset = start;
-	n->sz = (end - start) > 255 ? 255 : (uint8_t)(end - start);
+	ast_set_span(pool, ref, start, end - start);
 }
 
 ast_ref
-ast_new_bmath(parse_context* ctx, ast_node_t type, ast_ref left, ast_ref right,
+ast_new_bmath(ael_context* ctx, ast_node_t type, ast_ref left, ast_ref right,
 		ast_etype operand_etype)
 {
 	if (left == AST_REF_NULL || right == AST_REF_NULL) {
@@ -1319,7 +1337,7 @@ ast_new_rel_range_seg(ast_pool* pool, ast_node_t type, ast_ref start,
 }
 
 ast_ref
-ast_new_nary(parse_context* ctx, ast_node_t type, ast_ref left, ast_ref right,
+ast_new_nary(ael_context* ctx, ast_node_t type, ast_ref left, ast_ref right,
 		ast_etype etype)
 {
 	if (left == AST_REF_NULL || right == AST_REF_NULL) {
@@ -1362,7 +1380,7 @@ ast_new_unary(ast_pool* pool, ast_node_t type, ast_ref operand)
 }
 
 ast_ref
-ast_new_func1(parse_context* ctx, ast_node_t type, ast_ref arg, ast_etype etype)
+ast_new_func1(ael_context* ctx, ast_node_t type, ast_ref arg, ast_etype etype)
 {
 	ast_set_implicit_type(ctx, arg, etype);
 	ast_ref r = ast_new(ctx->pool, type);
@@ -1374,7 +1392,7 @@ ast_new_func1(parse_context* ctx, ast_node_t type, ast_ref arg, ast_etype etype)
 }
 
 ast_ref
-ast_new_func2(parse_context* ctx, ast_node_t type, ast_ref a, ast_ref b,
+ast_new_func2(ael_context* ctx, ast_node_t type, ast_ref a, ast_ref b,
 		ast_etype a_etype, ast_etype b_etype, ast_etype result_etype)
 {
 	ast_set_implicit_type(ctx, a, a_etype);
@@ -1415,7 +1433,7 @@ ast_new_meta(ast_pool* pool, exp_op_code op_code, int64_t param)
 }
 
 ast_ref
-ast_new_var_ref(parse_context* ctx, uint32_t name_offset, uint32_t name_sz)
+ast_new_var_ref(ael_context* ctx, uint32_t name_offset, uint32_t name_sz)
 {
 	const char* name = ctx->input + name_offset;
 
@@ -1442,8 +1460,10 @@ ast_new_var_ref(parse_context* ctx, uint32_t name_offset, uint32_t name_sz)
 
 	ast_ref r = ast_new(ctx->pool, AST_VAR);
 	ast_node* n = ast_pool_at(ctx->pool, r);
-	n->offset = name_offset;
-	n->sz = (name_sz > 255) ? 255 : (uint8_t)name_sz;
+	// The node anchors on the name -- codegen emits the variable name from
+	// node.offset, so a '${' prefix or an enclosing paren may only ever widen
+	// this node's span via disp_pre, never move it.
+	ast_set_span(ctx->pool, r, name_offset, name_sz);
 	n->u.var.var_idx = v.var_idx;
 	n->u.var.name_sz = name_sz;
 	n->u.var.parent = AST_REF_NULL;
@@ -1453,7 +1473,7 @@ ast_new_var_ref(parse_context* ctx, uint32_t name_offset, uint32_t name_sz)
 }
 
 ast_ref
-ast_new_var_def(parse_context* ctx, uint32_t name_offset, uint32_t name_sz,
+ast_new_var_def(ael_context* ctx, uint32_t name_offset, uint32_t name_sz,
 		ast_ref value)
 {
 	if (value == AST_REF_NULL) {
@@ -1487,15 +1507,16 @@ ast_new_var_def(parse_context* ctx, uint32_t name_offset, uint32_t name_sz,
 
 	ast_ref r = ast_new(ctx->pool, AST_VAR_DEF);
 	ast_node* dp = ast_pool_at(ctx->pool, r);
-	dp->u.var_def.name_offset = name_offset;
 	dp->u.var_def.name_sz = name_sz;
 	dp->u.var_def.value = value;
 	dp->next = AST_REF_NULL;
 
 	// Span over `name = value` so a parent that folds this node (via
-	// ast_span_extend) gets a precise caret, not the parser lookahead.
+	// ast_span_extend) gets a precise caret, not the parser lookahead. The
+	// node anchors on the name, so name_offset is both the semantic locator
+	// and the display start -- no disp_pre reach-back.
 	const ast_node* val_node = ast_pool_at(ctx->pool, value);
-	uint32_t val_end = val_node->offset + val_node->sz;
+	uint32_t val_end = ast_disp_offset(val_node) + val_node->sz;
 	ast_set_span(ctx->pool, r, name_offset,
 			val_end > name_offset ? val_end - name_offset : name_sz);
 
@@ -1504,7 +1525,7 @@ ast_new_var_def(parse_context* ctx, uint32_t name_offset, uint32_t name_sz,
 }
 
 ast_ref
-ast_new_let_scope(parse_context* ctx, uint32_t name_offset, uint32_t name_sz,
+ast_new_let_scope(ael_context* ctx, uint32_t name_offset, uint32_t name_sz,
 		ast_ref value)
 {
 	if (ctx->filter_depth > 0) {
@@ -1625,8 +1646,164 @@ ast_map_literal_next_key(ast_pool* pool, ast_ref key)
 }
 
 //==========================================================
+// Child iteration.
+//
+
+// Walk a counted sibling chain. The NULL check is belt-and-braces against a
+// count that disagrees with the chain: AST_REF_NULL is out of the pool's index
+// range, so running past the end would fault rather than stop.
+static void
+ast_foreach_chain(ast_pool* pool, ast_ref head, uint32_t count, ast_child_cb cb,
+		void* arg)
+{
+	ast_ref ele = head;
+
+	for (uint32_t i = 0; i < count && ele != AST_REF_NULL; i++) {
+		ast_ref next = ast_pool_at(pool, ele)->next;
+
+		cb(pool, ele, arg);
+		ele = next;
+	}
+}
+
+void
+ast_children_foreach(ast_pool* pool, ast_ref ref, ast_child_cb cb, void* arg)
+{
+	if (ref == AST_REF_NULL) {
+		return;
+	}
+
+	ast_node* np = ast_pool_at(pool, ref);
+
+	// Types whose child layout 'kind' cannot imply - these are the only ones
+	// that need naming. Everything else falls through to the kind dispatch.
+	switch (np->type) {
+	case AST_MAP: {
+		// Interleaved key->val->key->val chain.
+		ast_ref key = np->u.list.head;
+
+		for (uint32_t i = 0; i < np->u.list.count && key != AST_REF_NULL; i++) {
+			ast_ref val = ast_pool_at(pool, key)->next;
+
+			cf_assert(val != AST_REF_NULL, CF_MISC,
+					"ast_children_foreach: map literal missing value");
+
+			ast_ref next_key = ast_pool_at(pool, val)->next;
+
+			cb(pool, key, arg);
+			cb(pool, val, arg);
+			key = next_key;
+		}
+
+		return;
+	}
+
+	case AST_VAR_DEF:
+		cb(pool, np->u.var_def.value, arg);
+		return;
+
+	case AST_PATH_CALL:
+		cb(pool, np->u.call.ctx, arg);
+		cb(pool, np->u.call.call_op, arg);
+		return;
+
+	case AST_PATH_FUNC_SELECT:
+	case AST_PATH_FUNC_MODIFY:
+	case AST_PATH_FUNC_PSELECT_REMOVE:
+		// SELECT: value always NULL. MODIFY: value is the apply expr.
+		// PSELECT_REMOVE: value always NULL (codegen synthesizes blob).
+		cb(pool, np->u.modify.value, arg);
+		return;
+
+	case AST_PATH_CTX:
+		ast_foreach_chain(pool, np->u.ctx_list.head, np->u.ctx_list.count, cb,
+				arg);
+		return;
+
+	default:
+		break;
+	}
+
+	switch (ast_node_table[np->type].kind) {
+	case NK_UNARY:
+		// u.func1.arg aliases u.unary.operand.
+		cb(pool, np->u.unary.operand, arg);
+		break;
+	case NK_SEG_S:
+		cb(pool, ast_seg_operand(np), arg);
+		break;
+	case NK_BINARY:
+	case NK_BMATH:
+		// u.func2.arg1/arg2 and u.when_case.cond/result alias left/right.
+		cb(pool, np->u.binary.left, arg);
+		cb(pool, np->u.binary.right, arg);
+		break;
+	case NK_SEG_M: {
+		uint8_t flags = ast_node_table[np->type].flags;
+
+		// Flag order matches ast_seg_inverted: by-exp, then rel-range, then
+		// list, then plain range.
+		if ((flags & (AST_NF_BY_EXP | AST_NF_AND_EXP)) != 0) {
+			cb(pool, np->u.by_exp_seg.filter, arg);
+			break;
+		}
+
+		if ((flags & AST_NF_REL_RANGE) != 0) {
+			cb(pool, np->u.rel_range_seg.start, arg);
+			cb(pool, np->u.rel_range_seg.end, arg);
+			// The anchor is a child too. The hand-written walks all missed it,
+			// benignly - the grammar admits only literals here today.
+			cb(pool, np->u.rel_range_seg.relative_to, arg);
+			break;
+		}
+
+		if ((flags & AST_NF_LIST_SEG) != 0) {
+			ast_foreach_chain(pool, np->u.list_seg.head, np->u.list_seg.count,
+					cb, arg);
+			break;
+		}
+
+		cb(pool, np->u.range_seg.start, arg);
+		cb(pool, np->u.range_seg.end, arg);
+		break;
+	}
+	case NK_NMATH:
+		// Circular chain - the head is tail->next.
+		ast_foreach_chain(pool, ast_nmath_head(pool, np), np->u.nmath.count, cb,
+				arg);
+		break;
+	case NK_LIST:
+		ast_foreach_chain(pool, np->u.list.head, np->u.list.count, cb, arg);
+		break;
+	case NK_CDT_OP: {
+		// NUL-terminated rather than counted.
+		ast_ref ele = ast_cdt_op_head(np);
+
+		while (ele != AST_REF_NULL) {
+			ast_ref next = ast_pool_at(pool, ele)->next;
+
+			cb(pool, ele, arg);
+			ele = next;
+		}
+
+		break;
+	}
+	default:
+		break; // NK_LEAF / NK_NONE - no children
+	}
+}
+
+//==========================================================
 // Destruction.
 //
+
+static void
+ast_free_child_cb(ast_pool* pool, ast_ref child, void* arg)
+{
+	(void)arg;
+
+	ast_free(pool, child);
+}
 
 void
 ast_free(ast_pool* pool, ast_ref node)
@@ -1635,160 +1812,19 @@ ast_free(ast_pool* pool, ast_ref node)
 		return;
 	}
 
-	ast_node* np = ast_pool_at(pool, node);
+	cf_assert(ast_pool_at(pool, node)->is_free == 0, CF_MISC,
+			"ast_free: double free of ref %u", node);
 
-	cf_assert(np->is_free == 0, CF_MISC, "ast_free: double free of ref %u", node);
-
-	switch (np->type) {
-	case AST_MAP: {
-		// Interleaved key->val->key->val chain. Free pairs individually.
-		ast_ref key = np->u.list.head;
-
-		for (uint32_t i = 0; i < np->u.list.count; i++) {
-			ast_node* kp = ast_pool_at(pool, key);
-			ast_ref val = kp->next;
-
-			cf_assert(val != AST_REF_NULL, CF_MISC,
-					"ast_free: map literal missing value");
-
-			ast_node* vp = ast_pool_at(pool, val);
-			ast_ref next_key = vp->next;
-
-			// Break links before freeing.
-			kp->next = AST_REF_NULL;
-			vp->next = AST_REF_NULL;
-			ast_free(pool, key);
-			ast_free(pool, val);
-			key = next_key;
-		}
-
-		break;
-	}
-
-	case AST_VAR_DEF:
-		ast_free(pool, np->u.var_def.value);
-		break;
-
-	case AST_PATH_CALL:
-		ast_free(pool, np->u.call.ctx);
-		ast_free(pool, np->u.call.call_op);
-		break;
-
-	case AST_PATH_FUNC_SELECT:
-	case AST_PATH_FUNC_MODIFY:
-	case AST_PATH_FUNC_PSELECT_REMOVE:
-		// SELECT: value always NULL. MODIFY: value is the apply expr.
-		// PSELECT_REMOVE: value always NULL (codegen synthesizes blob).
-		ast_free(pool, np->u.modify.value);
-		break;
-
-	case AST_PATH_CTX: {
-		ast_ref ele = np->u.ctx_list.head;
-
-		for (uint32_t i = 0; i < np->u.ctx_list.count; i++) {
-			ast_ref next = ast_pool_at(pool, ele)->next;
-
-			ast_pool_at(pool, ele)->next = AST_REF_NULL;
-			ast_free(pool, ele);
-			ele = next;
-		}
-
-		break;
-	}
-
-	default:
-		switch (ast_node_table[np->type].kind) {
-		case NK_CDT_OP: {
-			ast_ref ele = ast_cdt_op_head(np);
-
-			while (ele != AST_REF_NULL) {
-				ast_ref next = ast_pool_at(pool, ele)->next;
-
-				ast_pool_at(pool, ele)->next = AST_REF_NULL;
-				ast_free(pool, ele);
-				ele = next;
-			}
-
-			break;
-		}
-		case NK_UNARY:
-			ast_free(pool, np->u.unary.operand);
-			break;
-		case NK_SEG_S:
-			ast_free(pool, ast_seg_operand(np));
-			break;
-		case NK_BINARY:
-		case NK_BMATH:
-			ast_free(pool, np->u.binary.left);
-			ast_free(pool, np->u.binary.right);
-			break;
-		case NK_SEG_M: {
-			uint8_t flags = ast_node_table[np->type].flags;
-
-			if ((flags & (AST_NF_BY_EXP | AST_NF_AND_EXP)) != 0) {
-				ast_free(pool, np->u.by_exp_seg.filter);
-				break;
-			}
-
-			if ((flags & AST_NF_LIST_SEG) == 0) {
-				ast_free(pool, np->u.range_seg.start);
-				ast_free(pool, np->u.range_seg.end);
-				break;
-			}
-
-			ast_ref ele = np->u.list_seg.head;
-
-			for (uint32_t i = 0; i < np->u.list_seg.count; i++) {
-				ast_ref next = ast_pool_at(pool, ele)->next;
-
-				ast_pool_at(pool, ele)->next = AST_REF_NULL;
-				ast_free(pool, ele);
-				ele = next;
-			}
-
-			break;
-		}
-		case NK_NMATH: {
-			ast_ref head = ast_nmath_head(pool, np);
-			ast_ref ele = head;
-
-			for (uint32_t i = 0; i < np->u.nmath.count; i++) {
-				ast_ref next = ast_pool_at(pool, ele)->next;
-
-				ast_pool_at(pool, ele)->next = AST_REF_NULL;
-				ast_free(pool, ele);
-				ele = next;
-			}
-
-			break;
-		}
-		case NK_LIST: {
-			ast_ref ele = np->u.list.head;
-
-			for (uint32_t i = 0; i < np->u.list.count; i++) {
-				ast_ref next = ast_pool_at(pool, ele)->next;
-
-				ast_pool_at(pool, ele)->next = AST_REF_NULL;
-				ast_free(pool, ele);
-				ele = next;
-			}
-
-			break;
-		}
-		default:
-			break;
-		}
-
-		break;
-	}
-
+	// No need to unlink children before freeing them: ast_pool_release
+	// overwrites 'next' with the free-list link.
+	ast_children_foreach(pool, node, ast_free_child_cb, NULL);
 	ast_pool_release(pool, node);
 }
 
 // Merge for NK_NMATH (circular list via u.nmath).
 static ast_ref
-ast_nmath_merge(parse_context* ctx, ast_node_t type, ast_ref left,
-		ast_ref right, ast_etype etype)
+ast_nmath_merge(ael_context* ctx, ast_node_t type, ast_ref left, ast_ref right,
+		ast_etype etype)
 {
 	ast_pool* pool = ctx->pool;
 	ast_node* n_left = ast_pool_at(pool, left);
@@ -1847,7 +1883,7 @@ ast_nmath_merge(parse_context* ctx, ast_node_t type, ast_ref left,
 
 // Merge for NK_LIST (linear list via u.list).
 static ast_ref
-ast_list_merge(parse_context* ctx, ast_node_t type, ast_ref left, ast_ref right)
+ast_list_merge(ael_context* ctx, ast_node_t type, ast_ref left, ast_ref right)
 {
 	ast_pool* pool = ctx->pool;
 	ast_node* n_left = ast_pool_at(pool, left);
@@ -1894,7 +1930,7 @@ ast_list_merge(parse_context* ctx, ast_node_t type, ast_ref left, ast_ref right)
 }
 
 ast_ref
-ast_nary_merge(parse_context* ctx, ast_node_t type, ast_ref left, ast_ref right,
+ast_nary_merge(ael_context* ctx, ast_node_t type, ast_ref left, ast_ref right,
 		ast_etype etype)
 {
 	if (left == AST_REF_NULL || right == AST_REF_NULL) {
@@ -1915,18 +1951,36 @@ ast_nary_merge(parse_context* ctx, ast_node_t type, ast_ref left, ast_ref right,
 	ast_set_implicit_type(ctx, left, etype);
 	ast_set_implicit_type(ctx, right, etype);
 
+	ast_ref r;
+
 	if (ast_node_table[type].kind == NK_NMATH) {
-		return ast_nmath_merge(ctx, type, left, right, etype);
+		r = ast_nmath_merge(ctx, type, left, right, etype);
+	}
+	else {
+		r = ast_list_merge(ctx, type, left, right);
 	}
 
-	ast_ref r = ast_list_merge(ctx, type, left, right);
-	ast_pool_at(ctx->pool, r)->etype = etype;
+	// Unreachable with the non-null children guaranteed above, but a null
+	// merge result must not reach the writes below - ast_pool_at(pool,
+	// AST_REF_NULL) would silently corrupt pool slot 0.
+	if (r == AST_REF_NULL) {
+		return AST_REF_NULL;
+	}
 
+	ast_node* n_r = ast_pool_at(ctx->pool, r);
+
+	if (ast_node_table[type].kind != NK_NMATH) {
+		n_r->etype = etype;
+	}
+
+	// No re-stamp needed: the merge branches extend the surviving node's
+	// span over the absorbed operand (ast_span_extend), so a flattened
+	// chain's span tracks the whole chain.
 	return r;
 }
 
 ast_etype
-ast_set_implicit_type_lr(parse_context* ctx, ast_node_t op, ast_ref left,
+ast_set_implicit_type_lr(ael_context* ctx, ast_node_t op, ast_ref left,
 		ast_ref right, ast_etype etype)
 {
 	// A failed operand sub-parse may pass AST_REF_NULL here (e.g. shift
@@ -1952,7 +2006,7 @@ ast_set_implicit_type_lr(parse_context* ctx, ast_node_t op, ast_ref left,
 
 // Find the var_def node for a given var_idx by walking the scope chain.
 static ast_ref
-ast_find_var_def(parse_context* ctx, uint32_t var_idx)
+ast_find_var_def(ael_context* ctx, uint32_t var_idx)
 {
 	ast_pool* pool = ctx->pool;
 
@@ -1983,7 +2037,7 @@ ast_find_var_def(parse_context* ctx, uint32_t var_idx)
 }
 
 static void
-ast_set_implicit_type_body(parse_context* ctx, ast_ref node, ast_etype etype)
+ast_set_implicit_type_body(ael_context* ctx, ast_ref node, ast_etype etype)
 {
 	if (etype == AST_ETYPE_AUTO || etype == AST_ETYPE_ERROR ||
 			node == AST_REF_NULL) {
@@ -2031,8 +2085,8 @@ ast_set_implicit_type_body(parse_context* ctx, ast_ref node, ast_etype etype)
 		// can't be (e.g. BOOL on a logical operand) is still a conflict.
 		if ((np->u.call.stype & EXP_CALL_FLAG_MODIFY_LOCAL) != 0) {
 			if ((np->etype & etype) == AST_ETYPE_ERROR) {
-				ast_diag_type_conflict(ctx, np->offset, np->sz, "type mismatch",
-						np->etype, etype);
+				ast_diag_type_conflict(ctx, ast_disp_offset(np), np->sz,
+						"type mismatch", np->etype, etype);
 			}
 
 			return;
@@ -2054,8 +2108,8 @@ ast_set_implicit_type_body(parse_context* ctx, ast_ref node, ast_etype etype)
 		if (op->type == AST_PATH_FUNC_SELECT || op->type == AST_PATH_FUNC_MODIFY ||
 				op->type == AST_PATH_FUNC_PSELECT_REMOVE) {
 			if ((np->etype & etype) == AST_ETYPE_ERROR) {
-				ast_diag_type_conflict(ctx, np->offset, np->sz, "type mismatch",
-						np->etype, etype);
+				ast_diag_type_conflict(ctx, ast_disp_offset(np), np->sz,
+						"type mismatch", np->etype, etype);
 			}
 
 			return;
@@ -2066,7 +2120,7 @@ ast_set_implicit_type_body(parse_context* ctx, ast_ref node, ast_etype etype)
 		op->etype &= etype;
 
 		if (op->etype == AST_ETYPE_ERROR) {
-			ast_diag_type_conflict(ctx, np->offset, np->sz,
+			ast_diag_type_conflict(ctx, ast_disp_offset(np), np->sz,
 					"type mismatch on bare-path get", op_prev, etype);
 			return;
 		}
@@ -2081,8 +2135,10 @@ ast_set_implicit_type_body(parse_context* ctx, ast_ref node, ast_etype etype)
 	etype &= np->etype;
 
 	if (etype == AST_ETYPE_ERROR) {
-		ast_diag_type_conflict(ctx, np->offset, np->sz, "type mismatch", req,
-				np->etype);
+		// Any kind reaches here, including the name-anchored bin queries and
+		// var defs - take the display start, not the bare name.
+		ast_diag_type_conflict(ctx, ast_disp_offset(np), np->sz,
+				"type mismatch", req, np->etype);
 		return;
 	}
 
@@ -2131,7 +2187,7 @@ ast_set_implicit_type_body(parse_context* ctx, ast_ref node, ast_etype etype)
 // Public entry: bounds the mutually recursive propagation walk (_lr, bin_set,
 // and climb all re-enter here) so it can't overflow the C stack.
 void
-ast_set_implicit_type(parse_context* ctx, ast_ref node, ast_etype etype)
+ast_set_implicit_type(ael_context* ctx, ast_ref node, ast_etype etype)
 {
 	if (ctx->prop_depth >= EXP_MAX_DEPTH) {
 		// Left-deep chains escape YYSTACKDEPTH; cap the walk so a huge
@@ -2143,7 +2199,7 @@ ast_set_implicit_type(parse_context* ctx, ast_ref node, ast_etype etype)
 		if (node != AST_REF_NULL) {
 			const ast_node* np = ast_pool_at(ctx->pool, node);
 
-			off = np->offset;
+			off = ast_disp_offset(np);
 			sz = np->sz;
 		}
 
@@ -2168,7 +2224,7 @@ ast_is_rel_cmp(ast_node_t type)
 // Climb from node through consecutive math parents to the top,
 // then propagate the type downward from there.
 static void
-ast_climb_and_propagate(parse_context* ctx, ast_ref node, ast_ref parent,
+ast_climb_and_propagate(ael_context* ctx, ast_ref node, ast_ref parent,
 		ast_etype etype)
 {
 	ast_pool* pool = ctx->pool;
@@ -2205,7 +2261,7 @@ ast_climb_and_propagate(parse_context* ctx, ast_ref node, ast_ref parent,
 }
 
 void
-ast_bin_set_implicit_type(parse_context* ctx, ast_ref bin_or_ref, ast_etype etype)
+ast_bin_set_implicit_type(ael_context* ctx, ast_ref bin_or_ref, ast_etype etype)
 {
 	if (etype == AST_ETYPE_AUTO || etype == AST_ETYPE_ERROR) {
 		return;
@@ -2354,7 +2410,7 @@ ast_etype_str(ast_etype et, char* buf, size_t sz)
 //==========================================================
 // Loop-var unification — intersect etypes across all occurrences of
 // the same builtin in a sub-program's chain (built up at construction
-// in parse_context.{at_root, key_root}). Called at filter scope-pop
+// in ael_context.{at_root, key_root}). Called at filter scope-pop
 // and at end-of-parse for the standalone-filter entry.
 //
 
@@ -2376,7 +2432,7 @@ ast_unify_loop_var_chain(ast_pool* pool, ast_ref head, ael_diag_list* diags)
 
 		if (next == AST_ETYPE_ERROR) {
 			conflict = true;
-			conflict_offset = np->offset;
+			conflict_offset = ast_disp_offset(np);
 			conflict_sz = np->sz;
 			break;
 		}
@@ -2628,6 +2684,31 @@ ast_print(ast_pool* pool, const char* input, ast_ref node, int indent)
 		printf(":\n");
 		ast_print(pool, input, np->u.when_case.cond, indent + 4);
 		ast_print(pool, input, np->u.when_case.result, indent + 2);
+		printf("%*s)\n", indent, "");
+		break;
+
+	case AST_VAR_DEF:
+		printf(" \"%.*s\"\n", (int)np->u.var_def.name_sz, input + np->offset);
+		ast_print(pool, input, np->u.var_def.value, indent + 2);
+		printf("%*s)\n", indent, "");
+		break;
+
+	case AST_FUNC_ABS:
+	case AST_FUNC_CEIL:
+	case AST_FUNC_FLOOR:
+	case AST_FUNC_COUNT_ONE_BITS:
+		printf("\n");
+		ast_print(pool, input, np->u.func1.arg, indent + 2);
+		printf("%*s)\n", indent, "");
+		break;
+
+	case AST_FUNC_LOG:
+	case AST_FUNC_POW:
+	case AST_FUNC_FIND_BIT_LEFT:
+	case AST_FUNC_FIND_BIT_RIGHT:
+		printf("\n");
+		ast_print(pool, input, np->u.func2.arg1, indent + 2);
+		ast_print(pool, input, np->u.func2.arg2, indent + 2);
 		printf("%*s)\n", indent, "");
 		break;
 

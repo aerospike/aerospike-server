@@ -1,5 +1,5 @@
 /*
- * parse_context.h
+ * ael_context.h
  *
  * Copyright (C) 2026 Aerospike, Inc.
  *
@@ -27,7 +27,7 @@
 #include "exp/ael_diag.h"
 #include "exp/ast.h"
 
-typedef struct parse_context_s {
+typedef struct ael_context_s {
 	ast_pool* pool;
 	const char* input;
 	ast_ref root;
@@ -44,7 +44,7 @@ typedef struct parse_context_s {
 	uint32_t postfix_token_sz;
 	ast_ref cur_scope; // current AST_LET_LIST ref, or AST_REF_NULL
 	ast_ref bin_root; // head of canonical AST_BIN linked list
-	ast_ref local_bin_root; // head of $.bin:local:T AST_BIN list, off bin_root
+	ast_ref local_bin_root; // head of $.bin:LOCAL:T AST_BIN list, off bin_root
 	// Head of the $.key() (EXP_REC_KEY) node chain, linked through the
 	// otherwise-unused u.meta.param field. Walked post-parse to reject a
 	// key whose type never resolved (spec: no silent default types).
@@ -70,7 +70,7 @@ typedef struct parse_context_s {
 	// AST_REF_NULL at pop so a subsequent top-level filter starts clean.
 	ast_ref at_root;
 	ast_ref key_root;
-} parse_context;
+} ael_context;
 
 typedef struct {
 	uint32_t var_idx;
@@ -83,7 +83,7 @@ typedef struct {
 // var_defs follow it as siblings. let_scope.parent points to the
 // enclosing AST_LET_LIST (or AST_REF_NULL).
 static inline ael_var_lookup
-ael_find_var(parse_context* ctx, const char* name, uint32_t name_sz)
+ael_find_var(ael_context* ctx, const char* name, uint32_t name_sz)
 {
 	ael_var_lookup result = { .etype = AST_ETYPE_AUTO };
 
@@ -101,8 +101,7 @@ ael_find_var(parse_context* ctx, const char* name, uint32_t name_sz)
 			}
 
 			if (dp->u.var_def.name_sz == name_sz &&
-					memcmp(ctx->input + dp->u.var_def.name_offset, name,
-							name_sz) == 0) {
+					memcmp(ctx->input + dp->offset, name, name_sz) == 0) {
 				ast_node* vp = ast_pool_at(ctx->pool, dp->u.var_def.value);
 				result.var_idx = idx;
 				result.etype = vp->etype;

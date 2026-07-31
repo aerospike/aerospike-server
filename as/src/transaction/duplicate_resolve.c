@@ -419,10 +419,13 @@ dup_res_handle_ack(cf_node node, msg* m)
 
 	bool delete_from_hash = rw->dup_res_cb(rw);
 
-	// Keep the no-leak property local to this fabric handler: if the cb
-	// deferred (built no reply) the armed verbosity/detail would otherwise
-	// persist on this thread until the next continuation re-arms.
-	as_error_msg_clear();
+	// Keep the no-leak property local to this fabric handler. Disarm, not
+	// clear: fabric receive threads are pooled and rw_msg_cb dispatches
+	// unarmed work (repl_write_handle_op, dup_res_handle_request) onto the
+	// same thread, and that work authors storage details of its own. Leaving
+	// the tier armed would let it do so on behalf of whichever client this
+	// thread last served.
+	as_error_msg_disarm();
 
 	rw->dup_res_complete = true;
 

@@ -64,6 +64,9 @@ typedef enum {
 	AEL_PNAME_FIND,
 	AEL_PNAME_REPLACE,
 	AEL_PNAME_PATTERN,
+	AEL_PNAME_BASE,
+	AEL_PNAME_EXPONENT,
+	AEL_PNAME_X,
 } ael_pname_t;
 
 // Function family — selects grammar context and node-construction path.
@@ -71,7 +74,7 @@ typedef enum {
 //   BIT:    method-style `recv.name(...)`; BLOB receiver; bit builders.
 //   HLL:    method-style `recv.name(...)`; HLL receiver; hll builders.
 //   PATH:   method-style `recv.name(...)` CDT path functions (getKeys /
-//           set / count / asInt / ...); builds an AST_PATH_FUNC_* node and
+//           set / count / toInt / ...); builds an AST_PATH_FUNC_* node and
 //           routes through the existing path finalizers (bin / value / ctx).
 //   MODIFY: method-style `recv.name(expr)` whose body is parsed in a pushed
 //           filter scope (loop vars @ / @key / @index). The `method_open`
@@ -146,8 +149,13 @@ const char* ael_pname_str(ael_pname_t name);
 // ...). Contiguous block routed to the string finalizer by ael_resolve_str_fn.
 #define AEL_IS_STR_TYPE(t)                                                     \
 	((t) >= AST_PATH_FUNC_STR_LENGTH && (t) <= AST_PATH_FUNC_STR_REGEX_REPLACE)
+// The casts (toInt / toFloat / toString) — NK_UNARY wrappers around their
+// operand, not CDT ops, so the path finalizers route them to finish_cast /
+// ael_finalize_cast rather than the leaf-consuming builders.
+#define AEL_IS_CAST_TYPE(t)                                                    \
+	((t) >= AST_PATH_FUNC_CAST_INT && (t) <= AST_PATH_FUNC_CAST_STRING)
 // CDT path functions resolved via the func table (getKeys / set / count /
-// asInt / type / ...). Two ranges: the read/cast/get block and the mutation
+// toInt / type / ...). Two ranges: the read/cast/get block and the mutation
 // block. type() reaches the finalizers via method_fn — bare bin builds
 // AST_BIN_TYPE, value/ctx_list receivers reject it. AST_PATH_FUNC_GET is
 // synthesized (implicit get) and never arrives via method_fn — harmless.

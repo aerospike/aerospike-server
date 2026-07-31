@@ -807,11 +807,17 @@ write_master(rw_request* rw, as_transaction* tr)
 
 	as_exp* filter_exp = NULL;
 
-	// NOTE: Not setting error details here because it's
-	// already set in handle_meta_filter().
 	// Handle metadata filter if present.
 	if (! record_created && as_record_is_live(r) &&
 			(result = handle_meta_filter(tr, r, &filter_exp)) != 0) {
+		// handle_meta_filter() stages its own detail only on a build failure
+		// (AS_ERR_PARAMETER); stage the filtered-out message here for the
+		// metadata-FALSE result, mirroring read.c / delete.c.
+		if (result == AS_ERR_FILTERED_OUT) {
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"write filtered out by metadata filter");
+		}
+
 		write_master_failed(tr, &r_ref, tree, NULL, result);
 		return TRANS_DONE;
 	}
@@ -852,7 +858,12 @@ write_master(rw_request* rw, as_transaction* tr)
 	// already set in as_mrt_monitor_write_check().
 	// Apply record bins filter if present.
 	if (filter_exp != NULL) {
-		if ((result = read_and_filter_bins(&rd, filter_exp)) != 0) {
+		// A write principal may lack read; the filter explanation is
+		// stored-data-derived throughout, so it is emitted only if the
+		// principal also has read permission (checked lazily in
+		// read_and_filter_bins).
+		if ((result = read_and_filter_bins(&rd, filter_exp,
+					 as_transaction_may_explain_filter(tr), tr)) != 0) {
 			destroy_filter_exp(tr, filter_exp);
 			write_master_failed(tr, &r_ref, tree, &rd, result);
 			return TRANS_DONE;
@@ -1834,7 +1845,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 
 			bool created_bin = as_bin_is_unused(b);
-			const as_exp_ctx exp_ctx = { .ns = ns, .rd = rd, .r = rd->r };
+			const as_exp_ctx exp_ctx = { .ns = ns, .rd = rd, .r = rd->r, .tr = tr };
 			const iops_expop* expop = tr->origin == FROM_IOPS
 					? &tr->from.iops_orig->expops[i]
 					: NULL;
@@ -1874,9 +1885,9 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			int error_code;
 
 			// Not setting error details here because it's already set in process_bin_read_op().
-			read_op_result read_result =
-					process_bin_read_op(rd, op, respond_all_ops, result_bins,
-							p_n_result_bins, &result_bin, &error_code);
+			read_op_result read_result = process_bin_read_op(tr, rd, op,
+					respond_all_ops, result_bins, p_n_result_bins, &result_bin,
+					&error_code);
 
 			if (read_result == READ_OP_RESULT_ERROR) {
 				return -error_code;

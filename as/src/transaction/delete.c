@@ -588,7 +588,12 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 
 		// Apply predexp record bins filter if present.
 		if (filter_exp != NULL) {
-			if ((result = read_and_filter_bins(&rd, filter_exp)) != 0) {
+			// A delete principal may lack read; the filter explanation is
+			// stored-data-derived throughout, so it is emitted only if the
+			// principal also has read permission (checked lazily in
+			// read_and_filter_bins).
+			if ((result = read_and_filter_bins(&rd, filter_exp,
+						 as_transaction_may_explain_filter(tr), tr)) != 0) {
 				destroy_filter_exp(tr, filter_exp);
 				as_storage_record_close(&rd);
 				as_record_done(r_ref, ns);

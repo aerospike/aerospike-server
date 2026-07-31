@@ -113,7 +113,10 @@ int set_name_check_on_update(const struct as_transaction_s* tr,
 int handle_meta_filter(const struct as_transaction_s* tr,
 		const struct as_index_s* r, struct as_exp_s** exp);
 void destroy_filter_exp(const struct as_transaction_s* tr, struct as_exp_s* exp);
-int read_and_filter_bins(struct as_storage_rd_s* rd, struct as_exp_s* exp);
+int read_and_filter_bins(struct as_storage_rd_s* rd, struct as_exp_s* exp,
+		bool explain, const struct as_transaction_s* tr);
+bool as_exp_explain_allowed(const struct as_transaction_s* tr,
+		const struct as_storage_rd_s* rd);
 bool check_msg_key(struct as_msg_s* m, struct as_storage_rd_s* rd);
 bool get_msg_key(struct as_transaction_s* tr, struct as_storage_rd_s* rd);
 int handle_msg_key(struct as_transaction_s* tr, struct as_storage_rd_s* rd);
@@ -137,9 +140,10 @@ void udf_delete_bin(struct as_storage_rd_s* rd, const char* name);
 void write_resolved_bin(struct as_storage_rd_s* rd,
 		const struct as_msg_op_s* op, uint64_t msg_lut, struct as_bin_s* b);
 void delete_all_bins(struct as_storage_rd_s* rd);
-read_op_result process_bin_read_op(as_storage_rd* rd, as_msg_op* op,
-		bool respond_all_ops, as_bin* result_bins, uint32_t* p_n_result_bins,
-		as_bin** result_bin_r, int* error_code);
+read_op_result process_bin_read_op(const struct as_transaction_s* tr,
+		as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
+		as_bin* result_bins, uint32_t* p_n_result_bins, as_bin** result_bin_r,
+		int* error_code);
 void pickle_all(struct as_storage_rd_s* rd, struct rw_request_s* rw);
 void update_sindex(struct as_namespace_s* ns, struct as_index_ref_s* r_ref,
 		struct as_bin_s* old_bins, uint32_t n_old_bins,

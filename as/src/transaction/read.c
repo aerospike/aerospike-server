@@ -586,7 +586,8 @@ read_local(as_transaction* tr)
 
 	// Apply record bins filter if present.
 	if (filter_exp != NULL) {
-		if ((result = read_and_filter_bins(&rd, filter_exp)) != 0) {
+		if ((result = read_and_filter_bins(&rd, filter_exp,
+					 as_transaction_may_explain_filter(tr), tr)) != 0) {
 			destroy_filter_exp(tr, filter_exp);
 
 			if (result == AS_ERR_FILTERED_OUT) {
@@ -694,9 +695,9 @@ read_local(as_transaction* tr)
 			int error_code;
 
 			// Not setting error details here because it's already set in process_bin_read_op().
-			read_op_result read_result =
-					process_bin_read_op(&rd, op, respond_all_ops, result_bins,
-							&n_result_bins, &result_bin, &error_code);
+			read_op_result read_result = process_bin_read_op(tr, &rd, op,
+					respond_all_ops, result_bins, &n_result_bins, &result_bin,
+					&error_code);
 
 			if (read_result == READ_OP_RESULT_ERROR) {
 				as_bin_destroy_all(result_bins, n_result_bins);

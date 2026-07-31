@@ -118,13 +118,18 @@ detail_unique(const as_transaction* tr, bool is_write)
 void
 as_tsvc_process_transaction(as_transaction* tr)
 {
-	as_error_msg_arm_from_msgp(tr->msgp);
-	// It is safe to set error details after this point.
-
+	// Before arming - the XDR msgp is a synthetic as_proto followed by a
+	// ship_request* (xdr/reader.c), not a real cl_msg, so msg.info4 would land
+	// inside that pointer. This path builds no client reply, so it wants no
+	// details either: skip arming and run unarmed (verbosity is off between
+	// transactions), so the ship filter's own eval stages nothing.
 	if (tr->msgp->proto.type == PROTO_TYPE_INTERNAL_XDR) {
 		as_xdr_read(tr);
 		return;
 	}
+
+	as_error_msg_arm_from_msgp(tr->msgp);
+	// It is safe to set error details after this point.
 
 	int rv;
 	bool free_msgp = true;
@@ -401,6 +406,14 @@ as_tsvc_process_transaction(as_transaction* tr)
 	}
 
 Cleanup:
+
+	// Disarm on the way out, matching the fabric continuations (dup-res,
+	// repl-write, repl-ping). Any reply this transaction builds has been built
+	// by now; a detail left armed here would ride out on whatever this pooled
+	// service thread serves next. A transaction that finishes elsewhere -
+	// TRANS_IN_PROGRESS on a fabric thread, TRANS_WAITING back through here -
+	// re-arms at that entry point, so nothing built after that point is lost.
+	as_error_msg_disarm();
 
 	if (free_msgp && ! SHARED_MSGP(tr)) {
 		cf_free(msgp);

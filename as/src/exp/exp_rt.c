@@ -79,6 +79,7 @@ typedef struct exp_op_value_int_s op_value_int;
 typedef struct exp_op_value_float_s op_value_float;
 typedef struct exp_rt_value_s rt_value;
 typedef struct exp_runtime_s runtime;
+typedef struct exp_explain_state_s explain_state;
 
 // op_table lives in exp.c; reached here via the exp.h extern.
 typedef exp_op_table_entry op_table_entry;
@@ -120,6 +121,160 @@ static const rt_value rt_unk = { .type = RT_TRILEAN, .r_trilean = AS_EXP_UNK };
 // sets and eval compares the same pointer.
 const uint8_t exp_call_eval_token[1] = "";
 
+// "Short-circuit" = UNK or ERROR - every op that propagates UNK propagates
+// a fault the same way. Leave rt_value_is_unk() meaning UNK only, so a fault
+// is never mistaken for an absent/deferred operand.
+static inline bool
+rt_value_is_short_circuit(const rt_value* entry)
+{
+	return entry->type == RT_TRILEAN &&
+			(entry->r_trilean == AS_EXP_UNK || entry->r_trilean == AS_EXP_ERROR);
+}
+
+// Why a genuine eval fault occurred - drives the human message composed at
+// the boundary (exp_err_reason_msg). Values are internal, never on the wire.
+typedef enum {
+	EXP_ERR_NONE = 0,
+	EXP_ERR_DIV_ZERO, // integer division by zero
+	EXP_ERR_DIV_OVERFLOW, // INT64_MIN / -1
+	EXP_ERR_MOD_ZERO, // integer modulo by zero
+	EXP_ERR_MOD_OVERFLOW, // INT64_MIN % -1
+	EXP_ERR_REC_KEY, // corrupt stored record key
+	EXP_ERR_REGEX_OPERAND, // regex operand is not a string
+	EXP_ERR_NOT_A_LIST, // operand is not a list
+	EXP_ERR_NOT_A_MAP, // operand is not a map
+	EXP_ERR_BAD_MSGPACK, // malformed / untranslatable stored msgpack
+	EXP_ERR_CALL_ARG, // invalid argument to a CDT/bits/HLL sub-op
+	EXP_ERR_GEOJSON, // invalid geojson
+	EXP_ERR_UNORDERED_MAP // ordered comparison of an unordered map (unsupported)
+} exp_err_reason;
+
+// Stamp an eval fault into the trilean rt_value. 'op_ix' is the FAILING op's
+// own index - capture it as (rt->op_ix - 1) at eval_cb entry, because by
+// fault-detection time rt->op_ix has advanced past the op's operands. The
+// boundary reads err_op_ix/err_reason to reconstruct the trace and message.
+static inline void
+rt_set_error(rt_value* ret_val, uint32_t op_ix, exp_err_reason reason)
+{
+	ret_val->type = RT_TRILEAN;
+	ret_val->r_trilean = AS_EXP_ERROR;
+	ret_val->err_op_ix = op_ix;
+	ret_val->err_reason = (uint16_t)reason;
+}
+
+// In the explainer's re-eval (rt->explain set), stamp the decisive op's index
+// onto a non-ERROR trilean result, riding the same err_op_ix slot the fault
+// path uses. Used by the absent (UNK) sites; FALSE results are stamped
+// centrally in rt_eval. A no-op on the hot path.
+static inline void
+rt_mark_decisive(const runtime* rt, rt_value* ret_val, uint32_t op_ix)
+{
+	if (rt->explain != NULL) {
+		ret_val->err_op_ix = op_ix;
+	}
+}
+
+// Render a comparison operand as a short human string for the explainer -
+// scalars in full, collections/geo as a type placeholder. Truncates to 'cap'.
+// Returns the written length (no NUL).
+static uint16_t
+rt_value_render(const rt_value* v, char* buf, uint32_t cap)
+{
+	int n;
+
+	switch (v->type) {
+	case RT_NIL:
+		n = snprintf(buf, cap, "nil");
+		break;
+	case RT_INT:
+		n = snprintf(buf, cap, "%ld", (long)v->r_int);
+		break;
+	case RT_FLOAT:
+		n = snprintf(buf, cap, "%g", v->r_float);
+		break;
+	case RT_TRILEAN: {
+		const char* s = "unknown";
+
+		if (v->r_trilean == AS_EXP_TRUE) {
+			s = "true";
+		}
+		else if (v->r_trilean == AS_EXP_FALSE) {
+			s = "false";
+		}
+
+		n = snprintf(buf, cap, "%s", s);
+		break;
+	}
+	case RT_STR: {
+		// These are stored bin bytes, and they are packed as a msgpack str -
+		// so they must actually be text. A string bin is only warned about,
+		// not rejected, on the write path (string_from_wire), so the stored
+		// value can be arbitrary bytes; and truncating at a byte count can
+		// split a multi-byte code point in an otherwise valid value. Render a
+		// placeholder rather than ship either past a client's str decoder.
+		uint32_t sz = v->r_bytes.sz;
+
+		if (sz > cap - 1) {
+			sz = cap - 1;
+
+			// Back off to a code-point boundary - never leave a partial
+			// sequence at the end of the window.
+			while (sz != 0 && (v->r_bytes.contents[sz] & 0xc0) == 0x80) {
+				sz--;
+			}
+		}
+
+		// sz == 0 here means the whole window was continuation bytes, and
+		// cf_str_is_valid_utf8(_, 0) is vacuously true - so this must be
+		// checked before the validity test, not folded into it.
+		if (sz == 0 || ! cf_str_is_valid_utf8(v->r_bytes.contents, sz)) {
+			n = snprintf(buf, cap, "<string#%u>", v->r_bytes.sz);
+			break;
+		}
+
+		// Flatten control characters - they would otherwise ride out inside
+		// the str and break line-oriented consumers of the message.
+		for (uint32_t i = 0; i < sz; i++) {
+			uint8_t c = v->r_bytes.contents[i];
+
+			buf[i] = (c < 0x20 || c == 0x7f) ? ' ' : (char)c;
+		}
+
+		buf[sz] = '\0';
+		return (uint16_t)sz;
+	}
+	case RT_BLOB:
+		n = snprintf(buf, cap, "<blob>");
+		break;
+	case RT_GEO_CONST:
+	case RT_GEO_COMPILED:
+	case RT_GEO_STR:
+		n = snprintf(buf, cap, "<geojson>");
+		break;
+	case RT_MSGPACK:
+	case RT_BIN:
+	case RT_BIN_PTR:
+		n = snprintf(buf, cap, "<collection>");
+		break;
+	default:
+		n = snprintf(buf, cap, "<value>");
+		break;
+	}
+
+	if (n < 0) {
+		n = 0;
+	}
+	else if ((uint32_t)n >= cap) {
+		n = (int)(cap - 1); // snprintf truncated
+	}
+
+	return (uint16_t)n;
+}
+
+// Forward-declared for as_exp_eval / as_exp_eval_to_result, defined above it.
+static void stage_eval_fault(const as_exp* exp, uint32_t fault_ix,
+		exp_err_reason reason);
+
 //==========================================================
 // Forward declarations.
 //
@@ -158,7 +313,7 @@ static const uint8_t* rt_value_get_str(const rt_value* val, uint32_t* sz_r);
 static as_exp_trilean cmp_bytes(exp_op_code code, const rt_value* e0,
 		const rt_value* e1);
 static as_exp_trilean cmp_msgpack(exp_op_code code, const rt_value* v0,
-		const rt_value* v1);
+		const rt_value* v1, bool* is_unordered_map);
 
 // Runtime call utilities.
 static void call_cleanup_fn(call_cleanup* cc);
@@ -177,7 +332,14 @@ static void display_msgpack(msgpack_in* mp, cf_dyn_buf* db);
 // Public API.
 //
 
-bool
+// Tri-state so the caller can tell a fault from a plain non-match:
+//   AS_EXP_TRUE  - produced a bin value
+//   AS_EXP_UNK   - clean non-match, no detail staged
+//   AS_EXP_ERROR - eval fault; stages the eval-phase trace + message (the
+//                  caller's status is unchanged)
+// A materialization fault here (bad geojson / msgpack / unexpected type) has
+// no sub-op index to point at, so it reconstructs from the root (op_ix 0).
+as_exp_trilean
 as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 		cf_ll_buf* particles_llb)
 {
@@ -201,7 +363,7 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 
 	if (ret_val.type == RT_BIN_PTR) {
 		rt_value_bin_ptr_to_bin(&rt, rb, &ret_val, particles_llb);
-		return true;
+		return AS_EXP_TRUE;
 	}
 
 	switch (ret_val.type) {
@@ -217,8 +379,16 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 		as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_FLOAT);
 		break;
 	case RT_TRILEAN:
+		if (ret_val.r_trilean == AS_EXP_ERROR) {
+			// A fault propagated up to the top. ret_val carries the failing
+			// op's index (err_op_ix) and reason (err_reason) - reconstruct.
+			stage_eval_fault(exp, ret_val.err_op_ix,
+					(exp_err_reason)ret_val.err_reason);
+			return AS_EXP_ERROR;
+		}
+
 		if (ret_val.r_trilean == AS_EXP_UNK) {
-			return false;
+			return AS_EXP_UNK;
 		}
 
 		rb->particle =
@@ -251,7 +421,8 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 				as_bin_particle_destroy(rb);
 			}
 
-			return false;
+			stage_eval_fault(exp, 0, EXP_ERR_GEOJSON);
+			return AS_EXP_ERROR;
 		}
 
 		break;
@@ -262,7 +433,8 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 		if (! cf_str_is_valid_utf8(ret_val.r_bytes.contents, ret_val.r_bytes.sz)) {
 			cf_ticker_warning(AS_EXP,
 					"as_exp_eval - invalid UTF-8 detected in string data");
-			return false;
+			stage_eval_fault(exp, 0, EXP_ERR_BAD_MSGPACK);
+			return AS_EXP_ERROR;
 		}
 
 		rb->particle = rt_alloc_mem(&rt, sizeof(cdt_mem) + ret_val.r_bytes.sz,
@@ -312,7 +484,8 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 	case RT_MSGPACK:
 		if (! msgpack_to_bin(&rt, rb, &ret_val, particles_llb)) {
 			cf_warning(AS_EXP, "as_exp_eval - invalid msgpack");
-			return false;
+			stage_eval_fault(exp, 0, EXP_ERR_BAD_MSGPACK);
+			return AS_EXP_ERROR;
 		}
 
 		break;
@@ -320,10 +493,11 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 		cf_warning(AS_EXP, "as_exp_eval - unexpected result type (%u)",
 				ret_val.type);
 		rt_value_destroy(&ret_val);
-		return false;
+		stage_eval_fault(exp, 0, EXP_ERR_BAD_MSGPACK);
+		return AS_EXP_ERROR;
 	}
 
-	return true;
+	return AS_EXP_TRUE;
 }
 
 uint32_t
@@ -453,7 +627,9 @@ as_exp_result_has_nonstorage(const as_exp_result* res)
 	return res->type == AS_EXP_RESULT_MSGPACK && res->msgpack.has_nonstorage != 0;
 }
 
-bool
+// Tri-state like as_exp_eval: TRUE produced a result, UNK is a clean
+// non-match, ERROR is a fault that also stages the eval-phase trace + message.
+as_exp_trilean
 as_exp_eval_to_result(const as_exp* exp, const as_exp_ctx* ctx, as_exp_result* res)
 {
 	define_deferred_array(vars, rt_value, exp->max_var_count);
@@ -497,7 +673,7 @@ as_exp_eval_to_result(const as_exp* exp, const as_exp_ctx* ctx, as_exp_result* r
 		case AS_PARTICLE_TYPE_LIST:
 			res->type = AS_EXP_RESULT_BIN;
 			res->particle.ptr = b->particle;
-			return true;
+			return AS_EXP_TRUE;
 		default:
 			break;
 		}
@@ -509,7 +685,8 @@ as_exp_eval_to_result(const as_exp* exp, const as_exp_ctx* ctx, as_exp_result* r
 	if (! rt_value_bin_translate(&t_val, &ret_val)) {
 		cf_warning(AS_EXP, "as_exp_eval_to_result - unexpected result type (%u)",
 				ret_val.type);
-		return false;
+		stage_eval_fault(exp, 0, EXP_ERR_BAD_MSGPACK);
+		return AS_EXP_ERROR;
 	}
 
 	switch (t_val.type) {
@@ -532,8 +709,14 @@ as_exp_eval_to_result(const as_exp* exp, const as_exp_ctx* ctx, as_exp_result* r
 		as_pack_double(&pk, t_val.r_float);
 		break;
 	case RT_TRILEAN:
+		if (t_val.r_trilean == AS_EXP_ERROR) {
+			stage_eval_fault(exp, t_val.err_op_ix,
+					(exp_err_reason)t_val.err_reason);
+			return AS_EXP_ERROR;
+		}
+
 		if (t_val.r_trilean == AS_EXP_UNK) {
-			return false;
+			return AS_EXP_UNK;
 		}
 
 		res->type = AS_EXP_RESULT_MP_SMALL;
@@ -549,7 +732,8 @@ as_exp_eval_to_result(const as_exp* exp, const as_exp_ctx* ctx, as_exp_result* r
 		msgpack_in mp = { .buf = res->msgpack.ptr, .buf_sz = res->msgpack.sz };
 
 		if (msgpack_sz(&mp) == 0) {
-			return false;
+			stage_eval_fault(exp, 0, EXP_ERR_BAD_MSGPACK);
+			return AS_EXP_ERROR;
 		}
 
 		res->msgpack.has_nonstorage = (mp.has_nonstorage ? 1 : 0);
@@ -591,10 +775,11 @@ as_exp_eval_to_result(const as_exp* exp, const as_exp_ctx* ctx, as_exp_result* r
 		cf_warning(AS_EXP, "as_exp_eval_to_result - unexpected result type (%u)",
 				t_val.type);
 		rt_value_destroy(&t_val);
-		return false;
+		stage_eval_fault(exp, 0, EXP_ERR_BAD_MSGPACK);
+		return AS_EXP_ERROR;
 	}
 
-	return true;
+	return AS_EXP_TRUE;
 }
 
 void
@@ -687,6 +872,284 @@ rt_get_bin_name(const runtime* rt, uint32_t idx)
 	return rt->bin_table->base + rt->bin_table->table[idx].off;
 }
 
+// Human message for a genuine eval fault, composed at the boundary
+// (reason -> string). The structured trace carries op/path/depth/outcome
+// separately. Shared by msgpack and AEL expressions - the eval path is common.
+static const char*
+exp_err_reason_msg(exp_err_reason reason)
+{
+	switch (reason) {
+	case EXP_ERR_DIV_ZERO:
+		return "integer division by zero";
+	case EXP_ERR_DIV_OVERFLOW:
+		return "integer division overflow";
+	case EXP_ERR_MOD_ZERO:
+		return "integer modulo by zero";
+	case EXP_ERR_MOD_OVERFLOW:
+		return "integer modulo overflow";
+	case EXP_ERR_REC_KEY:
+		return "corrupt stored record key";
+	case EXP_ERR_REGEX_OPERAND:
+		return "regex operand is not a string";
+	case EXP_ERR_NOT_A_LIST:
+		return "operand is not a list";
+	case EXP_ERR_NOT_A_MAP:
+		return "operand is not a map";
+	case EXP_ERR_BAD_MSGPACK:
+		return "malformed stored value";
+	case EXP_ERR_CALL_ARG:
+		return "invalid argument to a collection operation";
+	case EXP_ERR_GEOJSON:
+		return "invalid GeoJSON";
+	case EXP_ERR_UNORDERED_MAP:
+		return "cannot compare an unordered map";
+	default:
+		return "expression evaluation faulted";
+	}
+}
+
+// Render an op name into 'dst' (NUL-terminated, truncated to cap), returning
+// the byte length.
+static uint16_t
+exp_render_op_name(exp_op_code code, char* dst, uint32_t cap)
+{
+	if (cap == 0) { // no room even for the NUL - avoid the cap - 1 underflow
+		return 0;
+	}
+
+	const char* name = op_table[code].name;
+
+	if (name == NULL) {
+		name = "op";
+	}
+
+	size_t len = strlen(name);
+
+	if (len > cap - 1) { // cap >= 1 here (guarded above), so cap - 1 is safe
+		len = cap - 1;
+	}
+
+	memcpy(dst, name, len);
+	dst[len] = '\0';
+
+	return (uint16_t)len;
+}
+
+// Stage a field-45 eval-phase trace for op 'op_ix' with the given outcome
+// (fault / false / absent), reconstructing the ancestor path and focusable
+// snippet from the compiled op array. Trace-only (top verbosity tier) - the
+// caller pairs it with any message it wants.
+static void
+stage_eval_trace(const as_exp* exp, uint32_t op_ix, uint8_t outcome,
+		const explain_state* ex)
+{
+	// First-set-wins is enforced in as_error_exp_trace_set(), but check it
+	// here too - everything below (the ancestor walk, the op-name renders and
+	// the subtree display) would otherwise be built and then discarded.
+	if (g_error_verbosity < AS_ERROR_VERBOSITY_TRACE || g_error_exp_trace.set) {
+		return;
+	}
+
+	as_error_exp_trace t = { .phase = AS_EXP_TRACE_PHASE_EVAL,
+		.has_outcome = true,
+		.outcome = outcome };
+
+	// Guard a corrupt index (defends against a dropped err_op_ix)
+	// - the root op's instr_end_ix is the total op count.
+	const op_base_mem* root = (const op_base_mem*)exp->mem;
+	bool walk_ok = true;
+
+	if (op_ix < root->instr_end_ix) {
+		// Walk the preorder, variable-size op array collecting the ancestor
+		// chain root -> op_ix: descend into an op whose subtree contains the
+		// target, skip a sibling subtree entirely. Keep the outermost
+		// (cap - 1) frames + the target op; depth is the true nesting depth.
+		exp_op_code chain[AS_EXP_TRACE_MAX_FRAMES];
+		uint16_t n_kept = 0;
+		uint16_t depth = 0;
+		const uint8_t* p = exp->mem;
+		uint32_t cursor = 0;
+
+		while (cursor < op_ix) {
+			const op_base_mem* op = (const op_base_mem*)p;
+
+			if (op_ix < op->instr_end_ix) { // ancestor - descend
+				if (n_kept < AS_EXP_TRACE_MAX_FRAMES - 1) {
+					chain[n_kept++] = op->code;
+				}
+
+				depth++;
+				p += op_table[op->code].size;
+				cursor++;
+			}
+			else { // sibling subtree - skip [cursor, end)
+				uint32_t end = op->instr_end_ix;
+
+				// Every op's subtree includes itself and ends within the op
+				// array, so cursor < end <= root->instr_end_ix always holds
+				// for a well-formed one. Too small (the calloc'd 0 an omitted
+				// instr_end_ix stamp would leave) advances neither p nor
+				// cursor - an unkillable spin. Too large walks p off the end
+				// of the array and indexes op_table with whatever it reads.
+				// Bail out with no path on either.
+				if (end <= cursor || end > root->instr_end_ix) {
+					walk_ok = false;
+					break;
+				}
+
+				while (cursor < end) {
+					const op_base_mem* s = (const op_base_mem*)p;
+					p += op_table[s->code].size;
+					cursor++;
+				}
+			}
+		}
+
+		// Malformed op array - 'p' is not the target op, so naming it would be
+		// worse than saying nothing. Skip the op/path/snippet block but fall
+		// through to the operand attach below, matching what the sibling
+		// corrupt-op_ix guard does.
+		if (walk_ok) {
+			exp_op_code op_code = ((const op_base_mem*)p)->code;
+
+			depth++; // the target op itself
+
+			t.op_len = exp_render_op_name(op_code, t.op, sizeof(t.op));
+			t.has_op = true;
+
+			for (uint16_t i = 0; i < n_kept; i++) {
+				exp_render_op_name(chain[i], t.path[i], sizeof(t.path[i]));
+			}
+
+			exp_render_op_name(op_code, t.path[n_kept], sizeof(t.path[n_kept]));
+
+			t.n_frames = (uint16_t)(n_kept + 1);
+			t.depth = depth;
+			t.path_truncated = depth > AS_EXP_TRACE_MAX_FRAMES;
+			t.has_path = true;
+
+			const ael_src_map* ael_map = (const ael_src_map*)exp->ael_map;
+
+			if (ael_map != NULL) {
+				// AEL expression: resolve the op's ordinal through the
+				// compiled-in source map and render the focus-marked source
+				// slice in place of the op-stream disassembly. byte_offset
+				// (msgpack payload space) is deliberately never set for AEL.
+				t.has_lang = true;
+				t.lang = AS_EXP_TRACE_LANG_AEL;
+
+				if (op_ix < ael_map->n_ops) {
+					const ael_src_entry* e = &ael_map->entries[op_ix];
+
+					t.has_ael_offset = true;
+					t.ael_offset = e->offset;
+					t.has_ael_span = e->sz != 0;
+					t.ael_span = e->sz;
+
+					t.snippet_len = exp_render_ael_src_snippet(ael_map->src,
+							ael_map->src_sz, e->offset, e->sz, t.snippet,
+							sizeof(t.snippet));
+					t.has_snippet = t.snippet_len != 0;
+				}
+			}
+			else {
+				// Wire expression: render the target op's subtree as
+				// op_name(arg, ...) via the display machinery. The scratch
+				// runtime needs no ctx/record, but it MUST carry the compiled
+				// bin_table - display_bin resolves bin names through it, so
+				// leaving it NULL would crash on a subtree containing a bin
+				// reference. On a render that overflows the cap, leave
+				// has_snippet false.
+				//
+				// display_max_sz is what makes the render safe to run at all:
+				// it bounds the OUTPUT. A single op can emit bytes
+				// proportional to its own operands - a CDT context walks an
+				// input-controlled element list - so subtree op count bounds
+				// nothing. Without the budget a fault near the root of a
+				// near-EXP_MAX_SIZE expression renders far more than the cap,
+				// grows snip_db onto the heap, and has all of it thrown away
+				// by the cap check below - once per record, and batch re-arms
+				// per row. Every payload-driven loop consults it, so snip_db
+				// stays within one element's overshoot of its stack buffer.
+				//
+				// The op-count skip stays as a cheap pre-filter: every op
+				// contributes at least one byte, so a subtree of more ops than
+				// the cap cannot fit, and skipping it drops no snippet the cap
+				// check would have kept.
+				uint32_t n_sub_ops =
+						((const op_base_mem*)p)->instr_end_ix - op_ix;
+
+				if (n_sub_ops < AS_EXP_TRACE_SNIPPET_MAX) {
+					cf_dyn_buf_define_size(snip_db, AS_EXP_TRACE_SNIPPET_MAX);
+					runtime snip_rt = { .instr_ptr = p,
+						.op_ix = op_ix,
+						.bin_table = exp->bin_table,
+						.display_max_sz = AS_EXP_TRACE_SNIPPET_MAX };
+
+					exp_rt_display(&snip_rt, &snip_db);
+
+					// The UTF-8 test gates the wire, not the renderer: the display
+					// callbacks copy bin names and string literals verbatim and
+					// also feed the cf_detail log, where raw bytes are harmless.
+					// An expression bin name is length-checked only
+					// (as_bin_name_sz_check), so any non-NUL byte compiles -
+					// checking here covers every display callback at once,
+					// including ones added later. Key 6 is a msgpack str, so an
+					// invalid one would fault the client's decoder on the very
+					// error being reported; drop the snippet whole, as the budget
+					// cap above already does.
+					if (snip_db.used_sz != 0 &&
+							snip_db.used_sz < AS_EXP_TRACE_SNIPPET_MAX &&
+							cf_str_is_valid_utf8(snip_db.buf, snip_db.used_sz)) {
+						// Flatten control characters - inside a str they would
+						// break line-oriented consumers of the message.
+						for (uint32_t i = 0; i < snip_db.used_sz; i++) {
+							uint8_t c = snip_db.buf[i];
+							bool is_ctl = c < 0x20 || c == 0x7f;
+
+							t.snippet[i] = is_ctl ? ' ' : (char)c;
+						}
+
+						t.snippet[snip_db.used_sz] = '\0';
+						t.snippet_len = (uint16_t)snip_db.used_sz;
+						t.has_snippet = true;
+					}
+
+					cf_dyn_buf_free(&snip_db);
+				}
+			}
+		}
+	}
+
+	// Attach the decisive comparison's operand values, but only when they
+	// belong to the op we are tracing (ex->operands_ix).
+	if (ex != NULL && ex->operands_set && ex->operands_ix == op_ix) {
+		t.has_operands = true;
+		t.lhs_len = ex->lhs_len;
+		memcpy(t.lhs, ex->lhs, ex->lhs_len);
+		t.lhs[ex->lhs_len] = '\0';
+		t.rhs_len = ex->rhs_len;
+		memcpy(t.rhs, ex->rhs, ex->rhs_len);
+		t.rhs[ex->rhs_len] = '\0';
+	}
+
+	as_error_exp_trace_set(&t);
+}
+
+// Stage an eval fault - the eval-phase trace (outcome=fault, top tier) plus
+// the per-reason message (tier 2+).
+static void
+stage_eval_fault(const as_exp* exp, uint32_t fault_ix, exp_err_reason reason)
+{
+	stage_eval_trace(exp, fault_ix, AS_EXP_TRACE_OUTCOME_FAULT, NULL);
+
+	// Guarded so below the message tier the reason lookup + set_fmt are
+	// skipped entirely (nothing would be emitted).
+	if (g_error_verbosity >= AS_ERROR_VERBOSITY_MESSAGES) {
+		as_error_details_set_fmt(AS_SUB_NONE, "%s", exp_err_reason_msg(reason));
+	}
+}
+
 static as_exp_trilean
 match_internal(const as_exp* exp, const as_exp_ctx* ctx)
 {
@@ -728,7 +1191,210 @@ match_internal(const as_exp* exp, const as_exp_ctx* ctx)
 		return ctx->rd == NULL ? AS_EXP_UNK : AS_EXP_FALSE;
 	}
 
+	if (ret_val.r_trilean == AS_EXP_ERROR) {
+		if (ctx->rd == NULL) {
+			// Metadata (pre-bin) phase - not authoritative. A sibling that is
+			// UNK only because its bin is not loaded can still determine the
+			// match once bins load (e.g. or(bin > 5, div(x, 0)) on a record
+			// whose bin > 5), so surfacing the fault here could drop a record
+			// that should match. Defer like a top-level UNK; the record phase
+			// re-evaluates and surfaces the fault there.
+			return AS_EXP_UNK;
+		}
+
+		// Record phase - authoritative. Stage the eval-phase trace + message;
+		// the match status is unchanged (the caller maps ERROR to the same
+		// non-match it returns for FALSE).
+		stage_eval_fault(exp, ret_val.err_op_ix,
+				(exp_err_reason)ret_val.err_reason);
+	}
+
 	return ret_val.r_trilean;
+}
+
+// The top-level result of an explainer re-eval, flattened to scalars.
+typedef struct explain_top_s {
+	bool is_trilean;
+	as_exp_trilean trilean;
+	uint32_t op_ix; // decisive / absent / fault op (valid for a trilean result)
+	exp_err_reason err_reason; // valid only when trilean == AS_EXP_ERROR
+} explain_top;
+
+// Shared re-eval for the decision explainers. Re-runs the compiled expression
+// with the explain machinery armed (runtime.explain) so ops record the
+// decisive/absent op index - and a comparison its operand values - into *ex,
+// then hands back the top result as scalars in *out (no pointers into the
+// freed eval stack). Mirrors match_internal's runtime setup exactly.
+static void
+explain_reeval(const as_exp* exp, const as_exp_ctx* ctx, explain_state* ex,
+		explain_top* out)
+{
+	define_deferred_array(vars, rt_value, exp->max_var_count);
+	rt_value ret_val;
+
+	runtime rt = {
+		.ctx = ctx,
+		.instr_ptr = exp->mem,
+		.vars = vars,
+		.bin_table = exp->bin_table,
+		.explain = ex,
+		.vars_builtin = { [0 ...(AS_EXP_BUILTIN_COUNT - 1)] = rt_unk },
+	};
+
+	// Bins occupy the first var slots and lazy-load on first access. The
+	// .bin_table wiring and this RT_END init are both required, else the
+	// re-eval's eval_bin reads uninitialized slots / a NULL bin_table.
+	for (uint32_t i = 0; i < exp->max_var_count; i++) {
+		rt.vars[i] = (rt_value){ .type = RT_END };
+	}
+
+	op_value_geo geo_mem = {
+		.contents = NULL
+	}; // 1 object -- only value built-in var should have geo
+
+	// A no-op when ctx->vars_table is NULL (true for a top-level filter or value
+	// read), so this faithfully reproduces as_exp_eval, which omits it.
+	rt_init_builtin_vars(&rt, &geo_mem);
+	rt_eval(&rt, &ret_val);
+
+	if (geo_mem.contents != NULL &&
+			geo_mem.compiled.type == GEO_REGION) { // geojson needs cleanup
+		geo_region_destroy(geo_mem.compiled.region);
+	}
+
+	// Free the bin particles this re-eval materialized into rt.vars[] -
+	// without this, every explain pass leaks a particle per touched bin.
+	rt_release_bins(&rt, &ret_val);
+
+	out->is_trilean = ret_val.type == RT_TRILEAN;
+
+	if (out->is_trilean) {
+		out->trilean = ret_val.r_trilean;
+		out->op_ix = ret_val.err_op_ix;
+		out->err_reason = (exp_err_reason)ret_val.err_reason;
+	}
+	else {
+		rt_value_destroy(&ret_val);
+	}
+}
+
+void
+as_exp_explain_filter(const as_exp* exp, const as_exp_ctx* ctx)
+{
+	// Explain a clean single-record filter non-match: re-run the expression
+	// with runtime.explain set, then stage an eval-phase trace naming the
+	// deciding sub-expression and its outcome. pre: record phase (rd != NULL),
+	// single-record request, non-match already returned - never per row in a
+	// query/scan. A no-op below the trace tier.
+	//
+	// The caller must already have established that the principal may read
+	// the record: everything staged here is stored-data-derived, including
+	// the outcome (FALSE vs ABSENT reveals bin existence) and the decisive op
+	// index (which conjunct of an and-chain failed), not just the operand
+	// values. read_and_filter_bins() makes that check.
+	cf_assert(ctx->rd != NULL, AS_EXP, "invalid parameter");
+
+	if (g_error_verbosity < AS_ERROR_VERBOSITY_TRACE) {
+		return;
+	}
+
+	// A fault during the authoritative match already staged a trace, which
+	// outranks any explanation - skip the redundant re-eval.
+	if (g_error_exp_trace.set) {
+		return;
+	}
+
+	explain_state ex = { 0 };
+	explain_top top;
+
+	explain_reeval(exp, ctx, &ex, &top);
+
+	// A non-boolean top result can't happen for a compiled filter, but if it
+	// does there is nothing meaningful to explain - render the whole expression
+	// as a plain FALSE.
+	if (! top.is_trilean) {
+		stage_eval_trace(exp, 0, AS_EXP_TRACE_OUTCOME_FALSE, NULL);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"filtered out - filter expression evaluated to false");
+		return;
+	}
+
+	// Each arm stages the trace THEN authors the message, so
+	// as_error_details_set_fmt's eager assembly picks up the just-staged trace.
+	switch (top.trilean) {
+	case AS_EXP_FALSE:
+		// A real predicate FALSE: op_ix points at the deciding clause.
+		stage_eval_trace(exp, top.op_ix, AS_EXP_TRACE_OUTCOME_FALSE, &ex);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"filtered out - filter expression evaluated to false");
+		break;
+	case AS_EXP_UNK:
+		// A referenced bin/key was absent - op_ix points at the absent site.
+		stage_eval_trace(exp, top.op_ix, AS_EXP_TRACE_OUTCOME_ABSENT, NULL);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"filtered out - filter references an absent bin or key");
+		break;
+	case AS_EXP_ERROR:
+		// Shouldn't happen (the authoritative pass returned a clean
+		// non-match), but stay correct: report a fault, not a false/absent
+		// explanation.
+		stage_eval_fault(exp, top.op_ix, top.err_reason);
+		break;
+	default: // AS_EXP_TRUE - the record actually matches; nothing to explain
+		break;
+	}
+}
+
+// The value-read counterpart of as_exp_explain_filter: explain why an
+// expression op produced no value (a clean UNK from as_exp_eval). A value UNK
+// is an absent / wrong-type reference (outcome ABSENT). No operand values are
+// staged, but the outcome and the decisive op index are still functions of the
+// stored record - which reference went absent tells the caller whether that
+// bin exists and whether it has the referenced type - so the caller must have
+// established read permission exactly as on the filter side. eval_op() makes
+// that check. pre: record phase; a no-op below the trace tier or once a fault
+// already staged its trace.
+void
+as_exp_explain_value(const as_exp* exp, const as_exp_ctx* ctx)
+{
+	cf_assert(ctx->rd != NULL, AS_EXP, "invalid parameter");
+
+	if (g_error_verbosity < AS_ERROR_VERBOSITY_TRACE) {
+		return;
+	}
+
+	// A fault already staged its trace in as_exp_eval - skip the redundant
+	// re-eval.
+	if (g_error_exp_trace.set) {
+		return;
+	}
+
+	explain_state ex = { 0 };
+	explain_top top;
+
+	explain_reeval(exp, ctx, &ex, &top);
+
+	// A value materialized on the re-eval - nothing to explain. Shouldn't happen
+	// (eval_op only calls this after a clean AS_EXP_UNK), but stay correct.
+	if (! top.is_trilean) {
+		return;
+	}
+
+	switch (top.trilean) {
+	case AS_EXP_UNK:
+		// A referenced bin/key was absent or read at the wrong type - op_ix
+		// points at the absent site.
+		stage_eval_trace(exp, top.op_ix, AS_EXP_TRACE_OUTCOME_ABSENT, NULL);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"operation not applicable - expression references an absent bin or key");
+		break;
+	case AS_EXP_ERROR:
+		// Defensive - report a fault, not an absent explanation.
+		stage_eval_fault(exp, top.op_ix, top.err_reason);
+		break;
+	default: // AS_EXP_TRUE / AS_EXP_FALSE - a value materialized; nothing to do
+		break;
+	}
 }
 
 static bool
@@ -736,12 +1402,33 @@ rt_eval(runtime* rt, rt_value* ret_val)
 {
 	op_base_mem* ob = (op_base_mem*)rt->instr_ptr;
 	const op_table_entry* entry = &op_table[ob->code];
+	uint32_t self_ix = rt->op_ix; // this op's index, before children advance it
+
 	rt->op_ix++;
 	rt->instr_ptr += entry->size;
 	*ret_val = (rt_value){ 0 };
 	entry->eval_cb(rt, ob, ret_val);
 
-	bool ret = rt_value_is_unknown(ret_val);
+	// Short-circuit on UNK or ERROR - a parent that copies a short-circuit
+	// child propagates a fault verbatim. The Kleene ops (eval_and / eval_or)
+	// remember a fault but let a determining sibling override it, so the
+	// match outcome is unchanged.
+	bool ret = rt_value_is_short_circuit(ret_val);
+
+	// Decisive-op stamp for the explainer. A definite FALSE never
+	// short-circuits, so a FALSE out of any op is that op's own decision -
+	// stamp self (also clears any stale err_op_ix a leaf left in the aliased
+	// union). Excluded because their FALSE is a single child's decision,
+	// already stamped in the value they pass up: 'and' (its deciding
+	// conjunct) and the transparent wrappers 'let' / 'cond' - stamping the
+	// wrapper would obscure the deciding comparison and detach its captured
+	// operands (keyed to the comparison's op index). UNK is left alone: it is
+	// propagated, or stamped at its absent site.
+	if (rt->explain != NULL && ret_val->type == RT_TRILEAN &&
+			ret_val->r_trilean == AS_EXP_FALSE && ob->code != EXP_AND &&
+			ob->code != EXP_LET && ob->code != EXP_COND) {
+		ret_val->err_op_ix = self_ix;
+	}
 
 	return ret;
 }
@@ -749,16 +1436,20 @@ rt_eval(runtime* rt, rt_value* ret_val)
 void
 exp_eval_unknown(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
-	(void)rt;
 	(void)ob;
 
 	ret_val->type = RT_TRILEAN;
 	ret_val->r_trilean = AS_EXP_UNK;
+	// An unknown() reference is an absent site - attribute it to itself.
+	rt_mark_decisive(rt, ret_val, rt->op_ix - 1);
 }
 
 void
 exp_eval_compare(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
+	// This op's own index, before the operand rt_evals advance op_ix.
+	uint32_t self_ix = rt->op_ix - 1;
+
 	rt_value arg0;
 	rt_value arg1;
 
@@ -786,11 +1477,44 @@ exp_eval_compare(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	defer_rt_value_destroy(v0);
 	defer_rt_value_destroy(v1);
 
+	// A post-translate ERROR can only be a geo materialization fault (a
+	// corrupt stored geojson bin - see json_to_rt_geo). Check ERROR
+	// specifically: translate CAN yield a clean UNK (e.g. an HLL operand is
+	// not comparable), which must fall through to the unknown check below,
+	// not be misreported as a fault.
+	if ((v0.type == RT_TRILEAN && v0.r_trilean == AS_EXP_ERROR) ||
+			(v1.type == RT_TRILEAN && v1.r_trilean == AS_EXP_ERROR)) {
+		rt_set_error(ret_val, self_ix, EXP_ERR_GEOJSON);
+		return;
+	}
+
+	// A stored collection whose payload doesn't peek is corrupt storage, not
+	// a type mismatch - classify it as a fault before the rt_is_type gate
+	// below flattens it to a clean UNK. An empty payload is corrupt by the
+	// same token, and msgpack_peek_type() already reports MSGPACK_TYPE_ERROR
+	// for one - the sz == 0 tests are a NULL-safety belt, since contents may
+	// be NULL when sz is 0, not a bounds check.
+	if ((v0.type == RT_MSGPACK &&
+				(v0.r_bytes.sz == 0 ||
+						msgpack_buf_peek_type(v0.r_bytes.contents,
+								v0.r_bytes.sz) == MSGPACK_TYPE_ERROR)) ||
+			(v1.type == RT_MSGPACK &&
+					(v1.r_bytes.sz == 0 ||
+							msgpack_buf_peek_type(v1.r_bytes.contents,
+									v1.r_bytes.sz) == MSGPACK_TYPE_ERROR))) {
+		rt_set_error(ret_val, self_ix, EXP_ERR_BAD_MSGPACK);
+		return;
+	}
+
 	ret_val->type = RT_TRILEAN;
 
 	if (rt_value_is_unknown(&v0) || rt_value_is_unknown(&v1) ||
 			! rt_is_type(&v0, ob->rtype) || ! rt_is_type(&v1, ob->rtype)) {
 		ret_val->r_trilean = AS_EXP_UNK;
+		// Stamp this comparison as the decisive op - without it err_op_ix
+		// stays 0 and the explainer attributes an ABSENT outcome to the root,
+		// highlighting the whole expression instead of this operand.
+		rt_mark_decisive(rt, ret_val, self_ix);
 		return;
 	}
 
@@ -824,17 +1548,45 @@ exp_eval_compare(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		break;
 	}
 	case EXP_RTYPE_LIST:
-	case EXP_RTYPE_MAP:
-		ret_val->r_trilean = cmp_msgpack(ob->code, &v0, &v1);
+	case EXP_RTYPE_MAP: {
+		bool is_unordered_map = false;
+
+		ret_val->r_trilean = cmp_msgpack(ob->code, &v0, &v1, &is_unordered_map);
+
+		// Distinguish a legal-but-unsupported unordered-map comparison from
+		// genuinely malformed stored msgpack, so the client message is
+		// accurate.
+		if (ret_val->r_trilean == AS_EXP_ERROR) {
+			rt_set_error(ret_val, self_ix,
+					is_unordered_map ? EXP_ERR_UNORDERED_MAP
+									 : EXP_ERR_BAD_MSGPACK);
+		}
+
 		break;
+	}
 	default:
 		cf_crash(AS_EXP, "unexpected type %u", ob->rtype);
+	}
+
+	// In explain mode a definite FALSE comparison is the decisive clause -
+	// render its operand values before the deferred destroys run, keyed by
+	// this op's index.
+	if (ret_val->r_trilean == AS_EXP_FALSE && rt->explain != NULL) {
+		explain_state* ex = rt->explain;
+
+		ex->lhs_len = rt_value_render(&v0, ex->lhs, sizeof(ex->lhs));
+		ex->rhs_len = rt_value_render(&v1, ex->rhs, sizeof(ex->rhs));
+		ex->operands_ix = self_ix;
+		ex->operands_set = true;
 	}
 }
 
 void
 exp_eval_cmp_regex(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
+	// This op's own index, before the operand rt_evals advance op_ix.
+	uint32_t self_ix = rt->op_ix - 1;
+
 	if (rt_eval(rt, ret_val)) {
 		return;
 	}
@@ -843,9 +1595,10 @@ exp_eval_cmp_regex(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	const uint8_t* str = rt_value_get_str(ret_val, &str_sz);
 
 	if (str == NULL) {
+		// Regex against a non-string operand is a genuine type fault (the
+		// operand is a definite value here, not absent/deferred).
 		rt_value_destroy(ret_val);
-		ret_val->type = RT_TRILEAN;
-		ret_val->r_trilean = AS_EXP_UNK;
+		rt_set_error(ret_val, self_ix, EXP_ERR_REGEX_OPERAND);
 		return;
 	}
 
@@ -865,11 +1618,15 @@ exp_eval_cmp_regex(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 void
 exp_eval_in_list(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
+	// This op's own index, before the operand rt_evals advance op_ix.
+	uint32_t self_ix = rt->op_ix - 1;
+
 	rt_value arg0;
 	rt_value arg1;
 
+	// Copy a short-circuit operand verbatim so a propagated ERROR survives.
 	if (rt_eval(rt, &arg0)) {
-		*ret_val = rt_unk;
+		*ret_val = arg0;
 		rt_skip(rt, ob->instr_end_ix);
 		return;
 	}
@@ -877,15 +1634,17 @@ exp_eval_in_list(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	defer_rt_value_destroy(arg0);
 
 	if (rt_eval(rt, &arg1)) {
-		*ret_val = rt_unk;
+		*ret_val = arg1;
 		return;
 	}
 
 	defer_rt_value_destroy(arg1);
 	rt_value list;
 
-	if (rt_value_is_unknown(&arg1) || ! rt_value_bin_translate(&list, &arg1)) {
-		*ret_val = rt_unk;
+	// Arg1 is a definite value here - an untranslatable list operand is a
+	// genuine fault, not an absent operand.
+	if (! rt_value_bin_translate(&list, &arg1)) {
+		rt_set_error(ret_val, self_ix, EXP_ERR_BAD_MSGPACK);
 		return;
 	}
 
@@ -893,7 +1652,7 @@ exp_eval_in_list(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 	if (list.type != RT_MSGPACK) {
 		cf_warning(AS_EXP, "exp_eval_in_list - list expected, got %u", list.type);
-		*ret_val = rt_unk;
+		rt_set_error(ret_val, self_ix, EXP_ERR_NOT_A_LIST);
 		return;
 	}
 
@@ -905,7 +1664,7 @@ exp_eval_in_list(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	as_packer pk = { .buffer = buf, .capacity = sizeof(buf) };
 
 	if (! rt_value_to_msgpack_vec(&pk, &vec, alloc, &arg0)) {
-		*ret_val = rt_unk;
+		rt_set_error(ret_val, self_ix, EXP_ERR_BAD_MSGPACK);
 		return;
 	}
 
@@ -915,7 +1674,7 @@ exp_eval_in_list(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	uint32_t ele_count = 0;
 
 	if (! msgpack_get_list_ele_count(&mp_list, &ele_count)) {
-		*ret_val = rt_unk;
+		rt_set_error(ret_val, self_ix, EXP_ERR_BAD_MSGPACK);
 		return;
 	}
 
@@ -927,7 +1686,7 @@ exp_eval_in_list(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		msgpack_cmp_type cmp = msgpack_cmp(&mp_ele, &mp_list);
 
 		if (cmp == MSGPACK_CMP_ERROR) {
-			*ret_val = rt_unk;
+			rt_set_error(ret_val, self_ix, EXP_ERR_BAD_MSGPACK);
 			return;
 		}
 
@@ -946,10 +1705,32 @@ void
 exp_eval_and(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
 	as_exp_trilean ret = AS_EXP_TRUE;
+	uint32_t err_op_ix = 0; // first fault's op index (if ret==ERROR)
+	exp_err_reason err_reason = EXP_ERR_NONE;
+	uint32_t dec_op_ix = 0; // First UNK child's decisive op (explain)
 
 	while (rt->op_ix < ob->instr_end_ix) {
 		if (rt_eval(rt, ret_val)) {
-			ret = AS_EXP_UNK;
+			// Absorb a fault like UNK but remember it; a determining FALSE
+			// still overrides it. Precedence FALSE > ERROR > UNK > TRUE.
+			if (ret_val->r_trilean == AS_EXP_ERROR) {
+				if (ret != AS_EXP_ERROR) { // keep the first fault
+					err_op_ix = ret_val->err_op_ix;
+					err_reason = (exp_err_reason)ret_val->err_reason;
+				}
+
+				ret = AS_EXP_ERROR;
+			}
+			else if (ret == AS_EXP_TRUE) {
+				ret = AS_EXP_UNK; // UNK upgrades only the TRUE seed, not ERROR
+
+				if (rt->explain != NULL) {
+					// The first UNK conjunct's absent site is what the
+					// explainer reports if the and stays indeterminate.
+					dec_op_ix = ret_val->err_op_ix;
+				}
+			}
+
 			continue;
 		}
 
@@ -957,38 +1738,83 @@ exp_eval_and(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 				ret_val->type);
 
 		if (ret_val->r_trilean == AS_EXP_FALSE) {
-			ret = AS_EXP_FALSE;
+			ret = AS_EXP_FALSE; // determining: overrides a remembered fault
 			rt_skip(rt, ob->instr_end_ix);
 			break;
 		}
 	}
 
-	ret_val->type = RT_TRILEAN;
-	ret_val->r_trilean = ret;
+	if (ret == AS_EXP_ERROR) {
+		rt_set_error(ret_val, err_op_ix, err_reason);
+	}
+	else {
+		// A determining FALSE broke out with ret_val holding the deciding
+		// conjunct (its err_op_ix intact); an all-TRUE/UNK result overwrites
+		// r_trilean here. For an ABSENT (UNK) result, restore the first UNK
+		// conjunct's decisive op.
+		ret_val->type = RT_TRILEAN;
+		ret_val->r_trilean = ret;
+
+		if (rt->explain && ret == AS_EXP_UNK) {
+			ret_val->err_op_ix = dec_op_ix;
+		}
+	}
 }
 
 void
 exp_eval_or(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
 	as_exp_trilean ret = AS_EXP_FALSE;
+	uint32_t err_op_ix = 0; // first fault's op index (if ret==ERROR)
+	exp_err_reason err_reason = EXP_ERR_NONE;
+	uint32_t dec_op_ix = 0; // First UNK child's decisive op (explain)
 
 	while (rt->op_ix < ob->instr_end_ix) {
 		if (rt_eval(rt, ret_val)) {
-			ret = AS_EXP_UNK;
+			// Absorb a fault like UNK but remember it; a determining TRUE
+			// still overrides it. Precedence TRUE > ERROR > UNK > FALSE.
+			if (ret_val->r_trilean == AS_EXP_ERROR) {
+				if (ret != AS_EXP_ERROR) { // keep the first fault
+					err_op_ix = ret_val->err_op_ix;
+					err_reason = (exp_err_reason)ret_val->err_reason;
+				}
+
+				ret = AS_EXP_ERROR;
+			}
+			else if (ret == AS_EXP_FALSE) {
+				ret = AS_EXP_UNK; // UNK upgrades only the FALSE seed, not ERROR
+
+				if (rt->explain != NULL) {
+					dec_op_ix = ret_val->err_op_ix; // first UNK branch
+				}
+			}
+
 			continue;
 		}
 
 		cf_assert(ret_val->type == RT_TRILEAN, AS_EXP, "unexpected");
 
 		if (ret_val->r_trilean == AS_EXP_TRUE) {
-			ret = AS_EXP_TRUE;
+			ret = AS_EXP_TRUE; // determining: overrides a remembered fault
 			rt_skip(rt, ob->instr_end_ix);
 			break;
 		}
 	}
 
-	ret_val->type = RT_TRILEAN;
-	ret_val->r_trilean = ret;
+	if (ret == AS_EXP_ERROR) {
+		rt_set_error(ret_val, err_op_ix, err_reason);
+	}
+	else {
+		ret_val->type = RT_TRILEAN;
+		ret_val->r_trilean = ret;
+
+		// An indeterminate (UNK) or node reports its first absent
+		// branch; a definite FALSE (all branches false) is stamped as the or node
+		// by rt_eval (the design convention: report the or, not each branch).
+		if (rt->explain && ret == AS_EXP_UNK) {
+			ret_val->err_op_ix = dec_op_ix;
+		}
+	}
 }
 
 void
@@ -997,11 +1823,12 @@ exp_eval_not(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	(void)ob;
 
 	if (rt_eval(rt, ret_val)) {
-		return;
+		return; // UNK/ERROR child propagates verbatim (keeps its decisive op)
 	}
 
 	cf_assert(ret_val->type == RT_TRILEAN, AS_EXP, "unexpected");
 
+	// not(x)=FALSE means x was true; rt_eval stamps the not node as decisive.
 	ret_val->r_trilean = (ret_val->r_trilean == AS_EXP_TRUE) ? AS_EXP_FALSE
 															 : AS_EXP_TRUE;
 }
@@ -1133,6 +1960,9 @@ exp_eval_mul(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 void
 exp_eval_div(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
+	// This op's own index, before the operand rt_evals advance op_ix.
+	uint32_t self_ix = rt->op_ix - 1;
+
 	if (rt_eval(rt, ret_val)) {
 		rt_skip(rt, ob->instr_end_ix);
 		return;
@@ -1177,11 +2007,15 @@ exp_eval_div(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 			ret_val->r_int = 1;
 		}
 
-		if (iproduct == 0 || (ret_val->r_int == INT64_MIN && iproduct == -1)) {
-			cf_warning(AS_EXP,
-					"exp_eval_div - integer division by zero or overflow");
-			ret_val->type = RT_TRILEAN;
-			ret_val->r_trilean = AS_EXP_UNK;
+		if (iproduct == 0) {
+			cf_warning(AS_EXP, "exp_eval_div - integer division by zero");
+			rt_set_error(ret_val, self_ix, EXP_ERR_DIV_ZERO);
+			return;
+		}
+
+		if (ret_val->r_int == INT64_MIN && iproduct == -1) {
+			cf_warning(AS_EXP, "exp_eval_div - integer division overflow");
+			rt_set_error(ret_val, self_ix, EXP_ERR_DIV_OVERFLOW);
 			return;
 		}
 
@@ -1228,6 +2062,9 @@ exp_eval_log(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 void
 exp_eval_mod(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
+	// This op's own index, before the operand rt_evals advance op_ix.
+	uint32_t self_ix = rt->op_ix - 1;
+
 	if (rt_eval(rt, ret_val)) {
 		rt_skip(rt, ob->instr_end_ix);
 		return;
@@ -1235,11 +2072,21 @@ exp_eval_mod(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 	rt_value arg1;
 
-	if (rt_eval(rt, &arg1) || arg1.r_int == 0 ||
-			(ret_val->r_int == INT64_MIN && arg1.r_int == -1)) {
+	// Propagate a short-circuit divisor verbatim (preserving UNK or a
+	// propagated ERROR); integer mod-by-zero and INT64_MIN % -1 overflow are
+	// genuine faults.
+	if (rt_eval(rt, &arg1)) {
 		*ret_val = arg1;
-		ret_val->type = RT_TRILEAN;
-		ret_val->r_trilean = AS_EXP_UNK;
+		return;
+	}
+
+	if (arg1.r_int == 0) {
+		rt_set_error(ret_val, self_ix, EXP_ERR_MOD_ZERO);
+		return;
+	}
+
+	if (ret_val->r_int == INT64_MIN && arg1.r_int == -1) {
+		rt_set_error(ret_val, self_ix, EXP_ERR_MOD_OVERFLOW);
 		return;
 	}
 
@@ -1325,6 +2172,9 @@ exp_eval_to_string(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
 	(void)ob;
 
+	// This op's own index, before the operand rt_eval advances op_ix.
+	uint32_t self_ix = rt->op_ix - 1;
+
 	if (rt_eval(rt, ret_val)) {
 		return;
 	}
@@ -1388,6 +2238,10 @@ exp_eval_to_string(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		rt_value_destroy(&operand);
 		ret_val->type = RT_TRILEAN;
 		ret_val->r_trilean = AS_EXP_UNK;
+		// The operand's payload word aliases err_op_ix in the union - stamp
+		// this op's index rather than leave that data-derived value for the
+		// explainer to read as an op index.
+		rt_mark_decisive(rt, ret_val, self_ix);
 		return;
 	}
 
@@ -1397,6 +2251,7 @@ exp_eval_to_string(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		rt_value_destroy(&operand);
 		ret_val->type = RT_TRILEAN;
 		ret_val->r_trilean = AS_EXP_UNK;
+		rt_mark_decisive(rt, ret_val, self_ix);
 		return;
 	}
 
@@ -1845,13 +2700,21 @@ exp_eval_meta_record_size(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 void
 exp_eval_rec_key(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
+	// key() takes no operands, so its own index is rt->op_ix - 1.
+	uint32_t self_ix = rt->op_ix - 1;
+
 	if (! rt_has_rd(rt)) {
 		*ret_val = rt_unk;
+		rt_mark_decisive(rt, ret_val, self_ix); // Absent key() site
 		return;
 	}
 
+	// No-key-stored / device-load-fail stays ABSENT (UNK) - the storage API
+	// can't split "no key" (the common case) from a genuine load failure.
+	// Only the corrupt-key arms below become ERROR.
 	if (! as_storage_rd_load_key(rt->ctx->rd)) {
 		*ret_val = rt_unk;
+		rt_mark_decisive(rt, ret_val, self_ix); // Absent key() site
 		return;
 	}
 
@@ -1863,10 +2726,10 @@ exp_eval_rec_key(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	switch (key[0]) {
 	case AS_PARTICLE_TYPE_INTEGER:
 		if (key_sz != sizeof(int64_t) + 1) {
+			// Corrupt stored key (a key was loaded but is malformed).
 			cf_warning(AS_EXP,
 					"exp_eval_rec_key - unexpected integer key size %u", key_sz);
-			ret_val->type = RT_TRILEAN;
-			ret_val->r_trilean = AS_EXP_UNK;
+			rt_set_error(ret_val, self_ix, EXP_ERR_REC_KEY);
 			return;
 		}
 
@@ -1880,23 +2743,32 @@ exp_eval_rec_key(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		ret_val->r_bytes.sz = key_sz - 1;
 		break;
 	default:
+		// Corrupt stored key - invalid type byte.
 		cf_warning(AS_EXP, "exp_eval_rec_key - invalid key type %u", key[0]);
-		ret_val->type = RT_TRILEAN;
-		ret_val->r_trilean = AS_EXP_UNK;
+		rt_set_error(ret_val, self_ix, EXP_ERR_REC_KEY);
 		return;
 	}
 
 	if (ob->type != ret_val->type) {
 		ret_val->type = RT_TRILEAN;
 		ret_val->r_trilean = AS_EXP_UNK;
+		// Wrong-typed key() is an absent site. The r_bytes.sz written above
+		// aliases err_op_ix, so stamp this op's index rather than leave that
+		// data-controlled value for the explainer.
+		rt_mark_decisive(rt, ret_val, self_ix);
 	}
 }
 
 void
 exp_eval_bin(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
-	if (rt->ctx->rd == NULL) {
+	// This op's own index - in explain mode the absent / wrong-typed arms
+	// below tag it so the explainer can point at the bin itself.
+	uint32_t self_ix = rt->op_ix - 1;
+
+	if (! rt_has_rd(rt)) {
 		*ret_val = rt_unk;
+		rt_mark_decisive(rt, ret_val, self_ix);
 		return;
 	}
 
@@ -1913,21 +2785,27 @@ exp_eval_bin(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	}
 
 	// Borrow the cached value; do_not_destroy carries to the copy so
-	// rt_release_bins frees it. The per-reference type check is on the copy and
-	// never poisons the shared slot.
+	// rt_release_bins frees it. The per-reference type check is on the copy
+	// and never poisons the shared slot.
 	*ret_val = *brt;
 
 	if (exp_rtype_to_particle_type(op->base.rtype) !=
 			rt_value_particle_type(brt)) {
 		*ret_val = rt_unk;
+		// Absent / wrong-typed bin - tag it decisive so the explainer points
+		// at the bin itself.
+		rt_mark_decisive(rt, ret_val, self_ix);
 	}
 }
 
 void
 exp_eval_bin_type(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
-	if (rt->ctx->rd == NULL) {
+	uint32_t self_ix = rt->op_ix - 1; // bin_type() has no eval operands
+
+	if (! rt_has_rd(rt)) {
 		*ret_val = rt_unk;
+		rt_mark_decisive(rt, ret_val, self_ix); // Absent site.
 		return;
 	}
 
@@ -1987,10 +2865,14 @@ eval_map_keys_or_values(runtime* rt, const op_base_mem* ob, rt_value* ret_val,
 		bool is_values)
 {
 	(void)ob;
+
+	// This op's own index, before the operand rt_evals advance op_ix.
+	uint32_t self_ix = rt->op_ix - 1;
 	rt_value arg;
 
+	// Copy a short-circuit operand verbatim so a propagated ERROR survives.
 	if (rt_eval(rt, &arg)) {
-		*ret_val = rt_unk;
+		*ret_val = arg;
 		return;
 	}
 
@@ -1998,10 +2880,17 @@ eval_map_keys_or_values(runtime* rt, const op_base_mem* ob, rt_value* ret_val,
 
 	rt_value rt_map;
 
-	if (! rt_value_bin_translate(&rt_map, &arg) || rt_map.type != RT_MSGPACK ||
+	// Arg is a definite value here - an untranslatable, non-msgpack, or
+	// non-map operand is a genuine fault, not an absent operand.
+	if (! rt_value_bin_translate(&rt_map, &arg)) {
+		rt_set_error(ret_val, self_ix, EXP_ERR_BAD_MSGPACK);
+		return;
+	}
+
+	if (rt_map.type != RT_MSGPACK ||
 			msgpack_buf_peek_type(rt_map.r_bytes.contents, rt_map.r_bytes.sz) !=
 					MSGPACK_TYPE_MAP) {
-		*ret_val = rt_unk;
+		rt_set_error(ret_val, self_ix, EXP_ERR_NOT_A_MAP);
 		return;
 	}
 
@@ -2017,7 +2906,8 @@ eval_map_keys_or_values(runtime* rt, const op_base_mem* ob, rt_value* ret_val,
 
 	if (! map_buf_get_all_k_or_v(rt_map.r_bytes.contents, rt_map.r_bytes.sz,
 				&result)) {
-		*ret_val = rt_unk;
+		// Malformed stored map - a genuine fault.
+		rt_set_error(ret_val, self_ix, EXP_ERR_BAD_MSGPACK);
 		rollback_alloc_rollback(alloc);
 		return;
 	}
@@ -2079,6 +2969,9 @@ exp_eval_var_builtin(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 	if (! rt_is_type(ret_val, op->base.rtype)) {
 		*ret_val = rt_unk;
+		// A wrong-typed / absent builtin var is an absent site - attribute
+		// it to itself.
+		rt_mark_decisive(rt, ret_val, rt->op_ix - 1);
 	}
 }
 
@@ -2124,6 +3017,11 @@ exp_eval_let(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 void
 exp_eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
+	// This op's own index, before the operand rt_evals advance op_ix. Named
+	// distinctly from the local op_ix loop counter below (which walks
+	// op->vecs, not the runtime op stream).
+	uint32_t self_ix = rt->op_ix - 1;
+
 	const op_call* op = (const op_call*)ob;
 	define_deferred_array(vecs, msgpack_vec, op->n_vecs);
 	msgpack_in_vec mv = { .n_vecs = op->n_vecs, .vecs = vecs };
@@ -2150,6 +3048,15 @@ exp_eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 			rt_eval(rt, from);
 
+			// A short-circuit param propagates verbatim - preserving a
+			// child's UNK or ERROR. Only a genuine pack failure of a definite
+			// value is a fault.
+			if (rt_value_is_short_circuit(from)) {
+				*ret_val = *from;
+				rt_skip(rt, ob->instr_end_ix);
+				return;
+			}
+
 			vecs[vec_ix].buf = pk.buffer + pk.offset;
 			vecs[vec_ix].offset = 0;
 
@@ -2158,8 +3065,7 @@ exp_eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 			}
 
 			if (! rt_value_to_msgpack_vec(&pk, &vecs[vec_ix], alloc, from)) {
-				ret_val->type = RT_TRILEAN;
-				ret_val->r_trilean = AS_EXP_UNK;
+				rt_set_error(ret_val, self_ix, EXP_ERR_CALL_ARG);
 				rt_skip(rt, ob->instr_end_ix);
 				return;
 			}
@@ -2229,9 +3135,9 @@ exp_eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		bin_arg.do_not_destroy = 0;
 
 		if (! msgpack_to_bin(rt, &bin_arg.r_bin, &temp, NULL)) {
+			// A structurally invalid msgpack bin-arg is a fault.
 			rt_value_destroy(&temp);
-			ret_val->type = RT_TRILEAN;
-			ret_val->r_trilean = AS_EXP_UNK;
+			rt_set_error(ret_val, self_ix, EXP_ERR_BAD_MSGPACK);
 			return;
 		}
 
@@ -2250,6 +3156,9 @@ exp_eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		if (! cf_str_is_valid_utf8(bin_arg.r_bytes.contents, bin_arg.r_bytes.sz)) {
 			ret_val->type = RT_TRILEAN;
 			ret_val->r_trilean = AS_EXP_UNK;
+			// Absent call result - stamp this call op rather than leave the
+			// aliased result bytes in err_op_ix.
+			rt_mark_decisive(rt, ret_val, self_ix);
 			call_cleanup_fn(&bin_cleanup);
 			return;
 		}
@@ -2287,9 +3196,9 @@ exp_eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		break;
 	}
 	case RT_TRILEAN:
-		if (bin_arg.r_trilean == AS_EXP_UNK) {
-			ret_val->type = RT_TRILEAN;
-			ret_val->r_trilean = AS_EXP_UNK;
+		// Propagate a short-circuit bin-arg (UNK or ERROR) verbatim.
+		if (rt_value_is_short_circuit(&bin_arg)) {
+			*ret_val = bin_arg;
 			call_cleanup_fn(&bin_cleanup);
 			return;
 		}
@@ -2301,8 +3210,8 @@ exp_eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		old = *b;
 		break;
 	default:
-		ret_val->type = RT_TRILEAN;
-		ret_val->r_trilean = AS_EXP_UNK;
+		// An unexpected bin-arg type is a genuine fault.
+		rt_set_error(ret_val, self_ix, EXP_ERR_CALL_ARG);
 		return;
 	}
 
@@ -2349,9 +3258,11 @@ exp_eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	call_cleanup_fn(&bin_cleanup);
 
 	if (ret != AS_OK) {
+		// The CDT/bits/HLL/string sub-op failed - a fault. The sub-op may
+		// have armed a more specific detail; first-set-wins keeps it.
+		//
 		rt_value_destroy(&bin_arg);
-		ret_val->type = RT_TRILEAN;
-		ret_val->r_trilean = AS_EXP_UNK;
+		rt_set_error(ret_val, self_ix, EXP_ERR_CALL_ARG);
 		return;
 	}
 
@@ -2390,6 +3301,9 @@ exp_eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 		ret_val->type = RT_TRILEAN;
 		ret_val->r_trilean = AS_EXP_UNK;
+		// Result-type mismatch is an absent call site - stamp this call op
+		// rather than leave the aliased result in err_op_ix.
+		rt_mark_decisive(rt, ret_val, self_ix);
 		return;
 	}
 
@@ -2433,8 +3347,8 @@ exp_eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		break;
 	case AS_PARTICLE_TYPE_GEOJSON:
 		if (! as_bin_cdt_context_geojson_parse(b)) {
-			ret_val->type = RT_TRILEAN;
-			ret_val->r_trilean = AS_EXP_UNK;
+			// The sub-op produced invalid geojson - a genuine fault.
+			rt_set_error(ret_val, self_ix, EXP_ERR_GEOJSON);
 			as_bin_particle_destroy(b);
 			return;
 		}
@@ -2550,8 +3464,11 @@ json_to_rt_geo(const uint8_t* json, size_t jsonsz, rt_value* val)
 	*val = (rt_value){ 0 };
 
 	if (! as_geojson_parse(NULL, (const char*)json, jsonsz, &cellid, &region)) {
+		// Storage validates geojson on write, so a parse failure here means
+		// on-disk corruption - a fault, not an absent operand. Emit the ERROR
+		// sentinel; eval_compare stamps the op_ix + reason.
 		val->type = RT_TRILEAN;
-		val->r_trilean = AS_EXP_UNK;
+		val->r_trilean = AS_EXP_ERROR;
 		return;
 	}
 
@@ -3158,15 +4075,21 @@ cmp_bytes(exp_op_code code, const rt_value* v0, const rt_value* v1)
 }
 
 static as_exp_trilean
-cmp_msgpack(exp_op_code code, const rt_value* v0, const rt_value* v1)
+cmp_msgpack(exp_op_code code, const rt_value* v0, const rt_value* v1,
+		bool* is_unordered_map)
 {
 	msgpack_in mp0 = { .buf = v0->r_bytes.contents, .buf_sz = v0->r_bytes.sz };
 	msgpack_in mp1 = { .buf = v1->r_bytes.contents, .buf_sz = v1->r_bytes.sz };
 
 	msgpack_cmp_type cmp = msgpack_cmp(&mp0, &mp1);
 
+	// A comparison of malformed/unorderable stored msgpack is a fault. The
+	// caller stamps the op_ix + reason, using *is_unordered_map to tell the
+	// two causes apart.
+	//
 	if (cmp == MSGPACK_CMP_ERROR) {
-		return AS_EXP_UNK;
+		*is_unordered_map = false;
+		return AS_EXP_ERROR;
 	}
 
 	if (mp0.has_unordered_map || mp1.has_unordered_map) {
@@ -3174,7 +4097,8 @@ cmp_msgpack(exp_op_code code, const rt_value* v0, const rt_value* v1)
 				"illegal comparison of structure containing unordered map - arg0 %s arg1 %s",
 				mp0.has_unordered_map ? "has unordered" : "is ok",
 				mp1.has_unordered_map ? "has unordered" : "is ok");
-		return AS_EXP_UNK;
+		*is_unordered_map = true;
+		return AS_EXP_ERROR;
 	}
 
 	switch (code) {
@@ -3426,6 +4350,10 @@ msgpack_to_bin(runtime* rt, as_bin* to, rt_value* from, cf_ll_buf* ll_buf)
 // Local helpers - runtime display.
 //
 
+// pre: rt->display_max_sz is the caller's output budget, or 0 for unbounded.
+// post: on a budgeted render, db grows by at most one op's worth of output
+// past the budget - the caller must treat "at or over budget" as no snippet,
+// not as a truncated one.
 void
 exp_rt_display(runtime* rt, cf_dyn_buf* db)
 {
@@ -3434,6 +4362,20 @@ exp_rt_display(runtime* rt, cf_dyn_buf* db)
 
 	rt->op_ix++;
 	rt->instr_ptr += entry->size;
+
+	if (rt->display_max_sz != 0 && db->used_sz >= rt->display_max_sz) {
+		// Over budget - emit nothing for this subtree, but still advance past
+		// it so the caller's next child read stays aligned with the op stream.
+		while (rt->op_ix < ob->instr_end_ix) {
+			const op_base_mem* s = (const op_base_mem*)rt->instr_ptr;
+
+			rt->instr_ptr += op_table[s->code].size;
+			rt->op_ix++;
+		}
+
+		return;
+	}
+
 	entry->display_cb(rt, ob, db);
 }
 
@@ -3667,7 +4609,7 @@ exp_display_call(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 			}
 
 			cf_dyn_buf_append_format(db, "%s(", cdt_exp_display_name(op_code));
-			cdt_msgpack_ctx_to_dynbuf(&mp_ctx, db);
+			cdt_msgpack_ctx_to_dynbuf(&mp_ctx, db, rt->display_max_sz);
 			cf_dyn_buf_append_string(db, ", ");
 		}
 		else if (op_code == AS_CDT_OP_SELECT) {
@@ -3675,7 +4617,7 @@ exp_display_call(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 
 			cf_dyn_buf_append_format(db, "%s(", cdt_exp_display_name(op_code));
 
-			if (! cdt_msgpack_ctx_to_dynbuf(&mp, db)) {
+			if (! cdt_msgpack_ctx_to_dynbuf(&mp, db, rt->display_max_sz)) {
 				mp = mp_ctx;
 
 				if (msgpack_sz(&mp) == 0) {
@@ -3723,9 +4665,27 @@ exp_display_call(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 	}
 
 	uint32_t idx = 0;
+	bool over = false;
 
 	while (true) {
+		// A call op's inline arguments are a client-supplied msgpack payload of
+		// unbounded length, and they compile to no ops of their own - so
+		// neither the per-op budget check in exp_rt_display() nor the op-count
+		// pre-filter in stage_eval_trace() bounds this loop. Check per element.
+		//
+		// Stop appending, but keep walking the vecs below: each
+		// exp_call_eval_token still needs its exp_rt_display() call so the op
+		// stream stays aligned with the caller's next child read.
 		while (mp.offset != mp.buf_sz) {
+			if (rt->display_max_sz != 0 && db->used_sz >= rt->display_max_sz) {
+				if (! over) {
+					cf_dyn_buf_append_string(db, "...");
+					over = true;
+				}
+
+				break;
+			}
+
 			display_msgpack(&mp, db);
 			cf_dyn_buf_append_string(db, ", ");
 		}
@@ -3808,6 +4768,17 @@ exp_display_value(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 	case EXP_VOP_VALUE_HLL:
 		cf_dyn_buf_append_format(db, "<hll#%u>", ((op_value_blob*)ob)->value_sz);
 		break;
+	case EXP_QUOTE: {
+		// A quoted list literal (op arg). Reachable here now that
+		// stage_eval_fault renders client-supplied expressions at eval time -
+		// a faulting op whose subtree contains a quote must render, not crash.
+		op_value_blob* op_b = (op_value_blob*)ob;
+		uint32_t ele_count = UINT32_MAX;
+
+		msgpack_buf_get_list_ele_count(op_b->value, op_b->value_sz, &ele_count);
+		cf_dyn_buf_append_format(db, "<quote#%u>", ele_count);
+		break;
+	}
 	default:
 		cf_crash(AS_EXP, "unexpected code %u", ob->code);
 	}

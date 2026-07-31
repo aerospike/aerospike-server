@@ -22,7 +22,7 @@
 
 /*
  * Text expression AEL (filter expressions): canonical sources are this file,
- * lexer.re, ast.c, codegen.c, and headers in as/include/exp/.
+ * lexer.re, ast.c, ael_codegen.c, and headers in as/include/exp/.
  */
 
 %include {
@@ -61,18 +61,19 @@
 // ends the source. Pass a second ref for a range (`a:b`), AST_REF_NULL for a
 // single operand. Falls back to the last token if the operand span is empty.
 static void
-seg_operand_span(parse_context* ctx, ast_ref a, ast_ref b, uint32_t* offset,
+seg_operand_span(ael_context* ctx, ast_ref a, ast_ref b, uint32_t* offset,
 		uint32_t* byte_sz)
 {
 	ast_node* ap = ast_pool_at(ctx->pool, a);
-	uint32_t start = ap->offset;
-	uint32_t end = ap->offset + ap->sz;
+	uint32_t start = ast_disp_offset(ap);
+	uint32_t end = start + ap->sz;
 
 	if (b != AST_REF_NULL) {
 		ast_node* bp = ast_pool_at(ctx->pool, b);
+		uint32_t b_start = ast_disp_offset(bp);
 
-		start = bp->offset < start ? bp->offset : start;
-		end = bp->offset + bp->sz > end ? bp->offset + bp->sz : end;
+		start = b_start < start ? b_start : start;
+		end = b_start + bp->sz > end ? b_start + bp->sz : end;
 	}
 
 	if (end > start) {
@@ -88,7 +89,7 @@ seg_operand_span(parse_context* ctx, ast_ref a, ast_ref b, uint32_t* offset,
 }
 
 %token_type { token_value }
-%extra_argument { parse_context* ctx }
+%extra_argument { ael_context* ctx }
 
 %stack_overflow {
 	ael_diag_add(&ctx->diags, AEL_SEV_ERROR, 0, 0,
@@ -230,7 +231,9 @@ expr(R) ::= expr(A) TOK_POWER expr(B).   { R = ast_new_bmath(ctx, AST_POW, A, B,
 // typed to the operand -- there is no wire negate op. A `-` glued to a
 // number (`-10`) is already a literal token, so this fires only when `-`
 // stands alone (e.g. `-$.x`, `- 10`). `+x` is a numeric-checked identity.
-expr(R) ::= TOK_MINUS expr(A). [TOK_UMINUS] { R = ast_new_neg(ctx, A); }
+expr(R) ::= TOK_MINUS(M) expr(A). [TOK_UMINUS] {
+	R = ast_new_neg(ctx, A, M.offset + M.sz);
+}
 expr(R) ::= TOK_PLUS expr(A). [TOK_UMINUS] {
 	ast_set_implicit_type(ctx, A, AST_ETYPE_AUTO_NUMERIC);
 	R = A;
@@ -294,6 +297,18 @@ expr(R) ::= let_head(H) TOK_LPAREN expr(B) TOK_RPAREN. {
 		// Append body.
 		AST_PLIST_PUSH_TAIL(ctx->pool, n, B);
 
+		// The shell was spanned over the first binding when it was created
+		// (mid-construct); extend through the body so the LET's span covers
+		// bindings -> body.
+		ast_node* bp = ast_pool_at(ctx->pool, B);
+		uint32_t let_end = ast_disp_offset(bp) + bp->sz;
+		uint32_t let_start = ast_disp_offset(n);
+
+		if (let_end > let_start) {
+			uint32_t span = let_end - let_start;
+			n->sz = span > 255 ? 255 : (uint8_t)span;
+		}
+
 		// Pop scope — let_scope is at list head.
 		ast_node* sp = ast_pool_at(ctx->pool, n->u.list.head);
 		ctx->cur_scope = sp->u.let_scope.parent;
@@ -313,9 +328,7 @@ expr(R) ::= TOK_WHEN(W) TOK_LPAREN case_list(M) TOK_COMMA TOK_DEFAULT TOK_ARROW 
 
 		// Span the whole when(...) so diagnostics (e.g. a non-boolean when used
 		// as a logical operand) point at the operator, not the reused case_list.
-		uint32_t span = RP.str.offset + RP.str.sz - W.str.offset;
-		n->offset = W.str.offset;
-		n->sz = (span > 255) ? 255 : (uint8_t)span;
+		ast_set_span(ctx->pool, R, W.offset, RP.offset + RP.sz - W.offset);
 
 		AST_PLIST_PUSH_TAIL(ctx->pool, n, D);
 
@@ -351,7 +364,7 @@ expr(R) ::= TOK_WHEN(W) TOK_LPAREN case_list(M) TOK_COMMA TOK_DEFAULT TOK_ARROW 
 				result_types != AST_ETYPE_AUTO_NUMERIC;
 
 		if (incompatible) {
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, n->offset, n->sz,
+			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(n), n->sz,
 				"when branches have incompatible types");
 		}
 
@@ -389,7 +402,15 @@ expr(R) ::= TOK_WHEN(W) TOK_LPAREN case_list(M) TOK_COMMA TOK_DEFAULT TOK_ARROW 
 // expression that's not followed by `.something`, the chain is just
 // exp_base → operand → expr — a no-op compared to the prior single-
 // step reduction.
-exp_base(R) ::= TOK_LPAREN expr(A) TOK_RPAREN. { R = A; }
+exp_base(R) ::= TOK_LPAREN(LP) expr(A) TOK_RPAREN(RP). {
+	R = A;
+
+	// Widen the grouped node's displayed span over the parens so a highlight
+	// of the group includes both. Applies to every kind: ast_set_display_span
+	// widens without moving the node's anchor, so a grouped bin or variable
+	// keeps its name locator on the name.
+	ast_set_display_span(ctx->pool, R, LP.offset, RP.offset + RP.sz);
+}
 
 // Operands.
 expr(R) ::= operand(A). { R = A; }
@@ -417,54 +438,71 @@ map_key(R) ::= TOK_NAME(V).         { R = ast_new_string(ctx->pool, TOK_STR(ctx,
 map_key(R) ::= TOK_BLOB_LITERAL(V). { R = ast_new_blob_from_hex(ctx->pool, TOK_STR(ctx, V), V.str.sz); STAMP(R, V); }
 map_key(R) ::= TOK_B64_BLOB_LITERAL(V). { R = ast_new_blob_from_b64(ctx->pool, TOK_STR(ctx, V), V.str.sz); STAMP(R, V); }
 
-// List literal.
-literal(R) ::= TOK_LBRACKET TOK_RBRACKET. {
+// List literal. The list_body node accumulates elements without extending
+// its span (elements append via AST_LIST_PUSH_TAIL, not a span-merging
+// constructor), so the bracket rules stamp the literal over '[' .. ']' —
+// otherwise the span stays frozen at the first element and any parent's
+// child-derived span truncates mid-literal. The ':ORDER' postfix stays
+// outside the span, like a bin's ':T' pin.
+literal(R) ::= TOK_LBRACKET(LB) TOK_RBRACKET(RB). {
 	R = ast_new(ctx->pool, AST_LIST);
 	ast_pool_at(ctx->pool, R)->etype = AST_ETYPE_LIST;
 
 	AST_LIST_CLR(ctx->pool, R);
+	ast_set_span(ctx->pool, R, LB.offset, RB.offset + RB.sz - LB.offset);
 }
 
-literal(R) ::= TOK_LBRACKET list_body(L) TOK_RBRACKET. { R = L; }
+literal(R) ::= TOK_LBRACKET(LB) list_body(L) TOK_RBRACKET(RB). {
+	R = L;
+	ast_set_span(ctx->pool, R, LB.offset, RB.offset + RB.sz - LB.offset);
+}
 
 // Map literal.
-literal(R) ::= TOK_LBRACE TOK_RBRACE. {
+literal(R) ::= TOK_LBRACE(LB) TOK_RBRACE(RB). {
 	R = ast_new(ctx->pool, AST_MAP);
 	ast_pool_at(ctx->pool, R)->etype = AST_ETYPE_MAP;
 
 	AST_LIST_CLR(ctx->pool, R);
+	ast_set_span(ctx->pool, R, LB.offset, RB.offset + RB.sz - LB.offset);
 }
 
-literal(R) ::= TOK_LBRACE map_body(M) TOK_RBRACE. { R = M; }
+literal(R) ::= TOK_LBRACE(LB) map_body(M) TOK_RBRACE(RB). {
+	R = M;
+	ast_set_span(ctx->pool, R, LB.offset, RB.offset + RB.sz - LB.offset);
+}
 
 // `:ORDERED` / `:UNORDERED` ordering override on a collection literal. The
 // property is a plain TOK_NAME (not a keyword) — ael_apply_literal_order
 // matches it by text. Scoping the postfix to the brace/bracket forms keeps a
 // scalar postfix (e.g. 5:ORDERED) a syntax error.
-literal(R) ::= TOK_LBRACKET TOK_RBRACKET TOK_COLON TOK_NAME(N). {
+literal(R) ::= TOK_LBRACKET(LB) TOK_RBRACKET(RB) TOK_COLON TOK_NAME(N). {
 	R = ast_new(ctx->pool, AST_LIST);
 	ast_pool_at(ctx->pool, R)->etype = AST_ETYPE_LIST;
 
 	AST_LIST_CLR(ctx->pool, R);
+	ast_set_span(ctx->pool, R, LB.offset, RB.offset + RB.sz - LB.offset);
 	ael_apply_literal_order(ctx, R, N.str.offset, N.str.sz);
 }
 
-literal(R) ::= TOK_LBRACKET list_body(L) TOK_RBRACKET TOK_COLON TOK_NAME(N). {
+literal(R) ::= TOK_LBRACKET(LB) list_body(L) TOK_RBRACKET(RB) TOK_COLON TOK_NAME(N). {
 	ael_apply_literal_order(ctx, L, N.str.offset, N.str.sz);
 	R = L;
+	ast_set_span(ctx->pool, R, LB.offset, RB.offset + RB.sz - LB.offset);
 }
 
-literal(R) ::= TOK_LBRACE TOK_RBRACE TOK_COLON TOK_NAME(N). {
+literal(R) ::= TOK_LBRACE(LB) TOK_RBRACE(RB) TOK_COLON TOK_NAME(N). {
 	R = ast_new(ctx->pool, AST_MAP);
 	ast_pool_at(ctx->pool, R)->etype = AST_ETYPE_MAP;
 
 	AST_LIST_CLR(ctx->pool, R);
+	ast_set_span(ctx->pool, R, LB.offset, RB.offset + RB.sz - LB.offset);
 	ael_apply_literal_order(ctx, R, N.str.offset, N.str.sz);
 }
 
-literal(R) ::= TOK_LBRACE map_body(M) TOK_RBRACE TOK_COLON TOK_NAME(N). {
+literal(R) ::= TOK_LBRACE(LB) map_body(M) TOK_RBRACE(RB) TOK_COLON TOK_NAME(N). {
 	ael_apply_literal_order(ctx, M, N.str.offset, N.str.sz);
 	R = M;
+	ast_set_span(ctx->pool, R, LB.offset, RB.offset + RB.sz - LB.offset);
 }
 
 //==========================================================
@@ -524,9 +562,9 @@ operand(R) ::= TOK_PLACEHOLDER(V). {
 
 // bin_base: $.binName, $.binName:T (strict — pins the canonical bin's
 // etype; the narrowing propagates to other references), or
-// $.binName:local:T (loose — creates a separate bin reference whose
-// type is private to this call site, so $.bin:local:INT in one when
-// branch can coexist with $.bin:local:STRING in another). Both suffix
+// $.binName:LOCAL:T (loose — creates a separate bin reference whose
+// type is private to this call site, so $.bin:LOCAL:INT in one when
+// branch can coexist with $.bin:LOCAL:STRING in another). Both suffix
 // forms replace the old $.local(name, type: T) function-style grammar.
 //
 // Quoted forms ($."bin name" / $.'bin name') accept any byte except
@@ -534,31 +572,33 @@ operand(R) ::= TOK_PLACEHOLDER(V). {
 // [A-Za-z_][A-Za-z0-9_]* identifier rule (e.g. hyphens, spaces).
 // ast_new_bin enforces the server's bin-name constraints (non-empty,
 // ≤15 bytes, no NULs) for both forms.
-bin_base(R) ::= TOK_DOLLAR_DOT TOK_NAME(V). [TOK_BIN_BARE_PREC] {
-	R = ast_new_bin(ctx, V.str.offset, V.str.sz);
+bin_base(R) ::= TOK_DOLLAR_DOT(D) TOK_NAME(V). [TOK_BIN_BARE_PREC] {
+	R = ast_new_bin(ctx, D.offset, V.offset + V.sz, V.str.offset, V.str.sz);
 }
-bin_base(R) ::= TOK_DOLLAR_DOT TOK_NAME(V) TOK_COLON type_name(T). {
-	R = ast_new_bin(ctx, V.str.offset, V.str.sz);
+bin_base(R) ::= TOK_DOLLAR_DOT(D) TOK_NAME(V) TOK_COLON type_name(T). {
+	R = ast_new_bin(ctx, D.offset, V.offset + V.sz, V.str.offset, V.str.sz);
 
 	if (R != AST_REF_NULL) {
 		ast_bin_set_implicit_type(ctx, R, (ast_etype)T);
 	}
 }
-bin_base(R) ::= TOK_DOLLAR_DOT TOK_NAME(V) TOK_COLON TOK_LOCAL TOK_COLON type_name(T). {
-	R = ast_new_local_bin(ctx, V.str.offset, V.str.sz, (ast_etype)T);
+bin_base(R) ::= TOK_DOLLAR_DOT(D) TOK_NAME(V) TOK_COLON TOK_LOCAL TOK_COLON type_name(T). {
+	R = ast_new_local_bin(ctx, D.offset, V.offset + V.sz, V.str.offset,
+			V.str.sz, (ast_etype)T);
 }
-bin_base(R) ::= TOK_DOLLAR_DOT TOK_STRING(V). [TOK_BIN_BARE_PREC] {
-	R = ast_new_bin(ctx, V.str.offset, V.str.sz);
+bin_base(R) ::= TOK_DOLLAR_DOT(D) TOK_STRING(V). [TOK_BIN_BARE_PREC] {
+	R = ast_new_bin(ctx, D.offset, V.offset + V.sz, V.str.offset, V.str.sz);
 }
-bin_base(R) ::= TOK_DOLLAR_DOT TOK_STRING(V) TOK_COLON type_name(T). {
-	R = ast_new_bin(ctx, V.str.offset, V.str.sz);
+bin_base(R) ::= TOK_DOLLAR_DOT(D) TOK_STRING(V) TOK_COLON type_name(T). {
+	R = ast_new_bin(ctx, D.offset, V.offset + V.sz, V.str.offset, V.str.sz);
 
 	if (R != AST_REF_NULL) {
 		ast_bin_set_implicit_type(ctx, R, (ast_etype)T);
 	}
 }
-bin_base(R) ::= TOK_DOLLAR_DOT TOK_STRING(V) TOK_COLON TOK_LOCAL TOK_COLON type_name(T). {
-	R = ast_new_local_bin(ctx, V.str.offset, V.str.sz, (ast_etype)T);
+bin_base(R) ::= TOK_DOLLAR_DOT(D) TOK_STRING(V) TOK_COLON TOK_LOCAL TOK_COLON type_name(T). {
+	R = ast_new_local_bin(ctx, D.offset, V.offset + V.sz, V.str.offset,
+			V.str.sz, (ast_etype)T);
 }
 
 // `:T` postfix on an already-reduced bin_base. Lemon prefers shift
@@ -577,7 +617,7 @@ bin_base(R) ::= bin_base(B) TOK_COLON type_name(T). {
 operand(R) ::= bin_base(B). { R = B; }
 
 // $.bin.type() and all other bare-bin path functions (getKeys / count / set /
-// asInt / ...) are TOK_NAME and flow through `bin_base . method_fn` below.
+// toInt / ...) are TOK_NAME and flow through `bin_base . method_fn` below.
 
 // (expr) — parallel of bin_base. A parenthesized expression serves as
 // a particle-producing receiver anywhere a bin would; the runtime
@@ -610,7 +650,7 @@ operand(R) ::= ctx_list(C). {
 			ael_consume_leaf_then_finalize(ctx, C, impl_get, leaf);
 }
 
-// The pathed path functions (getKeys / count / set / asInt / append / ...) are
+// The pathed path functions (getKeys / count / set / toInt / append / ...) are
 // TOK_NAME and flow through `ctx_list . method_fn` below;
 // ael_finalize_method_call_path → ael_finalize_path_on_ctx reproduces the
 // former per-kind leaf-consume logic.
@@ -752,13 +792,17 @@ ctx_list(R) ::= TOK_AT(T) TOK_DOT path_seg(S). {
 // for other metadata nodes the pin is rejected via valid_types.
 %type meta_key_call { ast_ref }
 
-meta_key_call(R) ::= TOK_DOLLAR_DOT TOK_NAME(V) TOK_LPAREN TOK_RPAREN. {
+meta_key_call(R) ::= TOK_DOLLAR_DOT(D) TOK_NAME(V) TOK_LPAREN TOK_RPAREN(RP). {
 	R = ael_resolve_meta_call(ctx, V.str.offset, V.str.sz, 0, false);
+	// Span the whole '$.name()' so a runtime trace (e.g. an ABSENT $.key())
+	// focuses the accessor, not ast_new's lookahead default.
+	ast_set_span(ctx->pool, R, D.offset, RP.offset + RP.sz - D.offset);
 }
 
 meta_key_call(R) ::=
-		TOK_DOLLAR_DOT TOK_NAME(V) TOK_LPAREN TOK_INT(P) TOK_RPAREN. {
+		TOK_DOLLAR_DOT(D) TOK_NAME(V) TOK_LPAREN TOK_INT(P) TOK_RPAREN(RP). {
 	R = ael_resolve_meta_call(ctx, V.str.offset, V.str.sz, P.ival, true);
+	ast_set_span(ctx->pool, R, D.offset, RP.offset + RP.sz - D.offset);
 }
 
 meta_key_call(R) ::= meta_key_call(K) TOK_COLON type_name(T). {
@@ -1640,7 +1684,7 @@ case_list(R) ::= case_list(L) TOK_COMMA expr(C) TOK_ARROW expr(V). {
 
 %code {
 void
-ael_run_parser(parse_context* ctx, uint32_t input_sz)
+ael_run_parser(ael_context* ctx, uint32_t input_sz)
 {
 	lexer_t lex;
 	lexer_init(&lex, ctx->input, input_sz);

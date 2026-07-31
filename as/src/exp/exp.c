@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2020-2026 Aerospike, Inc.
  *
- * Portions may be licensed to Aerospike,),Inc. under one or more contributor
+ * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
  *
  * This program is free software: you can redistribute it and/or modify it under
@@ -55,11 +55,11 @@
 #include "base/particle_blob.h"
 #include "base/proto.h"
 #include "base/thr_info.h"
+#include "exp/ael_codegen.h"
 #include "exp/ael_emit.h"
 #include "exp/ael_parse.h"
 #include "exp/ael_string.h"
 #include "exp/ast.h"
-#include "exp/codegen.h"
 #include "exp/exp_rt.h"
 #include "exp/exp_wire.h"
 #include "geospatial/geospatial.h"
@@ -78,7 +78,7 @@
 #define EXP_MAX_AEL_SRC_SIZE EXP_MAX_SIZE
 
 // EXP_MAX_DEPTH (nesting cap for all traversals) is in exp/ast.h, shared with
-// codegen.c and the AEL build passes.
+// ael_codegen.c and the AEL build passes.
 
 //==========================================================
 // Type aliases.
@@ -155,11 +155,12 @@ typedef struct var_scope_s {
 // AEL direct compilation context -- sizing pass.
 typedef struct ael_size_ctx_s {
 	uint32_t instr_sz;
+	uint32_t instr_count; // upper bound on emitted ops - sizes the source map
 	uint32_t extra_sz;
 	uint32_t cleanup_count;
 	uint32_t depth; // ael_count_sz recursion depth (capped at EXP_MAX_DEPTH)
 	ast_pool* pool;
-	const char* ael_src; // for codegen_pack of inner exps
+	const char* ael_src; // for ael_codegen_pack of inner exps
 } ael_size_ctx;
 
 // Build-time view of the bin table (table points at scratch during the build).
@@ -191,10 +192,30 @@ typedef struct ael_build_args_s {
 	const char* ael_src;
 	uint8_t* ael_buf;
 	uint32_t ael_src_sz;
+	ael_src_map* src_map; // op ordinal -> source span, filled during emission
 
 	build_bin_table bin_table;
 	cf_vector* bins_info_r;
 } ael_build_args;
+
+// Record the just-claimed op's AST source span at its preorder ordinal
+// (instr_ix was incremented as the op was claimed, so the ordinal is
+// instr_ix - 1). Bounds-guarded so a count/emit mismatch degrades to a
+// missing map entry, never a scribble.
+static inline void
+ael_src_map_record(const ael_build_args* args, const ast_node* np)
+{
+	ael_src_map* m = args->src_map;
+	uint32_t ix = args->instr_ix - 1;
+
+	if (m != NULL && ix < m->n_ops) {
+		// The map is consumed only to render a source slice, so it stores the
+		// DISPLAY start -- for a bin or variable that reaches back over its
+		// '$.' / paren prefix, node.offset alone would focus the bare name.
+		m->entries[ix] =
+				(ael_src_entry){ .offset = ast_disp_offset(np), .sz = np->sz };
+	}
+}
 
 typedef struct build_counts_s {
 	uint32_t total_sz;
@@ -227,6 +248,10 @@ struct exp_build_args_s {
 	uint32_t max_var_idx;
 	var_scope* current;
 
+	// Live ancestor chain for the build-failure path/depth trace. Maintained
+	// by build_next(); leave NULL when driving build_cbs directly.
+	struct build_frame_s* current_frame;
+
 	uint32_t depth; // build_next recursion depth, capped at EXP_MAX_DEPTH
 
 	// Count of CDT literals the sizing pass found out of canonical form --
@@ -252,6 +277,179 @@ struct exp_build_args_s {
 
 typedef struct exp_build_args_s build_args;
 typedef exp_op_table_entry op_table_entry;
+
+// A build-time ancestor frame. build_next pushes one for the op it's about to
+// build and pops it on return, so at any failure the live chain
+// deepest -> root IS the path to the fault.
+typedef struct build_frame_s {
+	struct build_frame_s* parent;
+	exp_op_code op_code;
+} build_frame;
+
+// Thread-local build-failure accumulator. Reset at the top of build_internal
+// and filled first-set-wins as the recursion unwinds, so the deepest failing
+// op is the one kept. Raw codes and borrowed pointers only - rendering (op
+// name, path, snippet) happens at as_exp_take_build_error(), strictly on the
+// error path.
+typedef struct exp_build_err_s {
+	bool set;
+	uint32_t offset;
+	bool has_op;
+	exp_op_code op_code;
+	// Depth + ancestor chain (root -> fault), captured by walking the
+	// live build_frame chain at record time.
+	uint16_t depth;
+	bool path_truncated;
+	uint16_t n_frames;
+	exp_op_code frames[AS_EXP_TRACE_MAX_FRAMES];
+	// The msgpack payload (wire build) or the AEL source text (AEL build),
+	// retained so the snippet can be rendered from the failing element at
+	// as_exp_take_build_error() time. snippet_offset is the start of the
+	// failing element (the whole op list), which differs from 'offset' (the
+	// byte_offset, which points past the op header).
+	const uint8_t* payload;
+	uint32_t payload_sz;
+	uint32_t snippet_offset;
+	// AEL build failure: lang == AS_EXP_TRACE_LANG_AEL (0 for a wire build).
+	// 'offset'/'span' then index the AEL source text ('payload'), never the
+	// msgpack payload, and 'msg' carries the compile diagnostic verbatim.
+	uint8_t lang;
+	bool has_pos;
+	uint32_t span;
+	bool has_msg;
+	char msg[AS_EXP_BUILD_ERROR_MSG_MAX];
+} exp_build_err;
+
+static __thread exp_build_err g_exp_build_err;
+
+// Walk the live ancestor chain (deepest -> root) into the accumulator's frames
+// (stored root -> fault). depth is the true nesting depth even when the chain
+// is deeper than AS_EXP_TRACE_MAX_FRAMES; in that case the outermost frames
+// plus the innermost (failing) op are kept and path_truncated is set.
+static inline void
+exp_build_err_capture_path(exp_build_err* e, const build_frame* leaf)
+{
+	uint16_t depth = 0;
+
+	for (const build_frame* f = leaf; f != NULL; f = f->parent) {
+		depth++;
+	}
+
+	e->depth = depth;
+
+	if (depth == 0) {
+		e->n_frames = 0;
+		e->path_truncated = false;
+		return;
+	}
+
+	if (depth <= AS_EXP_TRACE_MAX_FRAMES) {
+		// Fits - fill frames[] right-to-left so it ends up root -> fault.
+		e->n_frames = depth;
+		e->path_truncated = false;
+
+		uint16_t ix = depth;
+
+		for (const build_frame* f = leaf; f != NULL; f = f->parent) {
+			e->frames[--ix] = f->op_code;
+		}
+
+		return;
+	}
+
+	// Deeper than the cap: keep the outermost (cap - 1) frames plus the
+	// innermost (failing) op, dropping the middle. pack_exp_trace renders an
+	// explicit "..." frame in the gap and path_truncated drives that.
+	uint16_t n_outer = AS_EXP_TRACE_MAX_FRAMES - 1;
+
+	e->n_frames = AS_EXP_TRACE_MAX_FRAMES;
+	e->path_truncated = true;
+	e->frames[AS_EXP_TRACE_MAX_FRAMES - 1] = leaf->op_code; // innermost
+
+	// For each outer slot p, the frame is at distance (depth - 1 - p) from the
+	// leaf toward the root. O(cap^2) but only on the deep-expression error path.
+	for (uint16_t p = 0; p < n_outer; p++) {
+		uint16_t dist = (uint16_t)(depth - 1 - p);
+		const build_frame* f = leaf;
+
+		for (uint16_t s = 0; s < dist; s++) {
+			f = f->parent;
+		}
+
+		e->frames[p] = f->op_code;
+	}
+}
+
+// 'offset' is the byte_offset (points past the op header, at the first arg);
+// 'snippet_offset' is the start of the failing element, where snippet
+// rendering begins. Pass-1 structural sites pass has_op false and render no
+// snippet - their 'offset' is the coarse position where parsing halted.
+static inline void
+exp_build_err_record(uint32_t offset, uint32_t snippet_offset, bool has_op,
+		exp_op_code op_code, const build_frame* leaf)
+{
+	if (g_exp_build_err.set) {
+		return; // deepest failure already captured (first-set-wins)
+	}
+
+	g_exp_build_err.set = true;
+	g_exp_build_err.offset = offset;
+	g_exp_build_err.snippet_offset = snippet_offset;
+	g_exp_build_err.has_op = has_op;
+	g_exp_build_err.op_code = op_code;
+	g_exp_build_err.depth = 0;
+	g_exp_build_err.path_truncated = false;
+	g_exp_build_err.n_frames = 0;
+	g_exp_build_err.lang = 0;
+	g_exp_build_err.has_msg = false;
+
+	if (leaf != NULL) {
+		exp_build_err_capture_path(&g_exp_build_err, leaf);
+	}
+}
+
+// Record an AEL build failure (first-set-wins, like exp_build_err_record).
+// 'offset'/'span' locate the offending region in the AEL source text; the
+// payload retained at build_internal entry is repointed at that source so
+// as_exp_take_build_error() can render the true source-slice snippet. 'msg' is
+// the compile diagnostic (or a fixed fallback), copied out because diag
+// storage dies with the parse pool.
+static void
+ael_build_err_record(const uint8_t* src, uint32_t src_sz, bool has_pos,
+		uint32_t offset, uint32_t span, const char* msg)
+{
+	if (g_exp_build_err.set) {
+		return; // deepest failure already captured (first-set-wins)
+	}
+
+	g_exp_build_err.set = true;
+	g_exp_build_err.lang = AS_EXP_TRACE_LANG_AEL;
+	g_exp_build_err.has_op = false;
+	g_exp_build_err.depth = 0;
+	g_exp_build_err.path_truncated = false;
+	g_exp_build_err.n_frames = 0;
+	g_exp_build_err.has_pos = has_pos;
+	g_exp_build_err.offset = has_pos ? offset : 0;
+	g_exp_build_err.span = has_pos ? span : 0;
+	g_exp_build_err.payload = src;
+	g_exp_build_err.payload_sz = src_sz;
+	g_exp_build_err.snippet_offset = 0; // unused for AEL
+
+	if (msg != NULL) {
+		size_t len = strlen(msg);
+
+		if (len > sizeof(g_exp_build_err.msg) - 1) {
+			len = sizeof(g_exp_build_err.msg) - 1;
+		}
+
+		memcpy(g_exp_build_err.msg, msg, len);
+		g_exp_build_err.msg[len] = '\0';
+		g_exp_build_err.has_msg = true;
+	}
+	else {
+		g_exp_build_err.has_msg = false;
+	}
+}
 
 //==========================================================
 // Forward declarations.
@@ -359,7 +557,7 @@ typedef struct {
 	ael_build_args* args; // set during build pass; NULL during size
 } blob_pack_ctx;
 
-// ael_emit_cdt_op_blob is shared with codegen.c -- declaration in ael_emit.h.
+// ael_emit_cdt_op_blob is shared with ael_codegen.c -- declaration in ael_emit.h.
 static int ael_pack_select_blob(blob_pack_ctx* bc, ast_ref ctx_seg_head,
 		ast_ref pf_ref);
 
@@ -517,8 +715,18 @@ as_exp_filter_build_base64(const char* buf64, uint32_t buf64_sz)
 			buf_sz_out, buf_sz_out, buf);
 
 	as_exp* exp = build_internal(buf, buf_sz_out, true, NULL);
+	as_exp* checked = exp == NULL ? NULL : check_filter_exp(exp);
 
-	return exp == NULL ? NULL : check_filter_exp(exp);
+	// build_internal retained 'buf' as the snippet payload, which dies with
+	// this scope (deferred free). Reset AFTER check_filter_exp, not between
+	// it and the build: check_filter_exp is itself a recording site on the
+	// AEL arm, so a reset placed before it leaves g_exp_build_err.set true on
+	// return - armed thread-local state for a build this caller never takes.
+	// (This entry's only callers today are XDR filter config, which never
+	// stage a trace.)
+	as_exp_build_err_reset();
+
+	return checked;
 }
 
 as_exp*
@@ -585,12 +793,457 @@ as_exp_destroy(as_exp* exp)
 	cf_free(exp);
 }
 
+// Append a NUL-terminated string into buf[*used .. cap), tracking *used. Stops
+// (and marks truncation by returning false) once it would overflow, so the
+// renderer can stop early instead of writing a misleading partial token.
+static bool
+snippet_append(char* buf, uint32_t cap, uint32_t* used, const char* s)
+{
+	uint32_t len = (uint32_t)strlen(s);
+
+	if (*used + len + 1 > cap) { // +1 for the NUL
+		return false;
+	}
+
+	memcpy(buf + *used, s, len);
+	*used += len;
+	buf[*used] = '\0';
+
+	return true;
+}
+
+// Record the primary diagnostic from 'diags' (positioned), or the fixed
+// fallback when the failure produced no diagnostic. Shared by the sizing- and
+// build-pass failure epilogues of build_internal_ael.
+static void
+ael_build_err_record_diags(const uint8_t* src, uint32_t src_sz,
+		const ael_diag_list* diags, const char* fallback_msg)
+{
+	if (ael_diag_has_error(diags)) {
+		const ael_diag* d = &diags->entries[0];
+
+		cf_warning(AS_EXP, "build_internal_ael - %s @ %u", d->msg, d->offset);
+		ael_build_err_record(src, src_sz, true, d->offset, d->sz, d->msg);
+	}
+	else {
+		cf_warning(AS_EXP, "build_internal_ael - %s", fallback_msg);
+		ael_build_err_record(src, src_sz, false, 0, 0, fallback_msg);
+	}
+}
+
+// Render a bounded, single-line slice of the AEL source with the offending
+// [offset, offset+span) region focus-marked (e.g. ... a + »5 / 0« ...).
+// Human-only: control characters flatten to spaces, truncated edges are
+// marked "...". Returns the rendered length (no NUL); 0 means nothing usable
+// was rendered. Used by both build diagnostics and runtime eval traces.
+#define AEL_SNIPPET_PRE_CTX 40 // source bytes kept ahead of the focus
+
+// Recursion cap for snippet_render's msgpack walk. Deliberately not the wire
+// path-frame cap: this bounds how deep the rendered expression nests, so tuning
+// the path array for field-45 size reasons must not change it.
+#define EXP_SNIPPET_MAX_DEPTH 16
+
+uint16_t
+exp_render_ael_src_snippet(const uint8_t* src, uint32_t src_sz, uint32_t offset,
+		uint32_t span, char* out, uint32_t cap)
+{
+	// cap >= 16 covers the NUL, both 2-byte focus marks, and both "..."
+	// pads, so the budget arithmetic below cannot underflow.
+	if (src == NULL || src_sz == 0 || offset > src_sz || cap < 16) {
+		return 0;
+	}
+
+	if (span > src_sz - offset) {
+		span = src_sz - offset;
+	}
+
+	if (span == 0 && offset < src_sz) {
+		span = 1; // a point diagnostic focuses the character it points at
+	}
+
+	// Window: up to PRE_CTX bytes of context before the focus, then as much of
+	// the focus + tail as the budget allows.
+	uint32_t start = offset > AEL_SNIPPET_PRE_CTX ? offset - AEL_SNIPPET_PRE_CTX
+												  : 0;
+
+	// Both window edges are raw byte offsets, so either can land inside a
+	// multi-byte sequence and turn valid UTF-8 source into an invalid str.
+	// Advance the head off any continuation byte. Bounded by offset, which is
+	// PRE_CTX bytes away, so this both terminates and stays in bounds.
+	if (start != 0) {
+		while (start < offset && (src[start] & 0xc0) == 0x80) {
+			start++;
+		}
+	}
+
+	uint32_t used = 0;
+
+	if (start > 0 && ! snippet_append(out, cap, &used, "...")) {
+		return 0;
+	}
+
+	// Text budget: cap less the NUL, the two 2-byte UTF-8 focus marks, and a
+	// possible trailing "...".
+	uint32_t budget = cap - 1 - 4 - 3 - used;
+	uint32_t end = src_sz;
+	bool tail_truncated = false;
+
+	if (end - start > budget) {
+		end = start + budget;
+		tail_truncated = true;
+
+		// Same for the tail. end is exclusive, so a continuation byte AT end
+		// means the sequence reaching it is split. In bounds: end < src_sz here,
+		// since end - start > budget implied src_sz - start > budget.
+		while (end > start && (src[end] & 0xc0) == 0x80) {
+			end--;
+		}
+	}
+
+	bool closed = false;
+
+	for (uint32_t i = start; i < end; i++) {
+		if (i == offset && ! snippet_append(out, cap, &used, "\xc2\xbb")) {
+			return 0; // focus open mark
+		}
+
+		if (i == offset + span && ! closed) {
+			if (! snippet_append(out, cap, &used, "\xc2\xab")) {
+				return 0; // focus close mark
+			}
+
+			closed = true;
+		}
+
+		uint8_t c = src[i];
+
+		out[used++] = (c < 0x20 || c == 0x7f) ? ' ' : (char)c;
+	}
+
+	out[used] = '\0';
+
+	if (offset >= end && ! snippet_append(out, cap, &used, "\xc2\xbb")) {
+		return 0; // focus starts at/past the window edge (e.g. EOF diagnostic)
+	}
+
+	if (! closed && ! snippet_append(out, cap, &used, "\xc2\xab")) {
+		return 0; // focus ran to the window edge - close it
+	}
+
+	if (tail_truncated && ! snippet_append(out, cap, &used, "...")) {
+		return 0;
+	}
+
+	// Trace key 6 ships as a msgpack str, which is defined to hold UTF-8, and
+	// the source is unvalidated client bytes - the edge alignment above fixes a
+	// split sequence but cannot make non-UTF-8 input valid. Drop the snippet
+	// whole rather than push an invalid str at the client's decoder, where it
+	// would fail while decoding the very error being reported. Callers already
+	// treat 0 as has_snippet false.
+	if (! cf_str_is_valid_utf8((const uint8_t*)out, used)) {
+		return 0;
+	}
+
+	return (uint16_t)used;
+}
+
+// Render one msgpack element (advancing mp past it) into the snippet buffer as
+// short human-readable text. A list whose first element is a known op code is
+// rendered op_name(arg, ...) - the readable expression form; any other element
+// is rendered as a scalar via msgpack_display (e.g. "5", "6.0", "<string#3>").
+// Bounded by 'cap'; on overflow it appends "..." (best effort) and returns
+// false so the caller marks the snippet truncated. depth_left guards against
+// pathologically deep payloads. Human-only - clients must not parse it.
+static bool
+snippet_render(msgpack_in* mp, char* buf, uint32_t cap, uint32_t* used,
+		uint32_t depth_left)
+{
+	if (depth_left == 0) {
+		snippet_append(buf, cap, used, "...");
+		return false;
+	}
+
+	// The (already malformed) payload can over-claim a list's element count,
+	// leaving the cursor at the end. Bail here rather than round-trip through
+	// msgpack_peek_type + msgpack_display, which fail closed on the resulting
+	// MSGPACK_TYPE_ERROR anyway. Redundant, kept because it names the
+	// exhausted-cursor case at the point it happens.
+	if (mp->offset >= mp->buf_sz) {
+		return false;
+	}
+
+	msgpack_type type = msgpack_peek_type(mp);
+
+	if (type == MSGPACK_TYPE_LIST) {
+		// Peek the op code without disturbing mp - use a copy.
+		msgpack_in peek = *mp;
+		uint32_t ele_count = 0;
+		uint64_t op_code = 0;
+
+		if (! msgpack_get_list_ele_count(&peek, &ele_count) || ele_count == 0 ||
+				! msgpack_get_uint64(&peek, &op_code)) {
+			// Not an op list (empty, or head is not an op code) - render the
+			// whole element as one token. Committing just the header for a
+			// non-int head would misalign the arg walk with the element
+			// stream, leaking inner elements into the enclosing op's args.
+			msgpack_display_str s;
+
+			if (! msgpack_display(mp, &s)) {
+				return false;
+			}
+
+			return snippet_append(buf, cap, used, s.str);
+		}
+
+		const char* name = NULL;
+
+		if (op_code < EXP_OP_CODE_END && op_table[op_code].code != 0) {
+			name = op_table[op_code].name;
+		}
+
+		// Commit: consume the list header + op code from mp.
+		(void)msgpack_get_list_ele_count(mp, &ele_count);
+		(void)msgpack_get_uint64(mp, &op_code);
+
+		uint32_t n_args = ele_count - 1; // -1 for the op code
+
+		if (! snippet_append(buf, cap, used, name != NULL ? name : "op")) {
+			return false;
+		}
+
+		if (! snippet_append(buf, cap, used, "(")) {
+			return false;
+		}
+
+		// No explicit arity cap needed: snippet_append() fails the moment
+		// output would exceed 'cap', so depth_left caps depth and the buffer
+		// caps breadth.
+		for (uint32_t i = 0; i < n_args; i++) {
+			if (i != 0 && ! snippet_append(buf, cap, used, ", ")) {
+				return false;
+			}
+
+			if (! snippet_render(mp, buf, cap, used, depth_left - 1)) {
+				return false;
+			}
+		}
+
+		return snippet_append(buf, cap, used, ")");
+	}
+
+	// Scalar (or map) - render a single token and advance mp past it.
+	msgpack_display_str s;
+
+	if (! msgpack_display(mp, &s)) {
+		return false;
+	}
+
+	return snippet_append(buf, cap, used, s.str);
+}
+
+// Pre-render the human-only snippet for the failing element into 'out'. Only
+// pass-2 (per-op) failures carry a reliable element start (build_next captures
+// it before consuming the op header), so the snippet is rendered only when an
+// op was recorded. Pass-1 structural sites stop mid-stream at an unvalidated
+// boundary, so they get no snippet (offset + message suffice). Best-effort:
+// any render failure just leaves has_snippet false.
+static void
+render_build_snippet(as_exp_build_error* out)
+{
+	if (! g_exp_build_err.has_op || g_exp_build_err.payload == NULL ||
+			g_exp_build_err.snippet_offset >= g_exp_build_err.payload_sz) {
+		return;
+	}
+
+	msgpack_in mp = { .buf = g_exp_build_err.payload,
+		.buf_sz = g_exp_build_err.payload_sz,
+		.offset = g_exp_build_err.snippet_offset };
+
+	uint32_t used = 0;
+
+	out->snippet[0] = '\0';
+
+	// Only expose the snippet on a COMPLETE render. snippet_render() returns
+	// false on overflow / truncation / malformed payload, which can leave a
+	// misleading partial fragment (e.g. "eq(5, " with no closing paren) - drop
+	// the whole component rather than emit a partial (matches the field-45
+	// budget policy and this function's "render failure -> has_snippet false").
+	if (snippet_render(&mp, out->snippet, sizeof(out->snippet), &used,
+				EXP_SNIPPET_MAX_DEPTH) &&
+			used != 0) {
+		out->snippet_len = (uint16_t)used;
+		out->has_snippet = true;
+	}
+}
+
+bool
+as_exp_take_build_error(as_exp_build_error* out)
+{
+	if (! g_exp_build_err.set) {
+		// A build can return NULL without recording - check_filter_exp()'s wire
+		// arm rejects a non-bool root and has no message channel to record into -
+		// yet build_internal() stamped its borrowed payload ref regardless. Drop
+		// it here so every exit of this function, and of
+		// as_exp_stage_build_error_details(), honors the contract.
+		as_exp_build_err_reset();
+		return false;
+	}
+
+	if (g_exp_build_err.lang == AS_EXP_TRACE_LANG_AEL) {
+		// AEL build failure: no op/path (there is no compiled op stream), no
+		// msgpack byte_offset - instead the source-text position + span, the
+		// compile diagnostic, and the true source-slice snippet.
+		*out = (as_exp_build_error){ .phase = AS_EXP_TRACE_PHASE_BUILD,
+			.lang = AS_EXP_TRACE_LANG_AEL };
+
+		if (g_exp_build_err.has_pos) {
+			out->has_ael_offset = true;
+			out->ael_offset = g_exp_build_err.offset;
+			out->has_ael_span = g_exp_build_err.span != 0;
+			out->ael_span = g_exp_build_err.span;
+
+			out->snippet_len = exp_render_ael_src_snippet(g_exp_build_err.payload,
+					g_exp_build_err.payload_sz, g_exp_build_err.offset,
+					g_exp_build_err.span, out->snippet, sizeof(out->snippet));
+			out->has_snippet = out->snippet_len != 0;
+		}
+
+		if (g_exp_build_err.has_msg) {
+			strcpy(out->msg, g_exp_build_err.msg);
+			out->has_msg = true;
+		}
+
+		g_exp_build_err.set = false;
+		g_exp_build_err.payload = NULL;
+		g_exp_build_err.payload_sz = 0;
+
+		return true;
+	}
+
+	*out = (as_exp_build_error){ .phase = AS_EXP_TRACE_PHASE_BUILD,
+		.has_offset = true,
+		.byte_offset = g_exp_build_err.offset };
+
+	if (g_exp_build_err.has_op) {
+		const char* name = op_table[g_exp_build_err.op_code].name;
+
+		if (name != NULL) {
+			size_t len = strlen(name);
+
+			if (len > sizeof(out->op) - 1) {
+				len = sizeof(out->op) - 1;
+			}
+
+			memcpy(out->op, name, len);
+			out->op[len] = '\0';
+			out->op_len = (uint16_t)len;
+			out->has_op = true;
+		}
+	}
+
+	// Pre-render the ancestor path op names (root -> fault). The op-name
+	// table lives here, so callers and proto.c stay free of it.
+	if (g_exp_build_err.n_frames != 0) {
+		out->depth = g_exp_build_err.depth;
+		out->path_truncated = g_exp_build_err.path_truncated;
+		out->n_frames = g_exp_build_err.n_frames;
+
+		for (uint16_t i = 0; i < g_exp_build_err.n_frames; i++) {
+			const char* name = op_table[g_exp_build_err.frames[i]].name;
+
+			if (name == NULL) {
+				name = "op";
+			}
+
+			size_t len = strlen(name);
+
+			if (len > sizeof(out->path[i]) - 1) {
+				len = sizeof(out->path[i]) - 1;
+			}
+
+			memcpy(out->path[i], name, len);
+			out->path[i][len] = '\0';
+		}
+
+		out->has_path = true;
+	}
+
+	// Pre-render the human-only snippet from the failing element.
+	render_build_snippet(out);
+
+	g_exp_build_err.set = false;
+	// Drop the retained payload reference now that the snippet is rendered, so a
+	// later read can never dereference a buffer that has since been freed.
+	g_exp_build_err.payload = NULL;
+	g_exp_build_err.payload_sz = 0;
+
+	return true;
+}
+
+// Reset the accumulator for a build whose result is NOT taken via
+// as_exp_take_build_error(). build_internal() retains 'payload' pointing into
+// the caller's buffer for a lazy snippet render - a non-taking caller must
+// drop that ref so a stale thread-local can't point into a freed request
+// buffer.
+void
+as_exp_build_err_reset(void)
+{
+	g_exp_build_err.set = false;
+	g_exp_build_err.lang = 0;
+	g_exp_build_err.payload = NULL;
+	g_exp_build_err.payload_sz = 0;
+}
+
+void
+as_exp_stage_build_error_details(const char* context_msg)
+{
+	// Nothing below this point can reach the wire with details off, and
+	// as_exp_take_build_error() is not cheap - it zeroes a ~1 KB struct,
+	// renders the op name and up to AS_EXP_TRACE_MAX_FRAMES path frames, and
+	// walks the client's msgpack payload to render a snippet. A malformed
+	// expression field is client-reachable at full request rate, so pay none
+	// of it with details off. Still drop the accumulator's retained payload
+	// ref - it points into a request buffer about to be freed.
+	//
+	// The gate is OFF-only, not tiered: tiers 1 and 2 still pay the whole
+	// render, and only the message survives (the trace components are dropped
+	// by as_error_exp_trace_set's own TRACE check). The take has to run anyway
+	// for tier 2's be.msg fold, and set_fmt has to run at every tier to claim
+	// first-set-wins - so the residue is the op/path/snippet render on an
+	// already-failed build, not a second gate waiting to be added.
+	if (g_error_verbosity == AS_ERROR_VERBOSITY_OFF) {
+		as_exp_build_err_reset();
+		return;
+	}
+
+	as_exp_build_error be;
+	bool has_be = as_exp_take_build_error(&be);
+
+	// A build-error with none of offset/op/snippet/ael_offset is message-only
+	// by definition - its trace would carry only phase+lang, which is noise.
+	// Wire (msgpack) builds always set has_offset and positioned AEL
+	// parse/build errors always set has_ael_offset, so their real traces are
+	// unaffected.
+	if (has_be &&
+			(be.has_offset || be.has_op || be.has_snippet || be.has_ael_offset)) {
+		as_error_exp_trace_set_from_build(&be);
+	}
+
+	// An AEL build carries its compile diagnostic - fold it in.
+	if (has_be && be.has_msg) {
+		as_error_details_set_fmt(AS_SUB_NONE, "%s: %s", context_msg, be.msg);
+	}
+	else {
+		as_error_details_set_fmt(AS_SUB_NONE, "%s", context_msg);
+	}
+}
+
 //==========================================================
 // Inter-file helpers.
 //
 // Non-static functions shared across the exp/ module but not part of the
 // public as_exp_* API: exp_geo_mp_to_op, called from exp_rt.c (eval).
-// (ael_pack_ctx lives in codegen.c, alongside ael_pack_ctx_seg_pair.)
+// (ael_pack_ctx lives in ael_codegen.c, alongside ael_pack_ctx_seg_pair.)
 //
 
 bool
@@ -650,8 +1303,23 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 	uint32_t top_count;
 	bool is_list = msgpack_buf_get_list_ele_count(mp.buf, mp.buf_sz, &top_count);
 
+	// Reset the build-failure accumulator - build_internal is the single entry
+	// for all public build functions, so one reset covers them all. Retain the
+	// payload so the snippet can be rendered from the failing element later.
+	// lang resets to wire; the AEL path re-stamps it when it records.
+	//
+	// Stamped here rather than at record time because this is the only scope
+	// holding the original buffer: with cpy_wire the deep recording site has
+	// only args.mp.buf, which points into the as_exp that as_exp_destroy() frees
+	// on that same failure path.
+	g_exp_build_err.set = false;
+	g_exp_build_err.lang = 0;
+	g_exp_build_err.payload = buf;
+	g_exp_build_err.payload_sz = buf_sz;
+
 	if (is_list && top_count == 0) {
 		cf_warning(AS_EXP, "build_internal - empty list");
+		exp_build_err_record(0, 0, false, EXP_UNK, NULL);
 		return NULL;
 	}
 
@@ -672,6 +1340,11 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 			}
 
 			cf_warning(AS_EXP, "build_internal - invalid AEL compilation");
+			// Keep the reporting contract every other build failure meets:
+			// no position/snippet (the defect is the envelope, not the
+			// source), but a diagnostic still folds into the message.
+			ael_build_err_record(NULL, 0, false, 0, 0,
+					"invalid AEL compilation envelope");
 			return NULL;
 		}
 
@@ -691,6 +1364,11 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 	};
 
 	if (! build_count_sz(&mp, &bc, 0)) {
+		// Pass-1 (structural) failure - mp.offset is the coarse position where
+		// parsing halted (it may sit past the failing element's header). The op
+		// is unknown and there is no live frame chain (pre-tree), so no op, no
+		// path, and no snippet - only the offset and the caller's message.
+		exp_build_err_record(mp.offset, mp.offset, false, EXP_UNK, NULL);
 		return NULL;
 	}
 
@@ -698,6 +1376,7 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 		cf_warning(AS_EXP,
 				"build_internal - incomplete expression field expected %u more elements",
 				bc.counter);
+		exp_build_err_record(mp.offset, mp.offset, false, EXP_UNK, NULL);
 		return NULL;
 	}
 
@@ -705,11 +1384,13 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 		cf_warning(AS_EXP,
 				"build_internal - expression size exceeds limit of %u bytes",
 				EXP_MAX_SIZE);
+		exp_build_err_record(mp.offset, mp.offset, false, EXP_UNK, NULL);
 		return NULL;
 	}
 
 	if (mp.offset != mp.buf_sz) {
 		cf_warning(AS_EXP, "build_internal - malformed expression field");
+		exp_build_err_record(mp.offset, mp.offset, false, EXP_UNK, NULL);
 		return NULL;
 	}
 
@@ -789,6 +1470,8 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 	args.exp->max_var_count = args.max_var_idx;
 
 	if (! build_set_expected_particle_type(&args)) {
+		exp_build_err_record(args.mp.offset, args.mp.offset, false, EXP_UNK,
+				NULL);
 		as_exp_destroy(args.exp);
 		return NULL;
 	}
@@ -821,6 +1504,12 @@ build_next(build_args* args)
 
 	args->depth++;
 	cf_defer { args->depth--; }
+
+	// Offset of the element about to be built (the op's whole list element, or
+	// a bare scalar) - before the header/op-code are consumed. The
+	// byte_offset points past them (at the first arg); the snippet renderer
+	// needs the element start so it can render op_name(arg, ...).
+	uint32_t elem_offset = args->mp.offset;
 
 	msgpack_type type = msgpack_peek_type(&args->mp);
 
@@ -872,8 +1561,29 @@ build_next(build_args* args)
 	args->ele_count = ele_count;
 	args->instr_ix++;
 
+	// Push this op onto the ancestor chain before recursing into children, so
+	// a child failure walks back through it (and pop on return). The frame is
+	// a stack local - the chain is only ever read synchronously on the error
+	// path while these frames are still live.
+	build_frame frame = { .parent = args->current_frame,
+		.op_code = (exp_op_code)op_code };
+
+	args->current_frame = &frame;
+
 	op_base_mem* op = (op_base_mem*)args->mem;
+	uint32_t op_offset = args->mp.offset;
 	bool rv = op_table[op_code].build_cb(args);
+
+	if (! rv) {
+		// One site covers every per-op pass-2 build failure. build_cb recurses
+		// into build_next for children, so the deepest failing op records first
+		// and first-set-wins keeps the innermost one. The live frame chain
+		// (this op back to the root) is the path to the fault.
+		exp_build_err_record(op_offset, elem_offset, true, (exp_op_code)op_code,
+				args->current_frame);
+	}
+
+	args->current_frame = frame.parent;
 
 	op->instr_end_ix = args->instr_ix;
 
@@ -1285,7 +1995,7 @@ build_get_or_add_bin_entry(build_bin_table* t, const exp_bin_name_entry* n)
 
 // Register every bin in a bin_next-threaded AST_BIN list into the runtime bin
 // table (deduped by name, capped at RECORD_MAX_BINS). Used for both the
-// canonical bin_root list and the local ($.bin:local:T) list -- every emitted
+// canonical bin_root list and the local ($.bin:LOCAL:T) list -- every emitted
 // bin op must have a table slot, matching the wire path.
 static bool
 ael_register_bins(build_bin_table* t, ast_pool* pool, const uint8_t* ael_str,
@@ -1301,6 +2011,10 @@ ael_register_bins(build_bin_table* t, ast_pool* pool, const uint8_t* ael_str,
 		};
 
 		if (! build_get_or_add_bin_entry(t, &bn)) {
+			// Record the source-positioned error detail for the offending bin
+			// (the caller only logs a generic warning).
+			ael_build_err_record(ael_str, ael_sz, true, bp->offset,
+					bp->u.bin.name_sz, "invalid bin name");
 			return false;
 		}
 
@@ -1773,7 +2487,7 @@ build_math_log(build_args* args)
 
 	if (! (arg0 == EXP_RTYPE_FLOAT && arg1 == EXP_RTYPE_FLOAT)) {
 		cf_warning(AS_EXP,
-				"build_math_log - error %u args are not numeric or different types - num %u (%s) base %u (%s)",
+				"build_math_log - error %u args are not numeric or different types - value %u (%s) base %u (%s)",
 				AS_ERR_PARAMETER, arg0, exp_rtype_to_str(arg0), arg1,
 				exp_rtype_to_str(arg1));
 		return false;
@@ -3041,6 +3755,20 @@ check_filter_exp(as_exp* exp)
 		cf_warning(AS_EXP,
 				"check_filter_exp - filters must return type %u (bool) found %u",
 				AS_PARTICLE_TYPE_BOOL, exp->expected_type);
+
+		// The build SUCCEEDED (accumulator empty), so a staging caller would
+		// otherwise fold a bare context message with no diagnostic at all.
+		// Record the reason, message-only for the AEL flavor: no position and
+		// no payload ref - the source lives in the exp destroyed just below,
+		// so a retained pointer would dangle at as_exp_take_build_error()
+		// time (the base64-path lesson). Wire builds keep the pre-existing
+		// no-detail behavior - the wire arm of as_exp_take_build_error()
+		// carries no message channel.
+		if (exp->ael_map != NULL) {
+			ael_build_err_record(NULL, 0, false, 0, 0,
+					"filter expression must evaluate to boolean");
+		}
+
 		as_exp_destroy(exp);
 		return NULL;
 	}
@@ -3083,11 +3811,14 @@ build_internal_ael(const uint8_t* ael_str, uint32_t ael_sz, cf_vector* bins_info
 		cf_warning(AS_EXP,
 				"build_internal_ael - AEL source size %u exceeds limit of %u bytes",
 				ael_sz, EXP_MAX_AEL_SRC_SIZE);
-		// First-set-wins: give the client the specific reason; the
+		// First-set-wins: give the client the specific reason via the
+		// build-error accumulator (which also stages the lang=AEL trace); the
 		// transaction layer's generic fallback then no-ops.
-		as_error_details_set_fmt(AS_SUB_NONE,
-				"expression exceeds maximum size of %u bytes",
+		char msg[AS_EXP_BUILD_ERROR_MSG_MAX];
+
+		snprintf(msg, sizeof(msg), "expression exceeds maximum size of %u bytes",
 				EXP_MAX_AEL_SRC_SIZE);
+		ael_build_err_record(ael_str, ael_sz, false, 0, 0, msg);
 		return NULL;
 	}
 
@@ -3109,35 +3840,49 @@ build_internal_ael(const uint8_t* ael_str, uint32_t ael_sz, cf_vector* bins_info
 		const ael_diag* d = &pr.diags.entries[0];
 
 		cf_warning(AS_EXP, "build_internal_ael - %s @ %u", d->msg, d->offset);
-
-		// Surface the parser's precise message + location to the client.
-		// as_error_details is first-set-wins, so this deep, specific set
-		// claims the slot over the transaction layer's generic fallback.
+		// Record the primary parse diagnostic, composing in the line/col so
+		// message-tier clients (no trace) get the location too.
 		uint32_t line;
 		uint32_t col;
 
 		ael_offset_line_col((const char*)ael_str, ael_sz, d->offset, &line, &col);
-		as_error_details_set_fmt(AS_SUB_NONE,
-				"invalid expression at line %u col %u: %s", line, col, d->msg);
 
+		char msg[AS_EXP_BUILD_ERROR_MSG_MAX];
+
+		snprintf(msg, sizeof(msg), "%s at line %u col %u", d->msg, line, col);
+		ael_build_err_record(ael_str, ael_sz, true, d->offset, d->sz, msg);
 		return NULL;
 	}
+
+	// Collect size/build-pass diagnostics (codegen's sub-program emitters
+	// report AEL-positioned errors via pool->diags in both passes).
+	ael_diag_list build_diags = { 0 };
+
+	cf_defer { ael_diag_list_destroy(&build_diags); }
+
+	pool.diags = &build_diags;
 
 	ael_size_ctx ctx = { .pool = &pool, .ael_src = (const char*)ael_str };
 
 	if (! ael_count_sz(&ctx, pr.root)) {
 		cf_warning(AS_EXP, "build_internal_ael - sizing failed");
+		ael_build_err_record_diags(ael_str, ael_sz, &build_diags,
+				"expression sizing failed");
 		return NULL;
 	}
 
 	// Collect the distinct bins the expression reads. Canonical bins are on
-	// pr.bin_root; $.bin:local:T bins are on pr.local_bin_root (kept off
+	// pr.bin_root; $.bin:LOCAL:T bins are on pr.local_bin_root (kept off
 	// bin_root for type narrowing). Both need a runtime slot -- mirrors the
 	// wire path, where build_count_sz registers every bin op. They occupy the
 	// first n_bins var slots, loaded/masked once by exp_eval_bin.
 	exp_bin_name_entry bin_entries[RECORD_MAX_BINS];
 	build_bin_table bin_table = { .table = bin_entries, .base = ael_str };
 
+	// Register both bin lists: canonical bins on pr.bin_root and the loose
+	// $.bin:LOCAL:T bins on pr.local_bin_root (kept off bin_root for type
+	// narrowing). Both need a runtime slot -- mirrors the wire path. The
+	// invalid-bin-name error detail is staged inside ael_register_bins.
 	if (! ael_register_bins(&bin_table, &pool, ael_str, ael_sz, pr.bin_root) ||
 			! ael_register_bins(&bin_table, &pool, ael_str, ael_sz,
 					pr.local_bin_root)) {
@@ -3145,8 +3890,9 @@ build_internal_ael(const uint8_t* ael_str, uint32_t ael_sz, cf_vector* bins_info
 		return NULL;
 	}
 
-	// Layout: [ops][extra][cleanup][exp_rt_bin_table + entries][ael_buf].
-	// The extra region is byte data, so 8-align the void** cleanup_stack.
+	// Layout: [ops][extra][cleanup][exp_rt_bin_table + entries][ael_src_map +
+	// entries][ael_buf]. The extra region is byte data, so 8-align the void**
+	// cleanup_stack; the source map holds a pointer, so 8-align it too.
 	// Offsets are computed in uint64 so the EXP_MAX_SIZE guard below stays
 	// authoritative regardless of the source cap -- no intermediate 32-bit
 	// wrap can slip a too-small buffer past the check.
@@ -3156,13 +3902,18 @@ build_internal_ael(const uint8_t* ael_str, uint32_t ael_sz, cf_vector* bins_info
 			~7ull;
 	uint64_t bin_table_sz = sizeof(exp_rt_bin_table) +
 			(uint64_t)bin_table.n_bins * sizeof(exp_bin_name_entry);
-	uint64_t ael_buf_offset = bin_table_offset + bin_table_sz;
+	uint64_t src_map_offset = (bin_table_offset + bin_table_sz + 7) & ~7ull;
+	uint64_t src_map_sz = sizeof(ael_src_map) +
+			(uint64_t)ctx.instr_count * sizeof(ael_src_entry);
+	uint64_t ael_buf_offset = src_map_offset + src_map_sz;
 	uint64_t total_sz_u64 = ael_buf_offset + ael_sz;
 
 	if (total_sz_u64 >= EXP_MAX_SIZE) {
 		cf_warning(AS_EXP,
 				"build_internal_ael - expression size %lu exceeds limit of %u bytes",
 				total_sz_u64, EXP_MAX_SIZE);
+		ael_build_err_record(ael_str, ael_sz, false, 0, 0,
+				"compiled expression exceeds the size limit");
 		return NULL;
 	}
 
@@ -3182,6 +3933,15 @@ build_internal_ael(const uint8_t* ael_str, uint32_t ael_sz, cf_vector* bins_info
 	args.ael_src_sz = ael_sz;
 
 	memcpy(args.ael_buf, ael_str, ael_sz);
+
+	// Publish the runtime source map - entries fill in as ops are emitted.
+	ael_src_map* src_map = (ael_src_map*)(args.exp->mem + src_map_offset);
+
+	src_map->src = args.ael_buf;
+	src_map->src_sz = ael_sz;
+	src_map->n_ops = ctx.instr_count;
+	args.src_map = src_map;
+	args.exp->ael_map = src_map;
 
 	// Publish the bin table -- entries locate name bytes in the copied ael_buf.
 	exp_rt_bin_table* rt_bins =
@@ -3205,41 +3965,25 @@ build_internal_ael(const uint8_t* ael_str, uint32_t ael_sz, cf_vector* bins_info
 	args.max_var_idx = bin_table.n_bins;
 
 	// Sub-program emission validates the just-emitted msgpack via
-	// pool->diags; collect any AEL-position errors for the cf_warning
-	// below.
-	ael_diag_list build_diags = { 0 };
-
-	cf_defer { ael_diag_list_destroy(&build_diags); }
-
-	pool.diags = &build_diags;
-
+	// pool->diags (armed above, before sizing); any AEL-positioned errors
+	// land in build_diags.
 	bool build_ok = ael_build_node(&args, pr.root);
 
 	pool.diags = NULL;
 
 	if (! build_ok) {
 		if (ael_diag_has_error(&build_diags)) {
-			const ael_diag* d = &build_diags.entries[0];
-
-			cf_warning(AS_EXP, "build_internal_ael - %s @ %u", d->msg, d->offset);
-
-			// Surface the located build diagnostic to the client, mirroring
-			// the parse-error branch above. as_error_details is
-			// first-set-wins, so this claims the slot over the transaction
-			// layer's generic fallback.
-			uint32_t line;
-			uint32_t col;
-
-			ael_offset_line_col((const char*)ael_str, ael_sz, d->offset, &line,
-					&col);
-			as_error_details_set_fmt(AS_SUB_NONE,
-					"invalid expression at line %u col %u: %s", line, col,
-					d->msg);
+			cf_warning(AS_EXP, "build_internal_ael - %s @ %u",
+					build_diags.entries[0].msg, build_diags.entries[0].offset);
 		}
 		else {
 			cf_warning(AS_EXP, "build_internal_ael - build failed");
 		}
 
+		// The caller stages the trace and folds the diagnostic into its
+		// context-prefixed message.
+		ael_build_err_record_diags(ael_str, ael_sz, &build_diags,
+				"expression build failed");
 		as_exp_destroy(args.exp);
 		return NULL;
 	}
@@ -3250,6 +3994,13 @@ build_internal_ael(const uint8_t* ael_str, uint32_t ael_sz, cf_vector* bins_info
 	cf_assert(args.extra_ptr <= (uint8_t*)args.exp->cleanup_stack, AS_EXP,
 			"ael build extra_data overran cleanup_stack %p > %p",
 			args.extra_ptr, args.exp->cleanup_stack);
+	// Sized-op count is an UPPER bound on emitted ops, not an equality:
+	// left-folded chains (a - b - c, a / b / c) size one op per AST chain
+	// node but emit a single vararg op. Emitting MORE than sized means the
+	// op region itself was under-reserved - crash-worthy corruption.
+	cf_assert(args.instr_ix <= ctx.instr_count, AS_EXP,
+			"ael op overrun - emitted %u sized %u", args.instr_ix,
+			ctx.instr_count);
 
 	args.exp->max_var_count = args.max_var_idx;
 
@@ -3257,6 +4008,8 @@ build_internal_ael(const uint8_t* ael_str, uint32_t ael_sz, cf_vector* bins_info
 	build_args type_args = { .exp = args.exp, .entry = args.entry };
 
 	if (args.entry == NULL || ! build_set_expected_particle_type(&type_args)) {
+		ael_build_err_record(ael_str, ael_sz, false, 0, 0,
+				"invalid expression result type");
 		as_exp_destroy(args.exp);
 		return NULL;
 	}
@@ -3276,6 +4029,23 @@ build_internal_ael(const uint8_t* ael_str, uint32_t ael_sz, cf_vector* bins_info
 	}
 
 	return args.exp;
+}
+
+// Account n emitted ops of 'code' in the sizing pass. The byte size and the
+// op count MUST move together: the count sizes the runtime source map and
+// upper-bounds the emitted-op assert in build_internal_ael - a size without a
+// count would fire that assert on any expression using the op.
+static inline void
+ael_size_ops(ael_size_ctx* ctx, exp_op_code code, uint32_t n)
+{
+	ctx->instr_sz += n * op_table[code].size;
+	ctx->instr_count += n;
+}
+
+static inline void
+ael_size_op(ael_size_ctx* ctx, exp_op_code code)
+{
+	ael_size_ops(ctx, code, 1);
 }
 
 // Depth guard for the recursive sizer: a left-deep chain is rejected at
@@ -3302,32 +4072,32 @@ ael_count_sz(ael_size_ctx* ctx, ast_ref ref)
 
 	switch (np->type) {
 	case AST_NIL:
-		ctx->instr_sz += op_table[EXP_VOP_VALUE_NIL].size;
+		ael_size_op(ctx, EXP_VOP_VALUE_NIL);
 		return true;
 
 	case AST_INT:
-		ctx->instr_sz += op_table[EXP_VOP_VALUE_INT].size;
+		ael_size_op(ctx, EXP_VOP_VALUE_INT);
 		return true;
 
 	case AST_FLOAT:
-		ctx->instr_sz += op_table[EXP_VOP_VALUE_FLOAT].size;
+		ael_size_op(ctx, EXP_VOP_VALUE_FLOAT);
 		return true;
 
 	case AST_ZERO:
 		if (np->etype == AST_ETYPE_FLOAT) {
-			ctx->instr_sz += op_table[EXP_VOP_VALUE_FLOAT].size;
+			ael_size_op(ctx, EXP_VOP_VALUE_FLOAT);
 		}
 		else {
-			ctx->instr_sz += op_table[EXP_VOP_VALUE_INT].size;
+			ael_size_op(ctx, EXP_VOP_VALUE_INT);
 		}
 		return true;
 
 	case AST_BOOL:
-		ctx->instr_sz += op_table[EXP_VOP_VALUE_BOOL].size;
+		ael_size_op(ctx, EXP_VOP_VALUE_BOOL);
 		return true;
 
 	case AST_STRING: {
-		ctx->instr_sz += op_table[EXP_VOP_VALUE_STR].size;
+		ael_size_op(ctx, EXP_VOP_VALUE_STR);
 
 		if (np->u.str.has_escape) {
 			ctx->extra_sz += ael_string_decoded_sz(np->u.str.str, np->u.str.sz);
@@ -3337,17 +4107,17 @@ ael_count_sz(ael_size_ctx* ctx, ast_ref ref)
 	}
 
 	case AST_BLOB:
-		ctx->instr_sz += op_table[EXP_VOP_VALUE_BLOB].size;
+		ael_size_op(ctx, EXP_VOP_VALUE_BLOB);
 		ctx->extra_sz += np->u.str.sz / 2; // decoded binary
 		return true;
 
 	case AST_B64_BLOB:
-		ctx->instr_sz += op_table[EXP_VOP_VALUE_BLOB].size;
+		ael_size_op(ctx, EXP_VOP_VALUE_BLOB);
 		ctx->extra_sz += ael_b64_decoded_sz(np->u.str.str, np->u.str.sz);
 		return true;
 
 	case AST_GEO_LITERAL:
-		ctx->instr_sz += op_table[EXP_VOP_VALUE_GEO].size;
+		ael_size_op(ctx, EXP_VOP_VALUE_GEO);
 		// Raw JSON copied into extra_data + 1 byte AS_BYTES_GEOJSON
 		// prefix; build_value_geo reads from a msgpack-bin source so
 		// account for the bin header bytes too (max 5 for u32 len).
@@ -3357,13 +4127,13 @@ ael_count_sz(ael_size_ctx* ctx, ast_ref ref)
 
 	case AST_BIN:
 	case AST_BIN_REF:
-		ctx->instr_sz += op_table[EXP_BIN].size;
+		ael_size_op(ctx, EXP_BIN);
 		return true;
 
 	case AST_META: {
 		exp_op_code mc = np->u.meta.op_code;
 
-		ctx->instr_sz += op_table[mc].size;
+		ael_size_op(ctx, mc);
 
 		if (mc == EXP_META_DIGEST_MOD) {
 			ctx->extra_sz += 0; // digest mod param is in struct
@@ -3373,15 +4143,15 @@ ael_count_sz(ael_size_ctx* ctx, ast_ref ref)
 	}
 
 	case AST_VAR:
-		ctx->instr_sz += op_table[EXP_VAR].size;
+		ael_size_op(ctx, EXP_VAR);
 		return true;
 
 	case AST_LOOP_VAR:
-		ctx->instr_sz += op_table[EXP_VAR_BUILTIN].size;
+		ael_size_op(ctx, EXP_VAR_BUILTIN);
 		return true;
 
 	case AST_UNKNOWN:
-		ctx->instr_sz += op_table[EXP_UNK].size;
+		ael_size_op(ctx, EXP_UNK);
 		return true;
 
 	// N-ary math (circular list).
@@ -3389,7 +4159,7 @@ ael_count_sz(ael_size_ctx* ctx, ast_ref ref)
 	case AST_MUL:
 	case AST_FUNC_MAX:
 	case AST_FUNC_MIN: {
-		ctx->instr_sz += op_table[ast_node_table[np->type].exp_cmd].size;
+		ael_size_op(ctx, ast_node_table[np->type].exp_cmd);
 		ast_ref e = ast_nmath_head(pool, np);
 
 		for (uint32_t i = 0; i < np->u.nmath.count; i++) {
@@ -3410,7 +4180,7 @@ ael_count_sz(ael_size_ctx* ctx, ast_ref ref)
 	case AST_BIT_AND:
 	case AST_BIT_OR:
 	case AST_BIT_XOR: {
-		ctx->instr_sz += op_table[ast_node_table[np->type].exp_cmd].size;
+		ael_size_op(ctx, ast_node_table[np->type].exp_cmd);
 		ast_ref e = np->u.list.head;
 
 		for (uint32_t i = 0; i < np->u.list.count; i++) {
@@ -3429,7 +4199,7 @@ ael_count_sz(ael_size_ctx* ctx, ast_ref ref)
 	// Left-fold binary ops (emitted as n-ary).
 	case AST_SUB:
 	case AST_DIV:
-		ctx->instr_sz += op_table[ast_node_table[np->type].exp_cmd].size;
+		ael_size_op(ctx, ast_node_table[np->type].exp_cmd);
 		return ael_count_sz(ctx, np->u.binary.left) &&
 				ael_count_sz(ctx, np->u.binary.right);
 
@@ -3447,7 +4217,7 @@ ael_count_sz(ael_size_ctx* ctx, ast_ref ref)
 	case AST_LSHIFT:
 	case AST_RSHIFT_ARITH:
 	case AST_RSHIFT_LOGIC:
-		ctx->instr_sz += op_table[ast_node_table[np->type].exp_cmd].size;
+		ael_size_op(ctx, ast_node_table[np->type].exp_cmd);
 		return ael_count_sz(ctx, np->u.binary.left) &&
 				ael_count_sz(ctx, np->u.binary.right);
 
@@ -3457,7 +4227,7 @@ ael_count_sz(ael_size_ctx* ctx, ast_ref ref)
 	case AST_PATH_FUNC_CAST_INT:
 	case AST_PATH_FUNC_CAST_FLOAT:
 	case AST_PATH_FUNC_CAST_STRING:
-		ctx->instr_sz += op_table[ast_node_table[np->type].exp_cmd].size;
+		ael_size_op(ctx, ast_node_table[np->type].exp_cmd);
 		return ael_count_sz(ctx, np->u.unary.operand);
 
 	// 1-arg functions.
@@ -3465,7 +4235,7 @@ ael_count_sz(ael_size_ctx* ctx, ast_ref ref)
 	case AST_FUNC_CEIL:
 	case AST_FUNC_FLOOR:
 	case AST_FUNC_COUNT_ONE_BITS:
-		ctx->instr_sz += op_table[ast_node_table[np->type].exp_cmd].size;
+		ael_size_op(ctx, ast_node_table[np->type].exp_cmd);
 		return ael_count_sz(ctx, np->u.func1.arg);
 
 	// 2-arg functions.
@@ -3473,13 +4243,13 @@ ael_count_sz(ael_size_ctx* ctx, ast_ref ref)
 	case AST_FUNC_POW:
 	case AST_FUNC_FIND_BIT_LEFT:
 	case AST_FUNC_FIND_BIT_RIGHT:
-		ctx->instr_sz += op_table[ast_node_table[np->type].exp_cmd].size;
+		ael_size_op(ctx, ast_node_table[np->type].exp_cmd);
 		return ael_count_sz(ctx, np->u.func2.arg1) &&
 				ael_count_sz(ctx, np->u.func2.arg2);
 
 	// Collection literals -- msgpack-encoded into extra_data.
 	case AST_LIST: {
-		ctx->instr_sz += op_table[EXP_QUOTE].size;
+		ael_size_op(ctx, EXP_QUOTE);
 		uint32_t pack_sz = ael_literal_pack_sz(pool, ref);
 
 		if (pack_sz == 0 && np->u.list.count > 0) {
@@ -3491,7 +4261,7 @@ ael_count_sz(ael_size_ctx* ctx, ast_ref ref)
 	}
 
 	case AST_MAP: {
-		ctx->instr_sz += op_table[EXP_VOP_VALUE_MSGPACK].size;
+		ael_size_op(ctx, EXP_VOP_VALUE_MSGPACK);
 		uint32_t pack_sz = ael_literal_pack_sz(pool, ref);
 
 		if (pack_sz == 0 && np->u.list.count > 0) {
@@ -3506,7 +4276,7 @@ ael_count_sz(ael_size_ctx* ctx, ast_ref ref)
 	case AST_LET: {
 		uint32_t defs_count = np->u.list.count - 2; // exclude let_scope + body
 
-		ctx->instr_sz += op_table[EXP_LET].size;
+		ael_size_op(ctx, EXP_LET);
 
 		// Skip let_scope at head.
 		ast_ref def = ast_pool_at(pool, np->u.list.head)->next;
@@ -3528,8 +4298,8 @@ ael_count_sz(ael_size_ctx* ctx, ast_ref ref)
 	case AST_WHEN: {
 		uint32_t mappings_count = np->u.list.count - 1;
 
-		ctx->instr_sz += op_table[EXP_COND].size;
-		ctx->instr_sz += mappings_count * op_table[EXP_VOP_COND_CASE].size;
+		ael_size_op(ctx, EXP_COND);
+		ael_size_ops(ctx, EXP_VOP_COND_CASE, mappings_count);
 
 		ast_ref m = np->u.list.head;
 
@@ -3551,7 +4321,7 @@ ael_count_sz(ael_size_ctx* ctx, ast_ref ref)
 	case AST_PATH_CALL: {
 		ast_node* op_node = ast_pool_at(pool, np->u.call.call_op);
 
-		ctx->instr_sz += op_table[EXP_CALL].size;
+		ael_size_op(ctx, EXP_CALL);
 
 		as_packer sizer = { .buffer = NULL };
 
@@ -3625,11 +4395,11 @@ ael_count_sz(ael_size_ctx* ctx, ast_ref ref)
 
 	// Type-of: bin_type op.
 	case AST_BIN_TYPE:
-		ctx->instr_sz += op_table[EXP_BIN_TYPE].size;
+		ael_size_op(ctx, EXP_BIN_TYPE);
 		return true;
 
 	case AST_BIN_EXISTS:
-		ctx->instr_sz += op_table[EXP_BIN_EXISTS].size;
+		ael_size_op(ctx, EXP_BIN_EXISTS);
 		return true;
 
 	default:
@@ -3658,7 +4428,7 @@ ael_build_left_fold(ael_build_args* args, ast_ref ref, ast_node_t type)
 	return ael_build_node(args, ref);
 }
 
-// Pure literal AST nodes — codegen_emit packs them as scalar msgpack
+// Pure literal AST nodes — ael_codegen_emit packs them as scalar msgpack
 // bytes (no leading list header). Anything else emits as an
 // `[opcode, ...]` instruction list and must go through an eval_token
 // + ael_build_node sub-instruction at the fast-path blob level.
@@ -3819,7 +4589,7 @@ ael_pack_call_blob(call_blob_ctx* cb, ast_pool* pool, const char* ael_src,
 		bool is_literal = ast_is_blob_literal(ep->type);
 
 		if (is_literal) {
-			rc = codegen_emit(pk, pool, ael_src, e);
+			rc = ael_codegen_emit(pk, pool, ael_src, e);
 			if (rc != 0) {
 				return -1;
 			}
@@ -3963,6 +4733,7 @@ ael_build_node(ael_build_args* args, ast_ref ref)
 
 	op_base_mem* op = (op_base_mem*)args->mem;
 	args->instr_ix++;
+	ael_src_map_record(args, np);
 
 	switch (np->type) {
 	case AST_NIL:
@@ -4452,8 +5223,8 @@ ael_build_node(ael_build_args* args, ast_ref ref)
 			if (ltype != EXP_RTYPE_END && rtype != EXP_RTYPE_END &&
 					ltype != rtype) {
 				if (pool->diags != NULL) {
-					ael_diag_add(pool->diags, AEL_SEV_ERROR, np->offset, np->sz,
-							"comparison operand types do not match");
+					ael_diag_add(pool->diags, AEL_SEV_ERROR, ast_disp_offset(np),
+							np->sz, "comparison operand types do not match");
 				}
 
 				return false;
@@ -4771,8 +5542,7 @@ ael_build_node(ael_build_args* args, ast_ref ref)
 		for (uint32_t i = 0; i < defs_count; i++) {
 			ast_node* dp = ast_pool_at(pool, def);
 
-			scope.entries[i].name =
-					(const uint8_t*)args->ael_src + dp->u.var_def.name_offset;
+			scope.entries[i].name = (const uint8_t*)args->ael_src + dp->offset;
 			scope.entries[i].name_sz = dp->u.var_def.name_sz;
 			scope.entries[i].idx = args->var_idx++;
 			scope.entries[i].r_type = EXP_RTYPE_END;
@@ -4837,10 +5607,11 @@ ael_build_node(ael_build_args* args, ast_ref ref)
 				return false;
 			}
 
-			// Emit COND_CASE marker.
+			// Emit COND_CASE marker - attributed to the when-case's source.
 			op_base_mem* op_case = (op_base_mem*)args->mem;
 			op_case->code = EXP_VOP_COND_CASE;
 			args->instr_ix++;
+			ael_src_map_record(args, mp);
 			args->mem += op_table[EXP_VOP_COND_CASE].size;
 
 			// Emit result.
@@ -4910,8 +5681,8 @@ ael_build_node(ael_build_args* args, ast_ref ref)
 				op_node->type != AST_PATH_FUNC_PSELECT_REMOVE &&
 				! ast_type_resolved(np->etype)) {
 			if (pool->diags != NULL) {
-				ael_diag_add(pool->diags, AEL_SEV_ERROR, np->offset, np->sz,
-						"cannot infer type — pin with :T");
+				ael_diag_add(pool->diags, AEL_SEV_ERROR, ast_disp_offset(np),
+						np->sz, "cannot infer type — pin with :T");
 			}
 
 			return false;
@@ -5237,7 +6008,8 @@ ael_pack_literal(as_packer* pk, ast_pool* pool, ast_ref ref)
 		if (ordered && pk->buffer != NULL && ele_count >= 2 &&
 				! list_buf_check_ordered(pk->buffer + start, pk->offset - start)) {
 			if (pool->diags != NULL) {
-				ael_diag_add(pool->diags, AEL_SEV_ERROR, np->offset, np->sz,
+				ael_diag_add(pool->diags, AEL_SEV_ERROR, ast_disp_offset(np),
+						np->sz,
 						":ORDERED list literal is not in ascending order");
 			}
 
@@ -5298,8 +6070,8 @@ ael_pack_literal(as_packer* pk, ast_pool* pool, ast_ref ref)
 		if (ordered && pk->buffer != NULL && ele_count >= 2 &&
 				! map_buf_sort_in_place(pk->buffer + start, pk->offset - start)) {
 			if (pool->diags != NULL) {
-				ael_diag_add(pool->diags, AEL_SEV_ERROR, np->offset, np->sz,
-						"map literal has duplicate keys");
+				ael_diag_add(pool->diags, AEL_SEV_ERROR, ast_disp_offset(np),
+						np->sz, "map literal has duplicate keys");
 			}
 
 			return -1;
@@ -5412,7 +6184,7 @@ ael_pack_select_blob(blob_pack_ctx* bc, ast_ref ctx_seg_head, ast_ref pf_ref)
 
 	if (is_apply) {
 		if (apply_expr != AST_REF_NULL) {
-			rc = codegen_emit(pk, pool, ael_buf, apply_expr);
+			rc = ael_codegen_emit(pk, pool, ael_buf, apply_expr);
 		}
 		else {
 			// PSELECT_REMOVE — synthetic [EXP_RESULT_REMOVE].

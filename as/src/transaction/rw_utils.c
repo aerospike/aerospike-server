@@ -45,6 +45,7 @@
 #include "base/masking.h"
 #include "base/mrt_monitor.h"
 #include "base/proto.h"
+#include "base/security.h"
 #include "base/transaction.h"
 #include "exp/exp.h"
 #include "fabric/fabric.h"
@@ -244,10 +245,13 @@ handle_meta_filter(const as_transaction* tr, const as_record* r, as_exp** exp)
 			as_msg_field* f =
 					as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_PREDEXP);
 			if ((*exp = as_exp_filter_build(f, false)) == NULL) {
-				as_error_details_set_fmt(AS_SUB_NONE,
+				as_exp_stage_build_error_details(
 						"invalid metadata expression in batch request");
 				return AS_ERR_PARAMETER;
 			}
+
+			// Non-taking build - drop the accumulator's payload ref.
+			as_exp_build_err_reset();
 		}
 		else if ((*exp = as_batch_get_predexp(tr->from.batch_shared)) == NULL) {
 			return AS_OK;
@@ -267,10 +271,12 @@ handle_meta_filter(const as_transaction* tr, const as_record* r, as_exp** exp)
 		as_msg_field* f =
 				as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_PREDEXP);
 		if ((*exp = as_exp_filter_build(f, false)) == NULL) {
-			as_error_details_set_fmt(AS_SUB_NONE,
-					"invalid metadata expression in request");
+			as_exp_stage_build_error_details("invalid metadata expression in request");
 			return AS_ERR_PARAMETER;
 		}
+
+		// Non-taking build - drop the accumulator's payload ref.
+		as_exp_build_err_reset();
 		break;
 	}
 
@@ -308,7 +314,8 @@ destroy_filter_exp(const as_transaction* tr, as_exp* exp)
 }
 
 int
-read_and_filter_bins(as_storage_rd* rd, as_exp* exp)
+read_and_filter_bins(as_storage_rd* rd, as_exp* exp, bool explain,
+		const as_transaction* tr)
 {
 	as_namespace* ns = rd->ns;
 
@@ -324,11 +331,69 @@ read_and_filter_bins(as_storage_rd* rd, as_exp* exp)
 	as_exp_ctx ctx = { .ns = ns, .r = rd->r, .rd = rd };
 
 	if (! as_exp_matches_record(exp, &ctx)) {
+		// Explain which sub-expression decided the non-match. Must run BEFORE
+		// the generic fallback below - as_error_details_set_fmt assembles
+		// eagerly and is first-set-wins, so the explainer's richer detail must
+		// be authored first. The permission check is lazy, paid only when an
+		// explanation can actually be produced - filtered out, at the trace
+		// tier, with no trace already staged.
+		//
+		// PERM_READ gates the whole explanation, not just the operand values.
+		// outcome (FALSE vs ABSENT) and the decisive op index are both
+		// functions of the stored record - an and-chain reports which
+		// conjunct failed, and ABSENT vs FALSE distinguishes "bin missing"
+		// from "bin present but unequal". Disclosing those to a principal
+		// authorized for write but not read would turn a filter into a
+		// record oracle, so a non-reader falls through to the generic
+		// message below - byte-identical to the pre-explainer reply.
+		//
+		// Scope: the gate covers the EXPLAINER only. An eval fault raised by
+		// the authoritative as_exp_matches_record() above has already staged
+		// its own trace, governed by the verbosity tier alone.
+		if (explain && g_error_verbosity >= AS_ERROR_VERBOSITY_TRACE &&
+				! g_error_exp_trace.set && as_exp_explain_allowed(tr, rd)) {
+			as_exp_explain_filter(exp, &ctx);
+		}
+
 		as_error_details_set_fmt(AS_SUB_NONE, "filtered out by bins expression");
+
 		return AS_ERR_FILTERED_OUT;
 	}
 
 	return AS_OK;
+}
+
+// May the principal behind 'tr' be shown an expression explanation over 'rd'?
+// Everything an explainer discloses is a function of the stored record - the
+// operand values render bin/key contents outright, and outcome (FALSE vs
+// ABSENT) plus the decisive op index leak bin existence and which conjunct of
+// an and-chain failed. A write, delete or expression-modify op is authorized
+// for write and may lack read, so the whole explanation is gated on PERM_READ
+// rather than just the operand tier.
+//
+// Fails closed on a NULL tr: no transaction means no principal to authorize
+// against. Internal evals (sindex maintenance, query record bodies, XDR)
+// leave as_exp_ctx.tr NULL and so never explain.
+//
+// Origin: iudf / iops bodies are excluded by contract - they are not client
+// requests and their internal as_msg carries info4 = 0 anyway.
+//
+// Side-effect-free: does not set tr->result_code or log a violation. The CE
+// stub returns AS_OK (no ACLs). Per-bin data masking still applies on top, at
+// rt_load_bin.
+//
+// Conjunct ORDER is load-bearing, not stylistic: as_security_check_permission
+// cf_crashes on an origin its switch does not list, and FROM_READ_TOUCH /
+// FROM_RE_REPL / FROM_MONITOR_ROLL are not listed. They reach the write path,
+// and reach here only if they ever carry a filter, which they do not today - so
+// the origin test short-circuiting first is what keeps a widened predicate or a
+// reordered && from becoming a node crash rather than a missing explanation.
+bool
+as_exp_explain_allowed(const as_transaction* tr, const as_storage_rd* rd)
+{
+	return tr != NULL && as_transaction_may_explain_filter(tr) &&
+			as_security_check_permission(tr, NULL, rd->ns->ix,
+					as_index_get_set_id(rd->r), PERM_READ) == AS_OK;
 }
 
 // Caller must have checked that key is present in message.
@@ -432,9 +497,9 @@ advance_record_version(as_transaction* tr, as_record* r)
 }
 
 read_op_result
-process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
-		as_bin* result_bins, uint32_t* p_n_result_bins, as_bin** result_bin_r,
-		int* error_code)
+process_bin_read_op(const as_transaction* tr, as_storage_rd* rd, as_msg_op* op,
+		bool respond_all_ops, as_bin* result_bins, uint32_t* p_n_result_bins,
+		as_bin** result_bin_r, int* error_code)
 {
 	as_namespace* ns = rd->ns;
 	*error_code = 0;
@@ -570,7 +635,7 @@ process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
 		return READ_OP_RESULT_NOT_FOUND;
 	}
 	case AS_MSG_OP_EXP_READ: {
-		const as_exp_ctx exp_ctx = { .ns = ns, .rd = rd, .r = rd->r };
+		const as_exp_ctx exp_ctx = { .ns = ns, .rd = rd, .r = rd->r, .tr = tr };
 
 		as_bin* rb = &result_bins[*p_n_result_bins];
 
@@ -962,7 +1027,20 @@ eval_and_populate_sbin(as_exp_ctx* ctx, as_sindex* si, as_sindex_bin* sbins,
 	as_bin rb;
 	as_bin_set_empty(&rb);
 
-	if (! as_exp_eval(si->exp, ctx, &rb, NULL)) {
+	// Internal sindex maintenance, not the client's operation: suppress
+	// eval-fault staging (verbosity 0) so a faulting sindex expression can't
+	// leak/mask a detail on the enclosing transaction. Only "did it produce a
+	// value" matters - any non-TRUE result maps to the existing "no sbin"
+	// outcome.
+	uint8_t saved_verbosity = g_error_verbosity;
+
+	g_error_verbosity = AS_ERROR_VERBOSITY_OFF;
+
+	as_exp_trilean rv = as_exp_eval(si->exp, ctx, &rb, NULL);
+
+	g_error_verbosity = saved_verbosity;
+
+	if (rv != AS_EXP_TRUE) {
 		return 0;
 	}
 

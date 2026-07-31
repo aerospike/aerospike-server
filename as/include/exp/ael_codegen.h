@@ -1,5 +1,5 @@
 /*
- * codegen.h
+ * ael_codegen.h
  *
  * Copyright (C) 2026 Aerospike, Inc.
  *
@@ -29,22 +29,24 @@
 #include "exp/ael_diag.h"
 #include "exp/ast.h"
 
-typedef struct codegen_result_s {
+typedef struct ael_codegen_result_s {
 	uint8_t* buf;
 	uint32_t buf_sz;
 	ael_diag_list diags;
-} codegen_result;
+} ael_codegen_result;
 
-codegen_result codegen_pack(ast_pool* pool, const char* input, ast_ref root);
+ael_codegen_result ael_codegen_pack(ast_pool* pool, const char* input,
+		ast_ref root);
 
-// Release a codegen_result's heap buffer (cf_malloc'd by codegen_pack). Safe on
+// Release a ael_codegen_result's heap buffer (cf_malloc'd by ael_codegen_pack). Safe on
 // a failed result (buf == NULL). Callers must use this rather than free()-ing
 // buf directly.
-void codegen_result_destroy(codegen_result* r);
+void ael_codegen_result_destroy(ael_codegen_result* r);
 
 // AST → msgpack emission for a single sub-tree, without round-tripping
-// through codegen_pack's two-pass alloc + emit.
-int codegen_emit(as_packer* pk, ast_pool* pool, const char* input, ast_ref node);
+// through ael_codegen_pack's two-pass alloc + emit.
+int ael_codegen_emit(as_packer* pk, ast_pool* pool, const char* input,
+		ast_ref node);
 
 // Pack a CDT context-eval wrapper -- [CONTEXT_EVAL, [ctx_type, key, ...]] --
 // ahead of the caller's inner expression. Pure msgpack, so shared by the

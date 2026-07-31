@@ -30,7 +30,7 @@
 typedef struct ael_parse_result_s {
 	ast_ref root;
 	ast_ref bin_root; // head of the deduped canonical AST_BIN list (bin_next chain)
-	ast_ref local_bin_root; // head of $.bin:local:T AST_BIN list (off bin_root)
+	ast_ref local_bin_root; // head of $.bin:LOCAL:T AST_BIN list (off bin_root)
 	ael_diag_list diags;
 	const char* input;
 } ael_parse_result;
@@ -42,7 +42,7 @@ ael_parse_has_error(const ael_parse_result* r)
 }
 
 // Shared parse entry; ael_parse / ael_parse_filter_body wrap it with a preset
-// depth. initial_filter_depth pre-seeds parse_context.filter_depth: 0 for a
+// depth. initial_filter_depth pre-seeds ael_context.filter_depth: 0 for a
 // top-level expression, 1 for a filter / modify body (loop vars @ / @key /
 // @index parse at the top level).
 // pre:  input is input_sz bytes; pool is a fresh pool owned by the caller.
@@ -62,7 +62,7 @@ ael_parse_result ael_parse_with_depth(ast_pool* pool, const char* input,
 // pre:  ctx is initialized (input, pool, filter_depth) with empty diags.
 // post: ctx->root / ctx->diags / bin chains reflect the parse; the caller
 //       runs the post-parse passes and assembles the result.
-void ael_run_parser(parse_context* ctx, uint32_t input_sz);
+void ael_run_parser(ael_context* ctx, uint32_t input_sz);
 
 static inline ael_parse_result
 ael_parse(ast_pool* pool, const char* input, uint32_t input_sz)

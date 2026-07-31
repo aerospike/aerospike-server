@@ -2050,12 +2050,32 @@ cdt_select_modify(select_ctx* sel, uint32_t off, uint32_t key_sz, uint32_t sz)
 {
 	apply_result_entry* re = select_apply_add_entry(sel->apply);
 
-	if (! as_exp_eval_to_result(sel->apply->modify, &sel->exp_ctx, &re->res)) {
+	// This runs once per matched collection element, and SELECT_NO_FAIL makes
+	// a non-TRUE result an expected outcome rather than an error - so suppress
+	// detail staging for the duration of the eval instead of building a full
+	// trace per element and discarding it afterwards. Suppressing at the
+	// source also leaves an enclosing site's already-armed detail intact,
+	// which a post-hoc as_error_msg_clear() would have wiped.
+	bool no_fail = (sel->flags & SELECT_NO_FAIL) != 0;
+	uint8_t saved_verbosity = g_error_verbosity;
+
+	if (no_fail) {
+		g_error_verbosity = AS_ERROR_VERBOSITY_OFF;
+	}
+
+	as_exp_trilean rv =
+			as_exp_eval_to_result(sel->apply->modify, &sel->exp_ctx, &re->res);
+
+	g_error_verbosity = saved_verbosity;
+
+	// as_exp_eval_to_result is tri-state; any non-TRUE result maps to the
+	// existing failure path. A fault has already staged a precise trace +
+	// message, making the generic set below a first-set-wins no-op.
+	if (rv != AS_EXP_TRUE) {
 		select_apply_undo_entry(sel->apply);
 
-		if ((sel->flags & SELECT_NO_FAIL) == 0) {
-			cf_debug(AS_PARTICLE, "cdt_select_modify() exp -> AS_EXP_UNK");
-			// TODO: Eventually capture the error in the expression evaluation.
+		if (! no_fail) {
+			cf_debug(AS_PARTICLE, "cdt_select_modify() exp eval not TRUE");
 			as_error_details_set_fmt(AS_SUB_NONE,
 					"cdt select apply expression evaluation failed or returned unknown");
 			sel->ret_code = -AS_ERR_UNKNOWN;
@@ -4222,10 +4242,20 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 					cf_warning(AS_PARTICLE,
 							"cdt_select_stack_init() invalid expression at pair %u",
 							j);
-					as_error_details_set_fmt(AS_SUB_NONE,
+
+					char ctx_msg[80];
+
+					snprintf(ctx_msg, sizeof(ctx_msg),
 							"cdt select failed to build expression at context level %u",
 							i);
+					// Folds the sub-expression's compile diagnostic into the
+					// message (and resets the accumulator's payload ref).
+					as_exp_stage_build_error_details(ctx_msg);
 					ret = -AS_ERR_PARAMETER;
+				}
+				else {
+					// Non-taking build - drop the accumulator's payload ref.
+					as_exp_build_err_reset();
 				}
 
 				break;
@@ -4486,11 +4516,16 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 		if (exp == NULL) {
 			cf_warning(AS_PARTICLE,
 					"cdt_process_state_select() invalid apply expression");
-			as_error_details_set_fmt(AS_SUB_NONE,
+			// Folds the sub-expression's compile diagnostic into the message
+			// (and resets the accumulator's payload ref).
+			as_exp_stage_build_error_details(
 					"cdt select apply expression failed to compile");
 			com->ret_code = -AS_ERR_PARAMETER;
 			return false;
 		}
+
+		// Non-taking build - drop the accumulator's payload ref.
+		as_exp_build_err_reset();
 
 		select_apply apply = {
 			.modify = exp,
@@ -8736,11 +8771,17 @@ cdt_ctx_to_dynbuf(const uint8_t* ctx, uint32_t ctx_sz, cf_dyn_buf* db)
 {
 	msgpack_in mp = { .buf = ctx, .buf_sz = ctx_sz };
 
-	return cdt_msgpack_ctx_to_dynbuf(&mp, db);
+	// 0 - unbounded. This path renders an operator-configured sindex context
+	// for an info command, not a client-supplied one on a request path.
+	return cdt_msgpack_ctx_to_dynbuf(&mp, db, 0);
 }
 
+// max_sz caps the bytes appended (0 - unbounded). A context carries one entry
+// per element of a client-supplied list, so nothing about the enclosing op
+// bounds this render on its own - a caller writing into a fixed-size buffer
+// must say so.
 bool
-cdt_msgpack_ctx_to_dynbuf(msgpack_in* mp, cf_dyn_buf* db)
+cdt_msgpack_ctx_to_dynbuf(msgpack_in* mp, cf_dyn_buf* db, uint32_t max_sz)
 {
 	static const char* ctx_names[] = { [AS_CDT_CTX_INDEX] = "index",
 		[AS_CDT_CTX_RANK] = "rank",
@@ -8771,6 +8812,11 @@ cdt_msgpack_ctx_to_dynbuf(msgpack_in* mp, cf_dyn_buf* db)
 	}
 
 	for (uint32_t i = 0; i < ele_count / 2; i++) {
+		if (max_sz != 0 && db->used_sz >= max_sz) {
+			cf_dyn_buf_append_string(db, ", ...]");
+			return false;
+		}
+
 		int64_t ctx_type;
 
 		if (! msgpack_get_int64(mp, &ctx_type)) {
@@ -8780,7 +8826,13 @@ cdt_msgpack_ctx_to_dynbuf(msgpack_in* mp, cf_dyn_buf* db)
 
 		uint8_t table_i = (uint8_t)ctx_type & AS_CDT_CTX_BASE_MASK;
 
-		if (table_i >= AS_CDT_MAX_CTX) {
+		// The >= check alone is dead: BASE_MASK is 0x0f so table_i is always
+		// < AS_CDT_MAX_CTX (16). The enum skips 5..7 (EXP is 4, INDEX_RANGE
+		// is 8), so those slots of the table below are NULL and reaching the
+		// append would strlen(NULL). Client-reachable: cdt_context_dig()
+		// rejects table_i > VALUE at eval and stages a detail, whose trace
+		// render brings that same ctx byte back here.
+		if (table_i >= AS_CDT_MAX_CTX || ctx_names[table_i] == NULL) {
 			cf_detail(AS_PARTICLE,
 					"cdt_msgpack_ctx_to_dynbuf() invalid table_i %u ctx_type 0x%lx i %u ele_count %u",
 					table_i, ctx_type, i, ele_count);
