@@ -28,6 +28,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <sys/mman.h>
 
 #include "citrusleaf/alloc.h"
 
@@ -69,6 +70,8 @@ cf_arenax_add_stage(cf_arenax* arena)
 				arena->stage_size, arena->stage_count);
 		return CF_ARENAX_ERR_STAGE_CREATE;
 	}
+
+	(void)madvise(p_stage, arena->stage_size, MADV_HUGEPAGE);
 
 	arena->stages[arena->stage_count++] = p_stage;
 
