@@ -25,7 +25,9 @@ env:
 
 jobs:
   setup:
-    if: github.event_name != 'push' || vars.SIGN_BUILD_DEPLOY_ON_PUSH == 'true'
+    # Release pipeline runs only in the private citrusleaf org; gating setup skips
+    # the whole chain when running in any mirror or fork copy of this repo.
+    if: ${{ github.repository_owner == 'citrusleaf' && (github.event_name != 'push' || vars.SIGN_BUILD_DEPLOY_ON_PUSH == 'true') }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
