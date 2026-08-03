@@ -33,6 +33,9 @@ env:
 
 jobs:
   setup:
+    # Release pipeline runs only in the private citrusleaf org (gating setup skips
+    # the whole chain when running in any mirror or fork copy of this repo).
+    if: ${{ github.repository_owner == 'citrusleaf' }}
     runs-on: ubuntu-22.04
     permissions:
       contents: read
