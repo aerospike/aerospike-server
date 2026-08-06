@@ -246,7 +246,7 @@ handle_meta_filter(const as_transaction* tr, const as_record* r, as_exp** exp)
 					as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_PREDEXP);
 			if ((*exp = as_exp_filter_build(f, false)) == NULL) {
 				as_exp_stage_build_error_details(
-						"invalid metadata expression in batch request");
+						"invalid filter expression in batch request");
 				return AS_ERR_PARAMETER;
 			}
 
@@ -271,7 +271,7 @@ handle_meta_filter(const as_transaction* tr, const as_record* r, as_exp** exp)
 		as_msg_field* f =
 				as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_PREDEXP);
 		if ((*exp = as_exp_filter_build(f, false)) == NULL) {
-			as_exp_stage_build_error_details("invalid metadata expression in request");
+			as_exp_stage_build_error_details("invalid filter expression in request");
 			return AS_ERR_PARAMETER;
 		}
 
