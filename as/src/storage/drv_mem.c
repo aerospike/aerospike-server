@@ -140,6 +140,7 @@ static void write_sanity_checks(drv_mem* mem, mem_write_block* mwb);
 static void aligned_write_to_shadow(drv_mem* mem, const uint8_t* header,
 		const uint8_t* from, size_t size);
 static void flush_flags(drv_mems* mems);
+static void mem_init_common_devs(drv_mems* mems, int n_devices);
 
 // Defrag.
 static void* run_defrag(void* pv_data);
@@ -188,7 +189,8 @@ static void shadow_flush_buf(drv_mem* mem, const uint8_t* buf,
 static inline uint32_t
 mem_get_file_id(const drv_mems* mems, const cf_digest* keyd)
 {
-	return *(uint32_t*)&keyd->digest[DIGEST_STORAGE_BASE_BYTE] % mems->n_mems;
+	return *(uint32_t*)&keyd->digest[DIGEST_STORAGE_BASE_BYTE] %
+			mems->common.n_devices;
 }
 
 static inline void
@@ -221,22 +223,32 @@ as_storage_init_mem(as_namespace* ns)
 
 	drv_mems* mems = (drv_mems*)ns->storage_private;
 
+	// All three branches must have called mem_init_common_devs(). Nothing
+	// forces them to, and only init_shadow_files is reached by a fixture, so
+	// dropping the call from either of the other two leaves the memset(0)
+	// state with the suite still green - and the first as_storage_save_pmeta
+	// after a rebalance aborts a live node.
+	cf_assert(mems->common.devs != NULL && mems->common.n_devices > 0 &&
+					mems->common.write_header != NULL &&
+					mems->common.write_header_atomic != NULL,
+			AS_DRV_MEM, "{%s} devices not wired", ns->name);
+
 	if (ns->n_tomb_raider_unmark_threads != 0 &&
-			ns->n_tomb_raider_unmark_threads > (uint32_t)mems->n_mems) {
+			ns->n_tomb_raider_unmark_threads > (uint32_t)mems->common.n_devices) {
 		cf_warning(AS_DRV_MEM,
 				"{%s} tomb-raider-unmark-threads (%u) exceeds number of memory stripes (%d), lowering to %d",
-				ns->name, ns->n_tomb_raider_unmark_threads, mems->n_mems,
-				mems->n_mems);
-		ns->n_tomb_raider_unmark_threads = (uint32_t)mems->n_mems;
+				ns->name, ns->n_tomb_raider_unmark_threads,
+				mems->common.n_devices, mems->common.n_devices);
+		ns->n_tomb_raider_unmark_threads = (uint32_t)mems->common.n_devices;
 	}
 
 	g_unique_data_size += ns->drives_size / (2 * ns->cfg_replication_factor);
 
-	cf_mutex_init(&mems->flush_lock);
+	cf_mutex_init(&mems->common.flush_lock);
 
 	// The queue limit is more efficient to work with.
-	ns->storage_max_write_q =
-			(uint32_t)(mems->n_mems * ns->storage_max_write_cache / WBLOCK_SZ);
+	ns->storage_max_write_q = (uint32_t)(mems->common.n_devices *
+			ns->storage_max_write_cache / WBLOCK_SZ);
 
 	// Minimize how often we recalculate this.
 	ns->defrag_lwm_size = (WBLOCK_SZ * ns->storage_defrag_lwm_pct) / 100;
@@ -253,7 +265,7 @@ as_storage_init_mem(as_namespace* ns)
 	histogram_scale scale = as_config_histogram_scale();
 
 	// Finish initializing drv_mem structures (non-zero-value members).
-	for (int i = 0; i < mems->n_mems; i++) {
+	for (int i = 0; i < mems->common.n_devices; i++) {
 		drv_mem* mem = &mems->mems[i];
 
 		mem->ns = ns;
@@ -308,7 +320,7 @@ as_storage_load_mem(as_namespace* ns, cf_queue* complete_q)
 	drv_mems* mems = (drv_mems*)ns->storage_private;
 
 	// If devices have data, and it's cold start, scan devices.
-	if (! mems->all_fresh && ns->cold_start) {
+	if (! mems->common.all_fresh && ns->cold_start) {
 		// Fire off threads to scan devices to build index and/or load record
 		// data into memory - will signal completion when threads are all done.
 		start_loading_records(mems, complete_q);
@@ -328,7 +340,7 @@ as_storage_load_ticker_mem(const as_namespace* ns)
 	int pos = 0;
 	const drv_mems* mems = (const drv_mems*)ns->storage_private;
 
-	for (int i = 0; i < mems->n_mems; i++) {
+	for (int i = 0; i < mems->common.n_devices; i++) {
 		const drv_mem* mem = &mems->mems[i];
 		uint32_t pct = (uint32_t)((mem->sweep_wblock_id * 100UL) /
 				(mem->file_size / WBLOCK_SZ));
@@ -404,7 +416,7 @@ as_storage_shutdown_mem(struct as_namespace_s* ns)
 {
 	drv_mems* mems = (drv_mems*)ns->storage_private;
 
-	for (int i = 0; i < mems->n_mems; i++) {
+	for (int i = 0; i < mems->common.n_devices; i++) {
 		drv_mem* mem = &mems->mems[i];
 
 		for (uint8_t c = 0; c < N_CURRENT_SWBS; c++) {
@@ -440,13 +452,13 @@ as_storage_shutdown_mem(struct as_namespace_s* ns)
 		}
 	}
 
-	for (int i = 0; i < mems->n_mems; i++) {
+	for (int i = 0; i < mems->common.n_devices; i++) {
 		drv_mem* mem = &mems->mems[i];
 
 		mem->running_shadow = false;
 	}
 
-	for (int i = 0; i < mems->n_mems; i++) {
+	for (int i = 0; i < mems->common.n_devices; i++) {
 		drv_mem* mem = &mems->mems[i];
 
 		if (mem->shadow_name != NULL) {
@@ -610,7 +622,7 @@ as_storage_defrag_sweep_mem(as_namespace* ns)
 
 	drv_mems* mems = (drv_mems*)ns->storage_private;
 
-	for (int i = 0; i < mems->n_mems; i++) {
+	for (int i = 0; i < mems->common.n_devices; i++) {
 		as_incr_uint32(&mems->mems[i].defrag_sweep);
 	}
 }
@@ -620,8 +632,7 @@ as_storage_load_regime_mem(as_namespace* ns)
 {
 	drv_mems* mems = (drv_mems*)ns->storage_private;
 
-	ns->eventual_regime = mems->generic->prefix.eventual_regime;
-	ns->rebalance_regime = ns->eventual_regime;
+	drv_load_regime(AS_DRV_MEM, &mems->common);
 }
 
 void
@@ -629,19 +640,7 @@ as_storage_save_regime_mem(as_namespace* ns)
 {
 	drv_mems* mems = (drv_mems*)ns->storage_private;
 
-	cf_mutex_lock(&mems->flush_lock);
-
-	mems->generic->prefix.eventual_regime = ns->eventual_regime;
-
-	for (int i = 0; i < mems->n_mems; i++) {
-		drv_mem* mem = &mems->mems[i];
-
-		write_header(mem, (uint8_t*)mems->generic,
-				(uint8_t*)&mems->generic->prefix.eventual_regime,
-				sizeof(mems->generic->prefix.eventual_regime));
-	}
-
-	cf_mutex_unlock(&mems->flush_lock);
+	drv_save_regime(AS_DRV_MEM, &mems->common);
 }
 
 void
@@ -649,7 +648,7 @@ as_storage_load_roster_generation_mem(as_namespace* ns)
 {
 	drv_mems* mems = (drv_mems*)ns->storage_private;
 
-	ns->roster_generation = mems->generic->prefix.roster_generation;
+	drv_load_roster_generation(AS_DRV_MEM, &mems->common);
 }
 
 void
@@ -657,64 +656,31 @@ as_storage_save_roster_generation_mem(as_namespace* ns)
 {
 	drv_mems* mems = (drv_mems*)ns->storage_private;
 
-	// Normal for this to not change, cleaner to check here versus outside.
-	if (ns->roster_generation == mems->generic->prefix.roster_generation) {
-		return;
-	}
-
-	cf_mutex_lock(&mems->flush_lock);
-
-	mems->generic->prefix.roster_generation = ns->roster_generation;
-
-	for (int i = 0; i < mems->n_mems; i++) {
-		drv_mem* mem = &mems->mems[i];
-
-		write_header(mem, (uint8_t*)mems->generic,
-				(uint8_t*)&mems->generic->prefix.roster_generation,
-				sizeof(mems->generic->prefix.roster_generation));
-	}
-
-	cf_mutex_unlock(&mems->flush_lock);
+	drv_save_roster_generation(AS_DRV_MEM, &mems->common);
 }
 
 void
 as_storage_load_pmeta_mem(as_namespace* ns, as_partition* p)
 {
 	drv_mems* mems = (drv_mems*)ns->storage_private;
-	drv_pmeta* pmeta = &mems->generic->pmeta[p->id];
 
-	p->version = pmeta->version;
+	drv_load_pmeta(AS_DRV_MEM, &mems->common, p);
 }
 
 void
 as_storage_save_pmeta_mem(as_namespace* ns, const as_partition* p)
 {
 	drv_mems* mems = (drv_mems*)ns->storage_private;
-	drv_pmeta* pmeta = &mems->generic->pmeta[p->id];
 
-	cf_mutex_lock(&mems->flush_lock);
-
-	pmeta->version = p->version;
-	pmeta->tree_id = p->tree_id;
-
-	for (int i = 0; i < mems->n_mems; i++) {
-		drv_mem* mem = &mems->mems[i];
-
-		write_header(mem, (uint8_t*)mems->generic, (uint8_t*)pmeta,
-				sizeof(*pmeta));
-	}
-
-	cf_mutex_unlock(&mems->flush_lock);
+	drv_save_pmeta(AS_DRV_MEM, &mems->common, p);
 }
 
 void
 as_storage_cache_pmeta_mem(as_namespace* ns, const as_partition* p)
 {
 	drv_mems* mems = (drv_mems*)ns->storage_private;
-	drv_pmeta* pmeta = &mems->generic->pmeta[p->id];
 
-	pmeta->version = p->version;
-	pmeta->tree_id = p->tree_id;
+	drv_cache_pmeta(AS_DRV_MEM, &mems->common, p);
 }
 
 void
@@ -722,18 +688,8 @@ as_storage_flush_pmeta_mem(as_namespace* ns, uint32_t start_pid,
 		uint32_t n_partitions)
 {
 	drv_mems* mems = (drv_mems*)ns->storage_private;
-	drv_pmeta* pmeta = &mems->generic->pmeta[start_pid];
 
-	cf_mutex_lock(&mems->flush_lock);
-
-	for (int i = 0; i < mems->n_mems; i++) {
-		drv_mem* mem = &mems->mems[i];
-
-		write_header(mem, (uint8_t*)mems->generic, (uint8_t*)pmeta,
-				sizeof(drv_pmeta) * n_partitions);
-	}
-
-	cf_mutex_unlock(&mems->flush_lock);
+	drv_flush_pmeta(AS_DRV_MEM, &mems->common, start_pid, n_partitions);
 }
 
 void
@@ -745,7 +701,7 @@ as_storage_stats_mem(as_namespace* ns, uint32_t* avail_pct, uint64_t* used_bytes
 		*avail_pct = 100;
 
 		// Find the device with the lowest available percent.
-		for (int i = 0; i < mems->n_mems; i++) {
+		for (int i = 0; i < mems->common.n_devices; i++) {
 			drv_mem* mem = &mems->mems[i];
 
 			drv_wblock_pool pool = DRV_WBLOCK_POOL(mem);
@@ -763,7 +719,7 @@ as_storage_stats_mem(as_namespace* ns, uint32_t* avail_pct, uint64_t* used_bytes
 	if (used_bytes != NULL) {
 		uint64_t sz = 0;
 
-		for (int i = 0; i < mems->n_mems; i++) {
+		for (int i = 0; i < mems->common.n_devices; i++) {
 			sz += mems->mems[i].inuse_size;
 		}
 
@@ -811,7 +767,7 @@ as_storage_ticker_stats_mem(as_namespace* ns)
 
 	drv_mems* mems = (drv_mems*)ns->storage_private;
 
-	for (int i = 0; i < mems->n_mems; i++) {
+	for (int i = 0; i < mems->common.n_devices; i++) {
 		drv_mem* mem = &mems->mems[i];
 
 		if (mem->hist_shadow_write) {
@@ -824,9 +780,9 @@ void
 as_storage_dump_wb_summary_mem(const as_namespace* ns, bool verbose)
 {
 	drv_mems* mems = ns->storage_private;
-	drv_dev_view views[mems->n_mems];
+	drv_dev_view views[mems->common.n_devices];
 
-	for (uint32_t d = 0; d < mems->n_mems; d++) {
+	for (uint32_t d = 0; d < mems->common.n_devices; d++) {
 		const drv_mem* mem = &mems->mems[d];
 
 		views[d] = (drv_dev_view){
@@ -838,7 +794,7 @@ as_storage_dump_wb_summary_mem(const as_namespace* ns, bool verbose)
 		};
 	}
 
-	drv_dump_wb_summary(AS_DRV_MEM, ns, verbose, views, mems->n_mems);
+	drv_dump_wb_summary(AS_DRV_MEM, ns, verbose, views, mems->common.n_devices);
 }
 
 void
@@ -847,7 +803,7 @@ as_storage_histogram_clear_mem(as_namespace* ns)
 	drv_mems* mems = (drv_mems*)ns->storage_private;
 	histogram_scale scale = as_config_histogram_scale();
 
-	for (int i = 0; i < mems->n_mems; i++) {
+	for (int i = 0; i < mems->common.n_devices; i++) {
 		drv_mem* mem = &mems->mems[i];
 
 		if (mem->hist_shadow_write) {
@@ -870,8 +826,9 @@ init_shadow_devices(as_namespace* ns)
 	ns->storage_private = (void*)mems;
 
 	memset(mems, 0, mems_size);
-	mems->n_mems = (int)ns->n_storage_shadows;
-	mems->ns = ns;
+	mems->common.ns = ns;
+
+	mem_init_common_devs(mems, (int)ns->n_storage_shadows);
 
 	size_t min_file_size = UINT64_MAX;
 
@@ -946,8 +903,9 @@ init_shadow_files(as_namespace* ns)
 	ns->storage_private = (void*)mems;
 
 	memset(mems, 0, mems_size);
-	mems->n_mems = (int)ns->n_storage_shadows;
-	mems->ns = ns;
+	mems->common.ns = ns;
+
+	mem_init_common_devs(mems, (int)ns->n_storage_shadows);
 
 	size_t rounded_file_size = check_file_size(ns->storage_filesize, "file");
 
@@ -1034,8 +992,9 @@ init_memory_only(as_namespace* ns)
 	ns->storage_private = (void*)mems;
 
 	memset(mems, 0, mems_size);
-	mems->n_mems = (int)n_stripes;
-	mems->ns = ns;
+	mems->common.ns = ns;
+
+	mem_init_common_devs(mems, (int)n_stripes);
 
 	for (uint32_t i = 0; i < n_stripes; i++) {
 		drv_mem* mem = &mems->mems[i];
@@ -1108,8 +1067,8 @@ init_synchronous(drv_mems* mems)
 		random = cf_get_rand64();
 	}
 
-	int n_mems = mems->n_mems;
-	as_namespace* ns = mems->ns;
+	int n_mems = mems->common.n_devices;
+	as_namespace* ns = mems->common.ns;
 
 	define_deferred_array(headers, drv_header*, n_mems);
 	int first_used = -1;
@@ -1148,17 +1107,17 @@ init_synchronous(drv_mems* mems)
 				"{%s} found all %d devices fresh, initializing to random %lu",
 				ns->name, n_mems, random);
 
-		mems->generic = cf_valloc(ROUND_UP_GENERIC);
-		memcpy(mems->generic, &headers[0]->generic, ROUND_UP_GENERIC);
+		mems->common.generic = cf_valloc(ROUND_UP_GENERIC);
+		memcpy(mems->common.generic, &headers[0]->generic, ROUND_UP_GENERIC);
 
-		mems->generic->prefix.n_devices = n_mems;
-		mems->generic->prefix.random = random;
+		mems->common.generic->prefix.n_devices = n_mems;
+		mems->common.generic->prefix.random = random;
 
 		for (int i = 0; i < n_mems; i++) {
 			headers[i]->unique.device_id = (uint32_t)i;
 		}
 
-		drv_adjust_sc_version_flags(ns, mems->generic->pmeta, true, false);
+		drv_adjust_sc_version_flags(ns, mems->common.generic->pmeta, true, false);
 
 		flush_header(mems, headers);
 
@@ -1169,7 +1128,7 @@ init_synchronous(drv_mems* mems)
 		as_truncate_list_cenotaphs(ns); // all will show as cenotaph
 		as_truncate_done_startup(ns);
 
-		mems->all_fresh = true; // won't need to scan devices
+		mems->common.all_fresh = true; // won't need to scan devices
 
 		return;
 	}
@@ -1180,7 +1139,8 @@ init_synchronous(drv_mems* mems)
 	bool non_commit_drive = false;
 	drv_prefix* prefix_first = &headers[first_used]->generic.prefix;
 
-	memset(mems->device_translation, -1, sizeof(mems->device_translation));
+	memset(mems->common.device_translation, -1,
+			sizeof(mems->common.device_translation));
 
 	for (int i = 0; i < n_mems; i++) {
 		drv_mem* mem = &mems->mems[i];
@@ -1198,7 +1158,7 @@ init_synchronous(drv_mems* mems)
 
 		init_pristine_wblock_id(mem, headers[i]->unique.pristine_offset);
 
-		mems->device_translation[old_device_id] = (int8_t)i;
+		mems->common.device_translation[old_device_id] = (int8_t)i;
 
 		if (prefix_first->random != prefix_i->random) {
 			cf_crash(AS_DRV_MEM,
@@ -1224,16 +1184,17 @@ init_synchronous(drv_mems* mems)
 	}
 
 	// Drive set OK - fix up header set.
-	mems->generic = cf_valloc(ROUND_UP_GENERIC);
-	memcpy(mems->generic, &headers[first_used]->generic, ROUND_UP_GENERIC);
+	mems->common.generic = cf_valloc(ROUND_UP_GENERIC);
+	memcpy(mems->common.generic, &headers[first_used]->generic, ROUND_UP_GENERIC);
 
-	mems->generic->prefix.n_devices = n_mems; // may have added/removed drives
-	mems->generic->prefix.random = random;
-	mems->generic->prefix.flags &= ~DRV_HEADER_FLAG_TRUSTED;
+	// May have added/removed drives.
+	mems->common.generic->prefix.n_devices = n_mems;
+	mems->common.generic->prefix.random = random;
+	mems->common.generic->prefix.flags &= ~DRV_HEADER_FLAG_TRUSTED;
 
 	flush_flags(mems);
 
-	drv_adjust_sc_version_flags(ns, mems->generic->pmeta,
+	drv_adjust_sc_version_flags(ns, mems->common.generic->pmeta,
 			n_mems < prefix_first->n_devices + n_fresh_drives,
 			ns->dirty_restart && non_commit_drive);
 
@@ -1252,9 +1213,9 @@ init_synchronous(drv_mems* mems)
 	// Cache booleans indicating whether partitions are owned or not. Also
 	// restore tree-ids - note that absent partitions do have tree-ids.
 	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
-		drv_pmeta* pmeta = &mems->generic->pmeta[pid];
+		drv_pmeta* pmeta = &mems->common.generic->pmeta[pid];
 
-		mems->get_state_from_storage[pid] =
+		mems->common.get_state_from_storage[pid] =
 				as_partition_version_has_data(&pmeta->version);
 		ns->partitions[pid].tree_id = pmeta->tree_id;
 	}
@@ -1269,7 +1230,7 @@ init_synchronous(drv_mems* mems)
 
 	// Cold start - we can now create our partition trees.
 	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
-		if (mems->get_state_from_storage[pid]) {
+		if (mems->common.get_state_from_storage[pid]) {
 			as_partition* p = &ns->partitions[pid];
 
 			p->tree = as_index_tree_create(&ns->tree_shared, p->tree_id,
@@ -1453,9 +1414,9 @@ flush_header(drv_mems* mems, drv_header** headers)
 	uint8_t* buf = cf_valloc(DRV_HEADER_SIZE);
 
 	memset(buf, 0, DRV_HEADER_SIZE);
-	memcpy(buf, mems->generic, sizeof(drv_generic));
+	memcpy(buf, mems->common.generic, sizeof(drv_generic));
 
-	for (int i = 0; i < mems->n_mems; i++) {
+	for (int i = 0; i < mems->common.n_devices; i++) {
 		memcpy(buf + DRV_OFFSET_UNIQUE, &headers[i]->unique, sizeof(drv_unique));
 
 		write_header(&mems->mems[i], buf, buf, DRV_HEADER_SIZE);
@@ -1481,7 +1442,7 @@ init_pristine_wblock_id(drv_mem* mem, uint64_t offset)
 static void
 start_loading_records(drv_mems* mems, cf_queue* complete_q)
 {
-	as_namespace* ns = mems->ns;
+	as_namespace* ns = mems->common.ns;
 
 	drv_mrt_create_cold_start_hash(ns);
 
@@ -1489,11 +1450,11 @@ start_loading_records(drv_mems* mems, cf_queue* complete_q)
 
 	void* p = cf_rc_alloc(1);
 
-	for (int i = 1; i < mems->n_mems; i++) {
+	for (int i = 1; i < mems->common.n_devices; i++) {
 		cf_rc_reserve(p);
 	}
 
-	for (int i = 0; i < mems->n_mems; i++) {
+	for (int i = 0; i < mems->common.n_devices; i++) {
 		drv_mem* mem = &mems->mems[i];
 		mem_load_records_info* lri = cf_malloc(sizeof(mem_load_records_info));
 
@@ -1509,23 +1470,24 @@ start_loading_records(drv_mems* mems, cf_queue* complete_q)
 static void
 load_wblock_queues(drv_mems* mems)
 {
-	cf_info(AS_DRV_MEM, "{%s} loading free & defrag queues", mems->ns->name);
+	cf_info(AS_DRV_MEM, "{%s} loading free & defrag queues",
+			mems->common.ns->name);
 
 	// Split this task across multiple threads.
-	define_deferred_array(tids, cf_tid, mems->n_mems);
+	define_deferred_array(tids, cf_tid, mems->common.n_devices);
 
-	for (int i = 0; i < mems->n_mems; i++) {
+	for (int i = 0; i < mems->common.n_devices; i++) {
 		drv_mem* mem = &mems->mems[i];
 
 		tids[i] = cf_thread_create_joinable(run_load_queues, (void*)mem);
 	}
 
-	for (int i = 0; i < mems->n_mems; i++) {
+	for (int i = 0; i < mems->common.n_devices; i++) {
 		cf_thread_join(tids[i]);
 	}
 	// Now we're single-threaded again.
 
-	for (int i = 0; i < mems->n_mems; i++) {
+	for (int i = 0; i < mems->common.n_devices; i++) {
 		drv_mem* mem = &mems->mems[i];
 
 		cf_info(AS_DRV_MEM,
@@ -1625,9 +1587,9 @@ static void
 start_maintenance_threads(drv_mems* mems)
 {
 	cf_info(AS_DRV_MEM, "{%s} starting device maintenance threads",
-			mems->ns->name);
+			mems->common.ns->name);
 
-	for (int i = 0; i < mems->n_mems; i++) {
+	for (int i = 0; i < mems->common.n_devices; i++) {
 		drv_mem* mem = &mems->mems[i];
 
 		cf_thread_create_detached(run_mem_maintenance, (void*)mem);
@@ -1637,9 +1599,9 @@ start_maintenance_threads(drv_mems* mems)
 static void
 start_write_threads(drv_mems* mems)
 {
-	cf_info(AS_DRV_MEM, "{%s} starting write threads", mems->ns->name);
+	cf_info(AS_DRV_MEM, "{%s} starting write threads", mems->common.ns->name);
 
-	for (int i = 0; i < mems->n_mems; i++) {
+	for (int i = 0; i < mems->common.n_devices; i++) {
 		drv_mem* mem = &mems->mems[i];
 
 		if (mem->shadow_name != NULL) {
@@ -1651,9 +1613,9 @@ start_write_threads(drv_mems* mems)
 static void
 start_defrag_threads(drv_mems* mems)
 {
-	cf_info(AS_DRV_MEM, "{%s} starting defrag threads", mems->ns->name);
+	cf_info(AS_DRV_MEM, "{%s} starting defrag threads", mems->common.ns->name);
 
-	for (int i = 0; i < mems->n_mems; i++) {
+	for (int i = 0; i < mems->common.n_devices; i++) {
 		drv_mem* mem = &mems->mems[i];
 
 		cf_thread_create_detached(run_defrag, (void*)mem);
@@ -1680,7 +1642,7 @@ run_mem_cold_start(void* udata)
 	if (cf_rc_release(complete_rc) == 0) {
 		// All drives are done reading.
 
-		as_namespace* ns = mems->ns;
+		as_namespace* ns = mems->common.ns;
 
 		if (drv_cold_start_sweeps_done(ns)) {
 			ns->loading_records = false;
@@ -1819,12 +1781,12 @@ cold_start_add_record(drv_mems* mems, drv_mem* mem, const as_flat_record* flat,
 	uint32_t pid = as_partition_getid(&flat->keyd);
 
 	// If this isn't a partition we're interested in, skip this record.
-	if (! mems->get_state_from_storage[pid]) {
+	if (! mems->common.get_state_from_storage[pid]) {
 		mem->record_add_unowned_counter++;
 		return;
 	}
 
-	as_namespace* ns = mems->ns;
+	as_namespace* ns = mems->common.ns;
 	as_partition* p_partition = &ns->partitions[pid];
 
 	// Includes round rblock padding, so may not literally exclude the mark.
@@ -2020,9 +1982,9 @@ prefer_existing_record(const as_namespace* ns, const as_flat_record* flat,
 static void
 set_pristine_offset(drv_mems* mems)
 {
-	cf_mutex_lock(&mems->flush_lock);
+	cf_mutex_lock(&mems->common.flush_lock);
 
-	for (int i = 0; i < mems->n_mems; i++) {
+	for (int i = 0; i < mems->common.n_devices; i++) {
 		drv_mem* mem = &mems->mems[i];
 		drv_header* header = (drv_header*)&mem->mem_base_addr[0];
 
@@ -2038,18 +2000,18 @@ set_pristine_offset(drv_mems* mems)
 		}
 	}
 
-	cf_mutex_unlock(&mems->flush_lock);
+	cf_mutex_unlock(&mems->common.flush_lock);
 }
 
 static void
 set_trusted(drv_mems* mems)
 {
-	cf_mutex_lock(&mems->flush_lock);
+	cf_mutex_lock(&mems->common.flush_lock);
 
-	mems->generic->prefix.flags |= DRV_HEADER_FLAG_TRUSTED;
+	mems->common.generic->prefix.flags |= DRV_HEADER_FLAG_TRUSTED;
 	flush_flags(mems);
 
-	cf_mutex_unlock(&mems->flush_lock);
+	cf_mutex_unlock(&mems->common.flush_lock);
 }
 
 //==========================================================
@@ -2550,6 +2512,27 @@ write_header(drv_mem* mem, const uint8_t* header, const uint8_t* from, size_t si
 	}
 }
 
+// Adapt write_header to the typed drv_write_header_fn callback - no void*, no
+// function-pointer cast.
+static void
+mem_write_header_cb(drv_dev dev, const uint8_t* header, const uint8_t* from,
+		size_t size)
+{
+	write_header(dev.mem, header, from, size);
+}
+
+// MEM has no atomic variant - both slots are the same.
+static void
+mem_init_common_devs(drv_mems* mems, int n_devices)
+{
+	drv_init_common_devs(&mems->common, n_devices, mem_write_header_cb,
+			mem_write_header_cb);
+
+	for (int i = 0; i < n_devices; i++) {
+		mems->common.devs[i].mem = &mems->mems[i];
+	}
+}
+
 static void
 aligned_write_to_shadow(drv_mem* mem, const uint8_t* header,
 		const uint8_t* from, size_t size)
@@ -2575,12 +2558,12 @@ aligned_write_to_shadow(drv_mem* mem, const uint8_t* header,
 static void
 flush_flags(drv_mems* mems)
 {
-	for (int i = 0; i < mems->n_mems; i++) {
+	for (int i = 0; i < mems->common.n_devices; i++) {
 		drv_mem* mem = &mems->mems[i];
 
-		write_header(mem, (uint8_t*)mems->generic,
-				(uint8_t*)&mems->generic->prefix.flags,
-				sizeof(mems->generic->prefix.flags));
+		write_header(mem, (uint8_t*)mems->common.generic,
+				(uint8_t*)&mems->common.generic->prefix.flags,
+				sizeof(mems->common.generic->prefix.flags));
 	}
 }
 

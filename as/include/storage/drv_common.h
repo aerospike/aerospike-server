@@ -134,6 +134,16 @@ typedef struct drv_atomic_s {
 
 COMPILER_ASSERT(sizeof(drv_atomic) == 128 * 1024);
 
+// The biggest write through PMEM's atomic header path is the whole pmeta
+// array, from drv_flush_pmeta. write_header_atomic stages that range in
+// drv_atomic.data before applying it, and stages it whole - so the array has
+// to fit. Only the atomic path stages: the plain writer copies straight to the
+// device, so flush_header's DRV_HEADER_SIZE write is not bounded by this.
+// Stated here because the two sizes are set in different structs, and the
+// staging copy does not check.
+COMPILER_ASSERT(sizeof(drv_pmeta) * AS_PARTITIONS <=
+		sizeof(((drv_atomic*)NULL)->data));
+
 #define ROUND_UP_GENERIC                                                       \
 	((sizeof(drv_generic) + (HI_IO_MIN_SIZE - 1)) & -HI_IO_MIN_SIZE)
 
@@ -403,6 +413,147 @@ typedef struct drv_dev_view_s {
 
 void drv_dump_wb_summary(cf_log_context log_ctx, const struct as_namespace_s* ns,
 		bool verbose, const drv_dev_view* devs, uint32_t n_devs);
+
+//==========================================================
+// Namespace storage state common to all engines.
+//
+// drv_ssds, drv_mems, and EE drv_pmems each embed this struct as their 'common'
+// member. It is a named member, not a positional one - nothing may depend on
+// it being first, and no code casts an engine struct to it. Engines pass
+// &<engine>->common to the shared helpers below, so no shared code needs to
+// know the engine structs, and a field added here is picked up by all three
+// engines automatically.
+//
+// What belongs here versus what an engine should project per call: use a
+// per-call view (drv_dev_view, DRV_WBLOCK_POOL) for anything the engine can
+// cheaply assemble at the call site, and put state here only when it must
+// outlive a call or be established once at init - devs, flush_lock, the writer
+// slots - or when a cross-engine rule must live in shared code rather than be
+// restated by each engine, such as "pmeta is written through the atomic
+// writer".
+//
+
+// Publishes bytes [from, from + size) of the in-memory header image to the
+// device's own header, persisting them where the engine has backing storage -
+// a memory-only namespace has no device, so there its write is a copy into the
+// stripe's header and nothing is made durable. 'header' must point at the
+// image of device offset 0, so the offset to write at is 'from - header'.
+// Implementations may write a larger, I/O-min aligned region containing that
+// range - so the caller's image must be allocated out to the I/O-min-rounded
+// end of it, not merely to 'from + size'. HI_IO_MIN_SIZE is the ceiling every
+// engine's io-min is found within (see find_io_min_size), which is why
+// drv_generic images are allocated ROUND_UP_GENERIC rather than
+// sizeof(drv_generic).
+//
+// Engines supply this via drv_devices_common below; the drv_dev arm they read
+// must be their own, which init guarantees by setting devs and the writers
+// together.
+typedef void (*drv_write_header_fn)(drv_dev dev, const uint8_t* header,
+		const uint8_t* from, size_t size);
+
+typedef struct drv_devices_common_s {
+	// Set by <engine>_init_devices/_init_files, before anything else here.
+	struct as_namespace_s* ns;
+
+	// The in-memory image of the header's generic region, shared by all
+	// devices. Allocated by <engine>_init_synchronous, i.e. after devs and the
+	// writers - every helper below dereferences it, so none are callable
+	// before that.
+	drv_generic* generic;
+
+	// Used only at startup, to determine whether to load a record. Populated
+	// by <engine>_init_synchronous and read during cold-start sweep. Kept
+	// resident for the life of the namespace rather than allocated and freed
+	// around startup - deliberately, so there is no second lifetime here that
+	// could disagree with the enclosing struct's.
+	bool get_state_from_storage[AS_PARTITIONS];
+
+	// Indexed by previous device-id to get new device-id. -1 means device is
+	// "fresh" or absent. Used only at startup to fix index elements' file-id;
+	// populated by <engine>_init_synchronous, read during warm-restart resume.
+	// Resident for the same reason as above.
+	int8_t device_translation[AS_STORAGE_MAX_DEVICES];
+
+	// Used only at startup, set true if all devices are fresh.
+	bool all_fresh;
+
+	cf_mutex flush_lock;
+
+	// The count, the handle array and the writers are written together by
+	// drv_init_common_devs(), so they cannot disagree with each other - the
+	// shared header helpers iterate devs[0 .. n_devices) and write through the
+	// slots, and no caller assembles a handle array per call.
+	//
+	// Agreement with the enclosing allocation stays the caller's job: each
+	// <engine>_init_* sizes its drv_<engine> array in a cf_malloc expression
+	// and passes the same count here, so the two have to be derived from one
+	// expression or devs[i] ends up pointing past the block. Nothing enforces
+	// that the call happened either, so the fan-out asserts the array is set
+	// and non-empty - skipping init leaves the memset(0) state, in which every
+	// save would be a silent no-op and persist no header at all.
+	int n_devices;
+	drv_dev* devs;
+
+	// PMEM needs both - its pmeta writes go through the atomic path; MEM and
+	// SSD point both at their single writer.
+	drv_write_header_fn write_header;
+	drv_write_header_fn write_header_atomic;
+} drv_devices_common;
+
+//
+// Device array setup.
+//
+
+// Establish the count, the handle array and the two writer slots in one write,
+// so they cannot disagree. Engines call this from their own
+// <engine>_init_common_devs(), which then fills each devs[i] with its own arm -
+// the only part that needs the engine struct.
+void drv_init_common_devs(drv_devices_common* dc, int n_devices,
+		drv_write_header_fn write_header,
+		drv_write_header_fn write_header_atomic);
+
+//
+// Namespace header / pmeta helpers.
+//
+
+// Every helper takes the caller's facility - engines pass their own AS_DRV_*
+// literal, so a crash still names the engine even though these bodies are
+// shared and the per-engine wrappers tail-call into them. The pmeta helpers
+// crash on a bad partition index; the four save helpers crash on an unwired
+// device array; the load helpers crash on a header image that does not exist
+// yet.
+//
+// Locking - the half of the contract a caller cannot derive from the
+// signatures. drv_save_regime, drv_save_roster_generation and drv_save_pmeta
+// hold flush_lock across both the field they mutate and the fan-out to every
+// device; drv_flush_pmeta mutates nothing and holds it across the fan-out
+// alone. The four load/cache helpers take nothing, and that is deliberate
+// rather than an oversight.
+//
+// flush_lock serializes device writes and nothing else. It does not protect
+// generic->pmeta[pid] against drv_cache_pmeta, which mutates the same bytes
+// unlocked - a cache landing between a flush's lock acquisition and its
+// fan-out publishes a partially updated record. Serializing per-partition
+// pmeta mutation is the caller's job, and today as_partition.lock does it,
+// except on paths that run only with migrations disallowed.
+//
+// Thread identity is not the invariant, so do not reason from it: these
+// already run on the exchange thread (rebalance), migrate threads (emigrate
+// and immigrate done), and the info thread (revive).
+
+void drv_load_regime(cf_log_context log_ctx, drv_devices_common* dc);
+void drv_load_roster_generation(cf_log_context log_ctx, drv_devices_common* dc);
+void drv_load_pmeta(cf_log_context log_ctx, const drv_devices_common* dc,
+		struct as_partition_s* p);
+void drv_cache_pmeta(cf_log_context log_ctx, drv_devices_common* dc,
+		const struct as_partition_s* p);
+
+void drv_save_regime(cf_log_context log_ctx, drv_devices_common* dc);
+void drv_save_roster_generation(cf_log_context log_ctx, drv_devices_common* dc);
+void drv_save_pmeta(cf_log_context log_ctx, drv_devices_common* dc,
+		const struct as_partition_s* p);
+void drv_flush_pmeta(cf_log_context log_ctx, drv_devices_common* dc,
+		uint32_t start_pid, uint32_t n_partitions);
 
 //
 // Write-buffer helpers - shared across storage engines.

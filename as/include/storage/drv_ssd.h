@@ -216,24 +216,11 @@ typedef struct drv_ssd_s {
 //------------------------------------------------
 // Per-namespace storage information.
 //
+// Embeds drv_devices_common (drv_common.h) so shared drv_* helpers can operate
+// on the common state - they take &ssds->common.
+//
 typedef struct drv_ssds_s {
-	struct as_namespace_s* ns;
-	drv_generic* generic;
-
-	// Not a great place for this - used only at startup to determine whether to
-	// load a record.
-	bool get_state_from_storage[AS_PARTITIONS];
-
-	// Indexed by previous device-id to get new device-id. -1 means device is
-	// "fresh" or absent. Used only at startup to fix index elements' file-id.
-	int8_t device_translation[AS_STORAGE_MAX_DEVICES];
-
-	// Used only at startup, set true if all devices are fresh.
-	bool all_fresh;
-
-	cf_mutex flush_lock;
-
-	int n_ssds;
+	drv_devices_common common;
 	drv_ssd ssds[];
 } drv_ssds;
 
@@ -297,7 +284,8 @@ void ssd_header_validate_cfg(const struct as_namespace_s* ns, drv_ssd* ssd,
 		drv_header* header);
 void ssd_clear_encryption_keys(struct as_namespace_s* ns);
 void ssd_flush_final_cfg(struct as_namespace_s* ns);
-void ssd_write_header(drv_ssd* ssd, uint8_t* header, uint8_t* from, size_t size);
+void ssd_write_header(drv_ssd* ssd, const uint8_t* header, const uint8_t* from,
+		size_t size);
 void ssd_prefetch_wblock(drv_ssd* ssd, uint64_t file_offset, uint8_t* read_buf);
 void ssd_block_free(drv_ssd* ssd, uint64_t rblock_id, uint32_t n_rblocks,
 		char* msg);

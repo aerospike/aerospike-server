@@ -410,3 +410,169 @@ drv_wb_get(cf_log_context log_ctx, const char* dev_name, bool use_reserve,
 
 	return wb;
 }
+
+//==========================================================
+// Local helpers - write to header.
+//
+
+// Push a byte range of the in-memory header image out to every device - one
+// prefix field for the regime and roster writers, one drv_pmeta or a run of
+// them for the pmeta writers. Takes no lock - callers that need one already
+// hold flush_lock across their mutation and this fan-out.
+//
+// The device array and the writer slots come from <engine>_init_common_devs(),
+// which nothing forces a new allocation path to call. Skipping it leaves the
+// memset(0) state - devs null, n_devices 0, slots null - where this loop would
+// write no header at all and report nothing, so assert instead of persisting
+// silently. The assert sits outside the loop, and the four save/flush helpers
+// that reach it run per rebalance, never per record.
+static void
+write_generic_header_bytes(cf_log_context log_ctx, const drv_devices_common* dc,
+		drv_write_header_fn write_fn, const uint8_t* from, size_t size)
+{
+	cf_assert(dc->devs != NULL && dc->n_devices > 0 && write_fn != NULL,
+			log_ctx, "{%s} header write before init", dc->ns->name);
+
+	for (int i = 0; i < dc->n_devices; i++) {
+		write_fn(dc->devs[i], (const uint8_t*)dc->generic, from, size);
+	}
+}
+
+//==========================================================
+// Public API - device array setup.
+//
+
+void
+drv_init_common_devs(drv_devices_common* dc, int n_devices,
+		drv_write_header_fn write_header, drv_write_header_fn write_header_atomic)
+{
+	dc->n_devices = n_devices;
+	dc->devs = cf_malloc((size_t)n_devices * sizeof(drv_dev));
+
+	dc->write_header = write_header;
+	dc->write_header_atomic = write_header_atomic;
+}
+
+//==========================================================
+// Public API - namespace header / pmeta persistence.
+//
+
+void
+drv_load_regime(cf_log_context log_ctx, drv_devices_common* dc)
+{
+	cf_assert(dc->generic != NULL, log_ctx, "{%s} header read before init",
+			dc->ns->name);
+
+	as_namespace* ns = dc->ns;
+
+	ns->eventual_regime = dc->generic->prefix.eventual_regime;
+	ns->rebalance_regime = ns->eventual_regime;
+}
+
+void
+drv_load_roster_generation(cf_log_context log_ctx, drv_devices_common* dc)
+{
+	cf_assert(dc->generic != NULL, log_ctx, "{%s} header read before init",
+			dc->ns->name);
+
+	dc->ns->roster_generation = dc->generic->prefix.roster_generation;
+}
+
+void
+drv_load_pmeta(cf_log_context log_ctx, const drv_devices_common* dc,
+		as_partition* p)
+{
+	cf_assert(p->id < AS_PARTITIONS, log_ctx, "{%s} bad pmeta pid %u",
+			dc->ns->name, p->id);
+
+	const drv_pmeta* pmeta = &dc->generic->pmeta[p->id];
+
+	p->version = pmeta->version;
+}
+
+void
+drv_cache_pmeta(cf_log_context log_ctx, drv_devices_common* dc,
+		const as_partition* p)
+{
+	cf_assert(p->id < AS_PARTITIONS, log_ctx, "{%s} bad pmeta pid %u",
+			dc->ns->name, p->id);
+
+	drv_pmeta* pmeta = &dc->generic->pmeta[p->id];
+
+	pmeta->version = p->version;
+	pmeta->tree_id = p->tree_id;
+}
+
+void
+drv_save_regime(cf_log_context log_ctx, drv_devices_common* dc)
+{
+	cf_mutex_lock(&dc->flush_lock);
+
+	dc->generic->prefix.eventual_regime = dc->ns->eventual_regime;
+
+	write_generic_header_bytes(log_ctx, dc, dc->write_header,
+			(const uint8_t*)&dc->generic->prefix.eventual_regime,
+			sizeof(dc->generic->prefix.eventual_regime));
+
+	cf_mutex_unlock(&dc->flush_lock);
+}
+
+void
+drv_save_roster_generation(cf_log_context log_ctx, drv_devices_common* dc)
+{
+	// Normal for this to not change, cleaner to check here versus outside.
+	if (dc->ns->roster_generation == dc->generic->prefix.roster_generation) {
+		return;
+	}
+
+	cf_mutex_lock(&dc->flush_lock);
+
+	dc->generic->prefix.roster_generation = dc->ns->roster_generation;
+
+	write_generic_header_bytes(log_ctx, dc, dc->write_header,
+			(const uint8_t*)&dc->generic->prefix.roster_generation,
+			sizeof(dc->generic->prefix.roster_generation));
+
+	cf_mutex_unlock(&dc->flush_lock);
+}
+
+void
+drv_save_pmeta(cf_log_context log_ctx, drv_devices_common* dc,
+		const as_partition* p)
+{
+	cf_assert(p->id < AS_PARTITIONS, log_ctx, "{%s} bad pmeta pid %u",
+			dc->ns->name, p->id);
+
+	drv_pmeta* pmeta = &dc->generic->pmeta[p->id];
+
+	cf_mutex_lock(&dc->flush_lock);
+
+	pmeta->version = p->version;
+	pmeta->tree_id = p->tree_id;
+
+	write_generic_header_bytes(log_ctx, dc, dc->write_header_atomic,
+			(const uint8_t*)pmeta, sizeof(*pmeta));
+
+	cf_mutex_unlock(&dc->flush_lock);
+}
+
+void
+drv_flush_pmeta(cf_log_context log_ctx, drv_devices_common* dc,
+		uint32_t start_pid, uint32_t n_partitions)
+{
+	// Not 'start_pid + n_partitions <= AS_PARTITIONS' - that sum is unsigned
+	// and wraps, which would let a huge start_pid through.
+	cf_assert(n_partitions <= AS_PARTITIONS &&
+					start_pid <= AS_PARTITIONS - n_partitions,
+			log_ctx, "{%s} bad pmeta range %u + %u", dc->ns->name, start_pid,
+			n_partitions);
+
+	drv_pmeta* pmeta = &dc->generic->pmeta[start_pid];
+
+	cf_mutex_lock(&dc->flush_lock);
+
+	write_generic_header_bytes(log_ctx, dc, dc->write_header_atomic,
+			(const uint8_t*)pmeta, sizeof(drv_pmeta) * n_partitions);
+
+	cf_mutex_unlock(&dc->flush_lock);
+}

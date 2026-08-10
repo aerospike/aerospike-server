@@ -54,7 +54,6 @@ struct as_index_ref_s;
 struct as_index_tree_s;
 struct as_namespace_s;
 struct as_storage_rd_s;
-struct drv_generic_s;
 struct drv_header_s;
 struct drv_mem_s;
 struct drv_pmeta_s;
@@ -191,24 +190,11 @@ typedef struct drv_mem_s {
 } drv_mem;
 
 // Per-namespace storage information.
+//
+// Embeds drv_devices_common (drv_common.h) so shared drv_* helpers can operate
+// on the common state - they take &mems->common.
 typedef struct drv_mems_s {
-	struct as_namespace_s* ns;
-	struct drv_generic_s* generic;
-
-	// Not a great place for this - used only at startup to determine whether to
-	// load a record.
-	bool get_state_from_storage[AS_PARTITIONS];
-
-	// Indexed by previous device-id to get new device-id. -1 means device is
-	// "fresh" or absent. Used only at startup to fix index elements' file-id.
-	int8_t device_translation[AS_STORAGE_MAX_DEVICES];
-
-	// Used only at startup, set true if all devices are fresh.
-	bool all_fresh;
-
-	cf_mutex flush_lock;
-
-	int n_mems;
+	drv_devices_common common;
 	drv_mem mems[];
 } drv_mems;
 
