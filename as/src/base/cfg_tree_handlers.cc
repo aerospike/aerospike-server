@@ -1086,7 +1086,8 @@ apply_cstring_field(void* target, const FieldDescriptor& desc,
 	char** field_ptr =
 			reinterpret_cast<char**>(static_cast<char*>(target) + desc.offset);
 
-	// Free existing string if any
+	// Free the existing string, if any - so every target must hold NULL or a
+	// cf_alloc'd string, never a string literal. See cfg_set_defaults().
 	if (*field_ptr != NULL) {
 		cf_free(*field_ptr);
 	}

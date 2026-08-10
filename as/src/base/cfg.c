@@ -176,7 +176,8 @@ cfg_set_defaults()
 	c->transaction_max_ns = 1000 * 1000 * 1000; // 1 second
 	c->transaction_retry_ms =
 			1000 + 2; // 1 second + epsilon, so default timeout happens first
-	c->work_directory = "/opt/aerospike";
+	// Heap-allocated - parsers free this before overwriting it.
+	c->work_directory = cf_strdup("/opt/aerospike");
 
 	// Network heartbeat defaults.
 	c->hb_config.mode = AS_HB_MODE_UNDEF;
@@ -2523,6 +2524,7 @@ as_config_init(const char* config_file)
 				g_vault_cfg.url = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_SERVICE_WORK_DIRECTORY:
+				cf_free(c->work_directory);
 				c->work_directory = cfg_strdup_no_checks(&line);
 				break;
 			// Obsoleted:
