@@ -56,6 +56,19 @@ struct as_storage_rd_s;
 #define END_MARK_SZ 4 // not for pmem, only SSD
 
 // Per-record mandatory metadata on device.
+//
+// WARNING: delta-zstd replication relies on master and replica producing
+// byte-identical flats for the same (gen, lut) record. Today the only
+// per-node-local field is `tree_id`, and as_flat_make_delta_canonical()
+// zeros exactly that. If you add ANY new field whose value differs across
+// nodes for the same record (a node id, a per-storage-device sequence
+// number, anything stamped from local state at flatten time), you MUST
+// extend as_flat_make_delta_canonical() to neutralise it. Otherwise
+// delta-zstd will silently corrupt: receivers will apply patches against
+// a divergent dictionary, get unexpected bytes, and the resulting failures
+// will surface only as delta_reject_apply stat increments with no warning.
+// The COMPILER_ASSERT below pins the struct size as of this design so any
+// such change forces a recompile and a re-examination of canonicalization.
 typedef struct as_flat_record_s {
 	uint32_t magic;
 
@@ -80,6 +93,8 @@ typedef struct as_flat_record_s {
 	// final size: 35
 	uint8_t data[];
 } __attribute__((__packed__)) as_flat_record;
+
+COMPILER_ASSERT(sizeof(as_flat_record) == 35);
 
 typedef struct as_flat_extra_flags_s {
 	uint8_t xdr_tombstone : 1;
@@ -181,6 +196,22 @@ bool as_flat_unpack_remote_record_meta(struct as_namespace_s* ns,
 		struct as_remote_record_s* rr);
 const uint8_t* as_flat_unpack_record_meta(const as_flat_record* flat,
 		const uint8_t* end, struct as_flat_opt_meta_s* opt_meta);
+bool as_flat_pickle_is_storage_compressed(const uint8_t* pickle,
+		uint32_t pickle_sz);
+
+// Copy `size` bytes from `src` to `dst`, then zero the `tree_id` field in
+// dst's flat header. Used by the wire-compression delta path so that master
+// and replica produce byte-identical zstd_wire input for the same record at
+// the same (gen, lut), regardless of their per-partition tree_id values
+// (which are node-local and stamped on the on-disk flat).
+//
+// `size` must be >= sizeof(as_flat_record). `dst` and `src` must not overlap.
+void as_flat_make_delta_canonical(void* dst, const void* src, uint32_t size);
+
+// Same tree_id neutralisation as as_flat_make_delta_canonical(), but applied in
+// place to a buffer the caller already owns - no copy. Use when the source is a
+// private buffer (e.g. rw->delta_base) rather than the stored record.
+void as_flat_canonicalize_delta_inplace(void* flat);
 bool as_flat_fix_padded_rr(struct as_remote_record_s* rr); // TODO - remove in "six months"
 int as_flat_unpack_remote_bins(struct as_remote_record_s* rr,
 		struct as_bin_s* bins);

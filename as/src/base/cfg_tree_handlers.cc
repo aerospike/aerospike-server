@@ -47,6 +47,7 @@ extern "C" {
 #include "base/datamodel.h"
 #include "base/security_config.h"
 #include "base/thr_info.h"
+#include "base/zstd_wire.h"
 #include "storage/storage.h"
 }
 
@@ -150,6 +151,8 @@ static bool try_expand_unit_value(const FieldDescriptor& desc,
 // Type-specific field appliers
 static void apply_uint16_field(void* target, const FieldDescriptor& desc,
 		const nlohmann::json& value);
+static void apply_int32_field(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
 static void apply_uint32_field(void* target, const FieldDescriptor& desc,
 		const nlohmann::json& value);
 static void apply_uint64_field(void* target, const FieldDescriptor& desc,
@@ -171,6 +174,10 @@ static void handle_advertise_ipv6(void* target, const FieldDescriptor& desc,
 static void handle_auto_pin(void* target, const FieldDescriptor& desc,
 		const nlohmann::json& value);
 static void handle_error_details_max_verbosity(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_smd_compression_mode(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_enable_benchmarks_wire_compression(void* target,
 		const FieldDescriptor& desc, const nlohmann::json& value);
 static void handle_cluster_name(void* target, const FieldDescriptor& desc,
 		const nlohmann::json& value);
@@ -241,6 +248,10 @@ static void handle_namespace_read_consistency_level_override(void* ns,
 static void handle_namespace_xdr_bin_tombstone_ttl(void* ns,
 		const FieldDescriptor& desc, const nlohmann::json& value);
 static void handle_namespace_conflict_resolution_policy(void* ns,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_namespace_replication_compression_mode(void* ns,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_namespace_migrate_compression_mode(void* ns,
 		const FieldDescriptor& desc, const nlohmann::json& value);
 
 // network field handlers
@@ -390,6 +401,7 @@ static void apply_namespace_set(const std::string& name,
 		{"/debug-allocations", offsetof(as_config, debug_allocations), apply_bool_field},
 		{"/disable-udf-execution", offsetof(as_config, udf_execution_disabled), apply_bool_field},
 		{"/enable-benchmarks-fabric", offsetof(as_config, fabric_benchmarks_enabled), apply_bool_field},
+		{"/enable-benchmarks-wire-compression", NO_OFFSET, handle_enable_benchmarks_wire_compression},
 		{"/enable-health-check", offsetof(as_config, health_check_enabled), apply_bool_field},
 		{"/enable-hist-info", offsetof(as_config, info_hist_enabled), apply_bool_field},
 		{"/enforce-best-practices", offsetof(as_config, enforce_best_practices), apply_bool_field},
@@ -425,6 +437,8 @@ static void apply_namespace_set(const std::string& name,
 		{"/service-threads", offsetof(as_config, n_service_threads), apply_uint32_field},
 		{"/sindex-builder-threads", offsetof(as_config, sindex_builder_threads), apply_uint32_field},
 		{"/sindex-gc-period", offsetof(as_config, sindex_gc_period), apply_uint32_field, UnitType::TIME_DURATION},
+		{"/smd-compression-mode", NO_OFFSET, handle_smd_compression_mode, EnterpriseOnly{}}, // enterprise-only
+		{"/smd-compression-level", offsetof(as_config, smd_compression_level), apply_int32_field, EnterpriseOnly{}}, // enterprise-only
 		{"/stay-quiesced", offsetof(as_config, stay_quiesced), apply_bool_field, EnterpriseOnly{}}, // enterprise-only
 		{"/ticker-interval", offsetof(as_config, ticker_interval), apply_uint32_field, UnitType::TIME_DURATION},
 		{"/tls-refresh-period", NO_OFFSET, handle_tls_refresh_period, EnterpriseOnly{}, UnitType::TIME_DURATION}, // enterprise-only
@@ -560,6 +574,12 @@ static void apply_namespace_set(const std::string& name,
 		{"/enable-benchmarks-udf", offsetof(as_namespace, udf_benchmarks_enabled), apply_bool_field},
 		{"/enable-benchmarks-udf-sub", offsetof(as_namespace, udf_sub_benchmarks_enabled), apply_bool_field},
 		{"/enable-benchmarks-write", offsetof(as_namespace, write_benchmarks_enabled), apply_bool_field},
+		{"/enable-benchmarks-migrate", offsetof(as_namespace, migrate_benchmarks_enabled), apply_bool_field},
+		{"/enable-benchmarks-repl", offsetof(as_namespace, repl_benchmarks_enabled), apply_bool_field},
+		{"/replication-compression-mode", NO_OFFSET, handle_namespace_replication_compression_mode, EnterpriseOnly{}}, // enterprise-only
+		{"/replication-compression-level", offsetof(as_namespace, repl_compression_level), apply_int32_field, EnterpriseOnly{}}, // enterprise-only
+		{"/migrate-compression-mode", NO_OFFSET, handle_namespace_migrate_compression_mode, EnterpriseOnly{}}, // enterprise-only
+		{"/migrate-compression-level", offsetof(as_namespace, migrate_compression_level), apply_int32_field, EnterpriseOnly{}}, // enterprise-only
 		{"/enable-hist-proxy", offsetof(as_namespace, proxy_hist_enabled), apply_bool_field},
 		{"/evict-hist-buckets", offsetof(as_namespace, evict_hist_buckets), apply_uint32_field},
 		{"/evict-indexes-memory-pct", offsetof(as_namespace, evict_indexes_memory_pct), apply_uint32_field},
@@ -1008,6 +1028,26 @@ apply_pct_w_minus_1_field(void* target, const FieldDescriptor& desc,
 }
 
 static void
+apply_int32_field(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	if (! value.is_number_integer()) {
+		throw config_error(desc.json_path, "must be an integer");
+	}
+
+	int64_t val = value.get<int64_t>();
+
+	if (val < std::numeric_limits<int32_t>::min() ||
+			val > std::numeric_limits<int32_t>::max()) {
+		throw config_error(desc.json_path, "value out of range for int32_t");
+	}
+
+	int32_t* field_ptr =
+			reinterpret_cast<int32_t*>(static_cast<char*>(target) + desc.offset);
+	*field_ptr = static_cast<int32_t>(val);
+}
+
+static void
 apply_uint32_field(void* target, const FieldDescriptor& desc,
 		const nlohmann::json& value)
 {
@@ -1339,6 +1379,46 @@ handle_info_max_ms(void* target, const FieldDescriptor& desc,
 
 	as_config* config = static_cast<as_config*>(target);
 	config->info_max_ns = info_max_ms * 1000000;
+}
+
+static void
+handle_smd_compression_mode(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	if (! value.is_string()) {
+		throw config_error("/service/smd-compression-mode", "must be a string");
+	}
+
+	as_config* config = static_cast<as_config*>(target);
+	std::string mode = value.get<std::string>();
+
+	if (mode == "none") {
+		config->smd_compression_mode = AS_SMD_COMPRESSION_MODE_NONE;
+	}
+	else if (mode == "zstd") {
+		config->smd_compression_mode = AS_SMD_COMPRESSION_MODE_ZSTD;
+	}
+	else {
+		throw config_error("/service/smd-compression-mode",
+				"invalid value: " + mode);
+	}
+}
+
+static void
+handle_enable_benchmarks_wire_compression(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	(void)target;
+	(void)desc;
+
+	if (! value.is_boolean()) {
+		throw config_error("/service/enable-benchmarks-wire-compression",
+				"must be a boolean");
+	}
+
+	// The flag lives in the zstd_wire module (single source of truth), not in
+	// as_config - push it down through the setter.
+	zstd_wire_set_benchmarks_enabled(value.get<bool>());
 }
 
 static void
@@ -1678,9 +1758,63 @@ handle_namespace_conflict_resolution_policy(void* ns,
 	}
 }
 
-//------------------------------------------------
-// Namespace Sindex-Type Handlers.
-//
+static void
+handle_namespace_replication_compression_mode(void* ns,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
+
+	if (! value.is_string()) {
+		throw config_error("/namespaces/replication-compression-mode",
+				"must be a string");
+	}
+
+	std::string mode = value.get<std::string>();
+
+	if (mode == "none") {
+		namespace_struct->repl_compression_mode =
+				AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_NONE;
+	}
+	else if (mode == "zstd") {
+		namespace_struct->repl_compression_mode =
+				AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_ZSTD;
+	}
+	else if (mode == "delta-zstd") {
+		namespace_struct->repl_compression_mode =
+				AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_DELTA_ZSTD;
+	}
+	else {
+		throw config_error("/namespaces/replication-compression-mode",
+				"invalid value: " + mode);
+	}
+}
+
+static void
+handle_namespace_migrate_compression_mode(void* ns, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
+
+	if (! value.is_string()) {
+		throw config_error("/namespaces/migrate-compression-mode",
+				"must be a string");
+	}
+
+	std::string mode = value.get<std::string>();
+
+	if (mode == "none") {
+		namespace_struct->migrate_compression_mode =
+				AS_NAMESPACE_MIGRATE_COMPRESSION_MODE_NONE;
+	}
+	else if (mode == "zstd") {
+		namespace_struct->migrate_compression_mode =
+				AS_NAMESPACE_MIGRATE_COMPRESSION_MODE_ZSTD;
+	}
+	else {
+		throw config_error("/namespaces/migrate-compression-mode",
+				"invalid value: " + mode);
+	}
+}
 
 static void
 handle_namespace_sindex_mounts(void* ns, const FieldDescriptor& desc,

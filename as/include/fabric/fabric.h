@@ -129,4 +129,13 @@ bool as_fabric_is_published_endpoint_list(const struct as_endpoint_list_s* list)
 struct as_endpoint_list_s* as_fabric_hb_plugin_get_endpoint_list(
 		struct as_hb_plugin_node_data_s* plugin_data);
 void as_fabric_rate_capture(fabric_rate* rate);
+
+// Cumulative bytes sent/received over fabric since process start, per
+// channel. Includes live connections plus any closed-connection totals
+// that have been folded into internal accumulators. Pair with the
+// repl/migrate wire-compression bytes_saved counters to compute total
+// bandwidth and a compression savings ratio.
+void as_fabric_bytes_total_capture(uint64_t s_bytes[AS_FABRIC_N_CHANNELS],
+		uint64_t r_bytes[AS_FABRIC_N_CHANNELS]);
+
 void as_fabric_dump(bool verbose);

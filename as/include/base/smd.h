@@ -27,6 +27,7 @@
 //
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "dynbuf.h"
@@ -94,6 +95,19 @@ bool as_smd_set_blocking(as_smd_id id, const char* key, const char* value,
 		uint64_t timeout);
 void as_smd_get_all(as_smd_id id, as_smd_get_all_fn cb, void* udata);
 void as_smd_get_info(cf_dyn_buf* db);
+
+// Compresses a full SMD item list using the plain zstd full-sync format.
+// Returns false if the list is empty, below the compression threshold, or if
+// compression is not beneficial.
+bool as_smd_compress_items(const cf_vector* items, uint8_t** buf_r,
+		size_t* sz_r, size_t* orig_sz_r, int32_t level);
+
+// Decompresses a full SMD item list encoded by as_smd_compress_items().
+// On success, caller owns all items and must call as_smd_items_destroy().
+bool as_smd_decompress_items(const uint8_t* buf, size_t sz, cf_vector* items_r);
+
+// Destroys a vector of as_smd_item* values.
+void as_smd_items_destroy(cf_vector* items);
 
 static inline void
 as_smd_set_and_forget(as_smd_id id, const char* key, const char* value)

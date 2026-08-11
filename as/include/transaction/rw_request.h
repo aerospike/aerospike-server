@@ -126,6 +126,54 @@ typedef struct rw_request_s {
 	// Store pickled data, for use in replica write.
 	uint8_t* pickle;
 	size_t pickle_sz;
+
+	// Wire-compression state. Populated by compute_delta_for_replication and
+	// compute_compression_for_replication when their respective namespace
+	// modes are active. Only one of use_delta / use_compressed is true.
+	bool use_delta;
+	bool use_compressed;
+	// True only when fill_repl_write_message() actually emitted a delta or
+	// compressed op on the wire. use_delta/use_compressed record what was
+	// computed; this records what was sent. They diverge when the rolling-
+	// upgrade compatibility gate forces a plain RW_OP_REPL_WRITE even though a
+	// compressed payload was computed. repl_write_handle_ack() credits
+	// bytes_saved off this flag, so a compat-gated plain send never over-credits
+	// savings for a record that actually went out uncompressed.
+	bool wire_compressed_op_sent;
+	uint8_t* delta;
+	size_t delta_sz;
+	uint8_t* compressed;
+	size_t compressed_sz;
+	// Snapshot of the OLD record's flat bytes, taken by
+	// capture_delta_base_for_replication() BEFORE as_storage_record_write().
+	// compute_delta_for_replication() patches against this instead of rd->flat,
+	// which for in-memory namespaces aliases the storage arena the write frees
+	// in place (use-after-free). NULL when delta mode is off or there is no old
+	// version.
+	uint8_t* delta_base;
+	uint32_t delta_base_sz;
+	// Set by capture_delta_base_for_replication() when the old record's
+	// stored flat is storage-compressed. The bin-load path decompresses into
+	// a separate buffer - rd->flat_end no longer points into rd->flat's
+	// allocation - so no coherent base snapshot exists, and
+	// compute_delta_for_replication() must skip the delta without touching
+	// rd->flat (freed in place by the write for in-memory namespaces).
+	bool delta_base_storage_compressed;
+	uint32_t base_generation;
+	uint64_t base_lut;
+	// Per-destination bytes saved by the chosen wire-compression path
+	// (pickle_sz - delta_sz or pickle_sz - compressed_sz). Credited to
+	// ns->repl_wire_comp_stat.bytes_saved one destination at a time on
+	// successful ack, so the counter reflects bytes actually saved on the
+	// wire rather than bytes we hoped to save. Zero if compression was
+	// not beneficial.
+	uint64_t per_dest_bytes_saved;
+	// Info bits computed from the originating transaction at first build.
+	// Re-emitted verbatim on delta-fallback retransmit so the rebuilt
+	// message preserves bits like RW_INFO_NO_REPL_ACK that would otherwise
+	// be lost on a zero-initialized synthetic transaction.
+	uint32_t repl_info_bits;
+	bool repl_info_bits_set;
 	const char* set_name; // points directly into vmap - never free it
 	uint32_t set_name_len;
 	uint8_t* key;
@@ -169,6 +217,12 @@ typedef struct rw_request_s {
 
 	// Node health related stat, to track replication latency.
 	uint64_t repl_start_us;
+
+	// Dedicated replication-latency histogram sample timestamp. Always
+	// set (cheap) so the histogram captures every replica write when
+	// enable-benchmarks-repl is on. Distinct from repl_start_us, which is
+	// the sampled-subset timing used by the as_health outlier detector.
+	uint64_t repl_start_ns;
 
 } rw_request;
 

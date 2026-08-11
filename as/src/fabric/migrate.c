@@ -26,6 +26,7 @@
 
 #include "fabric/migrate.h"
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -52,9 +53,11 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/proto.h"
+#include "base/zstd_wire.h"
 #include "fabric/exchange.h"
 #include "fabric/fabric.h"
 #include "fabric/meta_batch.h"
+#include "fabric/migrate_test_support.h" // reinsert internals (also used by unit tests)
 #include "fabric/partition.h"
 #include "fabric/partition_balance.h"
 #include "storage/flat.h"
@@ -73,7 +76,7 @@ const msg_template migrate_mt[] = {
 		{ MIG_FIELD_NAMESPACE, M_FT_BUF },
 		{ MIG_FIELD_PARTITION, M_FT_UINT32 },
 		{ MIG_FIELD_UNUSED_5, M_FT_BUF },
-		{ MIG_FIELD_UNUSED_6, M_FT_UINT32 },
+		{ MIG_FIELD_COMPRESSION, M_FT_UINT32 },
 		{ MIG_FIELD_RECORD, M_FT_BUF },
 		{ MIG_FIELD_CLUSTER_KEY, M_FT_UINT64 },
 		{ MIG_FIELD_ORIG_RECORD, M_FT_BUF },
@@ -133,14 +136,6 @@ typedef struct emigration_pop_info_s {
 	uint64_t avoid_dest;
 } emigration_pop_info;
 
-typedef struct emigration_reinsert_ctrl_s {
-	uint64_t xmit_ms; // time of last xmit - 0 when done
-	emigration* emig;
-	msg* m;
-	cf_digest keyd;
-	uint64_t lut;
-} emigration_reinsert_ctrl;
-
 //==========================================================
 // Globals.
 //
@@ -179,7 +174,27 @@ bool emigration_send_done(emigration* emig);
 void* run_emigration_reinserter(void* arg);
 bool emigrate_tree_reduce_fn(as_index_ref* r_ref, void* udata);
 int emigration_reinsert_reduce_fn(const void* key, void* data, void* udata);
-void emigrate_record(emigration* emig, msg* m, cf_digest* keyd, uint64_t lut);
+void emigrate_record(emigration* emig, msg* m, cf_digest* keyd, uint64_t lut,
+		uint64_t bytes_saved);
+static uint64_t migration_compression_bytes_saved(size_t raw_pickle_sz,
+		size_t compressed_pickle_sz, size_t raw_orig_pickle_sz,
+		size_t compressed_orig_pickle_sz);
+
+// Migration compression is fully independent of replication compression —
+// see ns_migrate_compression_mode in datamodel.h. Helpers stay for readability
+// at the call sites and to keep the policy decision in one place.
+static inline bool
+migrate_zstd_enabled(const as_namespace* ns)
+{
+	return ns->migrate_compression_mode ==
+			AS_NAMESPACE_MIGRATE_COMPRESSION_MODE_ZSTD;
+}
+
+static inline int32_t
+migrate_zstd_level(const as_namespace* ns)
+{
+	return ns->migrate_compression_level;
+}
 
 // Immigration.
 uint32_t immigration_hashfn(const void* key);
@@ -190,6 +205,7 @@ int immigration_reaper_reduce_fn(const void* key, void* object, void* udata);
 int migrate_receive_msg_cb(cf_node src, msg* m, void* udata);
 void immigration_handle_start_request(cf_node src, msg* m);
 void immigration_ack_start_request(cf_node src, msg* m, uint32_t op);
+void immigration_ack_insert_request(cf_node src, msg* m);
 void immigration_handle_insert_request(cf_node src, msg* m);
 void immigration_handle_done_request(cf_node src, msg* m);
 void immigration_handle_all_done_request(cf_node src, msg* m);
@@ -330,6 +346,11 @@ as_migrate_dump(bool verbose)
 void
 emigration_init(emigration* emig)
 {
+	// emig->features is written by the fabric receive thread on START_ACK
+	// (emigration_handle_ctrl_ack) and read by the emigration worker thread
+	// (emigrate_tree_reduce_fn). Use atomic load/store on every access so the
+	// worker can't observe a torn/stale value.
+	as_store_uint32(&emig->features, 0);
 	emig->reinsert_hash = cf_shash_create(cf_shash_fn_u32, sizeof(uint64_t),
 			sizeof(emigration_reinsert_ctrl), 16 * 1024, true);
 	emig->ctrl_q = cf_queue_create(sizeof(int), true);
@@ -837,6 +858,50 @@ run_emigration_reinserter(void* arg)
 	return NULL;
 }
 
+// Free the per-record compressed buffers and reset them so the caller falls
+// through to the plain-pickle send path. cf_free(NULL) is a no-op, so this is
+// safe whether or not the buffers were allocated.
+static inline void
+emigrate_drop_compressed(uint8_t** pickle, size_t* pickle_sz,
+		uint8_t** orig_pickle, size_t* orig_pickle_sz)
+{
+	cf_free(*pickle);
+	cf_free(*orig_pickle);
+	*pickle = NULL;
+	*orig_pickle = NULL;
+	*pickle_sz = 0;
+	*orig_pickle_sz = 0;
+}
+
+// Post-send bookkeeping shared by the compressed and plain paths of
+// emigrate_tree_reduce_fn: count the record, apply the migrate-sleep pacing,
+// then block while we're over the in-flight byte ceiling. Returns whether this
+// emigration's cluster key is still current - the reduce-fn's "keep going?"
+// signal.
+static bool
+emigrate_throttle_after_send(emigration* emig, as_namespace* ns)
+{
+	as_incr_uint64(&ns->migrate_records_transmitted);
+
+	if (ns->migrate_sleep != 0) {
+		usleep(ns->migrate_sleep);
+	}
+
+	uint32_t waits = 0;
+
+	while (emig->bytes_emigrating > MAX_BYTES_EMIGRATING &&
+			emig->cluster_key == as_exchange_cluster_key()) {
+		usleep(1000);
+
+		// Temporary paranoia to inform us old nodes aren't acking properly.
+		if (++waits % (ns->migrate_retransmit_ms * 4) == 0) {
+			cf_warning(AS_MIGRATE, "missing acks from node %lx", emig->dest);
+		}
+	}
+
+	return emig->cluster_key == as_exchange_cluster_key();
+}
+
 bool
 emigrate_tree_reduce_fn(as_index_ref* r_ref, void* udata)
 {
@@ -855,6 +920,9 @@ emigrate_tree_reduce_fn(as_index_ref* r_ref, void* udata)
 	msg_set_uint32(m, MIG_FIELD_EMIG_ID, emig->id);
 
 	uint32_t info = emigration_pack_info(ns, r);
+	bool try_compress =
+			(as_load_uint32(&emig->features) & MIG_FEATURE_ZSTD) != 0 &&
+			migrate_zstd_enabled(ns);
 
 	if (info != 0) {
 		msg_set_uint32(m, MIG_FIELD_INFO, info);
@@ -869,6 +937,134 @@ emigrate_tree_reduce_fn(as_index_ref* r_ref, void* udata)
 		uint32_t orig_pickle_sz = 0;
 
 		if (mrt_load_orig_pickle(ns, r, &orig_pickle, &orig_pickle_sz)) {
+			migrate_wire_compression compression = MIGRATE_COMPRESSION_NONE;
+			uint8_t* compressed_pickle = NULL;
+			size_t compressed_pickle_sz = 0;
+			uint8_t* compressed_orig_pickle = NULL;
+			size_t compressed_orig_pickle_sz = 0;
+			uint64_t wire_bytes_saved = 0; // credited at insert-ack
+			// Only consumed by the try_compress blocks below; short-circuit on
+			// try_compress so we don't pay a full flat meta-unpack (twice when
+			// an orig exists) per emigrated record when migration compression
+			// is off or the peer never advertised MIG_FEATURE_ZSTD.
+			bool has_storage_compressed_pickle = try_compress &&
+					as_flat_pickle_is_storage_compressed(rd.pickle, rd.pickle_sz);
+			bool has_storage_compressed_orig_pickle = try_compress &&
+					orig_pickle != NULL &&
+					as_flat_pickle_is_storage_compressed(orig_pickle,
+							orig_pickle_sz);
+
+			if (try_compress &&
+					(has_storage_compressed_pickle ||
+							has_storage_compressed_orig_pickle)) {
+				cf_debug(AS_MIGRATE,
+						"emigrate_tree_reduce_fn: skipping wire compression for storage-compressed pickle %pD",
+						&r->keyd);
+			}
+
+			if (try_compress && ! has_storage_compressed_pickle &&
+					! has_storage_compressed_orig_pickle &&
+					// Skip records too small to beat zstd's framing overhead -
+					// don't pay a per-record compress + alloc for no gain.
+					rd.pickle_sz >= ZSTD_WIRE_COMPRESS_MIN_SZ) {
+				int32_t level = migrate_zstd_level(ns);
+
+				compressed_pickle_sz =
+						zstd_wire_compress_buffer((void**)&compressed_pickle,
+								rd.pickle, rd.pickle_sz, level);
+
+				if (orig_pickle == NULL) {
+					// Sentinel value indicating no orig_pickle. A real compressed
+					// buffer cannot be 1 byte, so this is a safe sentinel.
+					compressed_orig_pickle_sz = 1;
+				}
+				else {
+					// No separate size threshold for orig_pickle: MIG_FIELD_COMPRESSION
+					// is one per-message flag and the receiver decompresses both
+					// MIG_FIELD_RECORD and MIG_FIELD_ORIG_RECORD together, so a raw
+					// orig cannot ride inside a ZSTD message. Compressing a tiny orig
+					// is cheap, and migration_compression_bytes_saved() weighs the
+					// combined pickle+orig result and drops it if not beneficial.
+					compressed_orig_pickle_sz =
+							zstd_wire_compress_buffer((void**)&compressed_orig_pickle,
+									orig_pickle, orig_pickle_sz, level);
+				}
+
+				if (compressed_pickle_sz != 0 && compressed_orig_pickle_sz != 0) {
+					uint64_t saved =
+							migration_compression_bytes_saved(rd.pickle_sz,
+									compressed_pickle_sz, orig_pickle_sz,
+									compressed_orig_pickle_sz);
+
+					if (saved == 0) {
+						// Compressed payload is no smaller than the
+						// plain pickles — sending it would only cost the
+						// receiver a decompress for no gain.
+						as_incr_uint64(&ns->migrate_wire_comp_stat
+										.compression_not_beneficial);
+						emigrate_drop_compressed(&compressed_pickle,
+								&compressed_pickle_sz, &compressed_orig_pickle,
+								&compressed_orig_pickle_sz);
+					}
+					else {
+						compression = MIGRATE_COMPRESSION_ZSTD;
+						// bytes_saved credited at ack-time via ri_ctrl,
+						// not here.
+						wire_bytes_saved = saved;
+					}
+				}
+				else {
+					// The codec itself failed (e.g. allocation failure) -
+					// nothing we can guard against here, so send the record
+					// plain and count it.
+					//
+					// This is now the ONLY contributor to migration's
+					// fallback_count: the other one was the NACK-driven
+					// uncompressed rebuild, removed with the fallback itself. So
+					// for migration the stat means "codec failed on send, record
+					// went plain", NOT "fell back after a peer refused it" - the
+					// name predates the change and is kept because
+					// migrate_wire_compression_fallbacks is already on the info
+					// surface. Read it against the codec, not against peer
+					// behavior.
+					as_incr_uint64(&ns->migrate_wire_comp_stat.fallback_count);
+					emigrate_drop_compressed(&compressed_pickle,
+							&compressed_pickle_sz, &compressed_orig_pickle,
+							&compressed_orig_pickle_sz);
+				}
+			}
+
+			if (compression != MIGRATE_COMPRESSION_NONE) {
+				msg_set_uint32(m, MIG_FIELD_COMPRESSION, compression);
+				msg_set_buf(m, MIG_FIELD_RECORD, compressed_pickle,
+						compressed_pickle_sz, MSG_SET_HANDOFF_MALLOC);
+
+				if (orig_pickle != NULL) {
+					msg_set_buf(m, MIG_FIELD_ORIG_RECORD, compressed_orig_pickle,
+							compressed_orig_pickle_sz, MSG_SET_HANDOFF_MALLOC);
+				}
+
+				// The compressed buffers are what's on the wire and the msg
+				// owns them - the raw pickles are done. (There's no
+				// uncompressed rebuild to keep them around for: a peer that
+				// can't decode a well-formed frame has a problem we can't fix
+				// by re-sending, so retransmit is the only recovery, same as
+				// for an uncompressed record.)
+				cf_free(rd.pickle);
+				cf_free(orig_pickle);
+
+				as_storage_record_close(&rd);
+
+				cf_digest keyd = r->keyd;
+				uint64_t lut = r->last_update_time;
+
+				as_record_done(r_ref, ns);
+
+				emigrate_record(emig, m, &keyd, lut, wire_bytes_saved);
+
+				return emigrate_throttle_after_send(emig, ns);
+			}
+
 			msg_set_buf(m, MIG_FIELD_RECORD, rd.pickle, rd.pickle_sz,
 					MSG_SET_HANDOFF_MALLOC);
 
@@ -901,27 +1097,9 @@ emigrate_tree_reduce_fn(as_index_ref* r_ref, void* udata)
 	as_record_done(r_ref, ns);
 
 	// This might block if the queues are backed up.
-	emigrate_record(emig, m, &keyd, lut);
+	emigrate_record(emig, m, &keyd, lut, 0);
 
-	as_incr_uint64(&ns->migrate_records_transmitted);
-
-	if (ns->migrate_sleep != 0) {
-		usleep(ns->migrate_sleep);
-	}
-
-	uint32_t waits = 0;
-
-	while (emig->bytes_emigrating > MAX_BYTES_EMIGRATING &&
-			emig->cluster_key == as_exchange_cluster_key()) {
-		usleep(1000);
-
-		// Temporary paranoia to inform us old nodes aren't acking properly.
-		if (++waits % (ns->migrate_retransmit_ms * 4) == 0) {
-			cf_warning(AS_MIGRATE, "missing acks from node %lx", emig->dest);
-		}
-	}
-
-	return emig->cluster_key == as_exchange_cluster_key();
+	return emigrate_throttle_after_send(emig, ns);
 }
 
 int
@@ -977,8 +1155,28 @@ emigration_reinsert_reduce_fn(const void* key, void* data, void* udata)
 	return CF_SHASH_OK;
 }
 
+static uint64_t
+migration_compression_bytes_saved(size_t raw_pickle_sz,
+		size_t compressed_pickle_sz, size_t raw_orig_pickle_sz,
+		size_t compressed_orig_pickle_sz)
+{
+	size_t raw_sz = raw_pickle_sz + raw_orig_pickle_sz;
+	size_t compressed_sz = compressed_pickle_sz + compressed_orig_pickle_sz;
+
+	// compressed_orig_pickle_sz is a 1-byte sentinel when there is no orig.
+	if (raw_orig_pickle_sz == 0 && compressed_orig_pickle_sz == 1) {
+		compressed_sz--;
+	}
+
+	return compressed_sz < raw_sz ? raw_sz - compressed_sz : 0;
+}
+
+// bytes_saved is what compressing this record's pickle(s) took off the wire -
+// 0 for a plain send. It's credited to the namespace at insert-ack time, so the
+// counter reflects bytes actually saved rather than bytes we hoped to save.
 void
-emigrate_record(emigration* emig, msg* m, cf_digest* keyd, uint64_t lut)
+emigrate_record(emigration* emig, msg* m, cf_digest* keyd, uint64_t lut,
+		uint64_t bytes_saved)
 {
 	uint64_t insert_id = emig->insert_id++;
 
@@ -986,10 +1184,12 @@ emigrate_record(emigration* emig, msg* m, cf_digest* keyd, uint64_t lut)
 
 	emigration_reinsert_ctrl ri_ctrl = {
 		.xmit_ms = cf_getms(),
+		.start_ns = cf_getns(),
 		.emig = emig,
 		.m = m,
 		.keyd = *keyd,
 		.lut = lut,
+		.bytes_saved = bytes_saved,
 	};
 
 	msg_incr_ref(m); // the reference in the hash
@@ -1182,8 +1382,6 @@ immigration_handle_start_request(cf_node src, msg* m)
 
 	msg_get_uint64(m, MIG_FIELD_PARTITION_SIZE, &emig_n_recs);
 
-	msg_preserve_fields(m, 1, MIG_FIELD_EMIG_ID);
-
 	immigration* immig = cf_rc_alloc(sizeof(immigration));
 
 	as_incr_uint64(&ns->migrate_rx_instance_count);
@@ -1279,9 +1477,27 @@ immigration_handle_start_request(cf_node src, msg* m)
 void
 immigration_ack_start_request(cf_node src, msg* m, uint32_t op)
 {
+	// Trim the echoed START payload for all three ack variants (OK, FAIL,
+	// EAGAIN) - the emigrator reads only EMIG_ID and FEATURES.
+	msg_preserve_fields(m, 2, MIG_FIELD_EMIG_ID, MIG_FIELD_FEATURES);
 	msg_set_uint32(m, MIG_FIELD_OP, op);
 
 	if (as_fabric_send(src, m, AS_FABRIC_CHANNEL_CTRL) != AS_FABRIC_SUCCESS) {
+		as_fabric_msg_put(m);
+	}
+}
+
+// An insert is acked only when the record was applied (or was a no-op the
+// emigrator can treat as applied). Every failure - including a compressed
+// record we couldn't decode - drops the message unacked and lets the
+// emigrator's reinserter retransmit.
+void
+immigration_ack_insert_request(cf_node src, msg* m)
+{
+	msg_preserve_fields(m, 2, MIG_FIELD_EMIG_INSERT_ID, MIG_FIELD_EMIG_ID);
+	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_INSERT_ACK);
+
+	if (as_fabric_send(src, m, AS_FABRIC_CHANNEL_BULK) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
 }
@@ -1336,8 +1552,25 @@ immigration_handle_insert_request(cf_node src, msg* m)
 	}
 
 	as_remote_record rr = { .via = VIA_MIGRATION, .src = src, .rsv = &immig->rsv };
+	uint32_t compression = MIGRATE_COMPRESSION_NONE;
+	uint8_t* record_buf = NULL;
+	size_t record_sz = 0;
+	uint8_t* orig_buf = NULL;
+	size_t orig_buf_sz = 0;
 
-	if (msg_get_buf(m, MIG_FIELD_RECORD, &rr.pickle, &rr.pickle_sz,
+	msg_get_uint32(m, MIG_FIELD_COMPRESSION, &compression);
+
+	// Trust no byte from a peer - reject anything but the two legal values
+	// rather than falling through to the uncompressed path.
+	if (compression != MIGRATE_COMPRESSION_NONE &&
+			compression != MIGRATE_COMPRESSION_ZSTD) {
+		cf_warning(AS_MIGRATE, "handle insert: bad compression %u", compression);
+		immigration_release(immig);
+		as_fabric_msg_put(m);
+		return;
+	}
+
+	if (msg_get_buf(m, MIG_FIELD_RECORD, &record_buf, &record_sz,
 				MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_MIGRATE, "handle insert: got no record");
 		immigration_release(immig);
@@ -1345,11 +1578,49 @@ immigration_handle_insert_request(cf_node src, msg* m)
 		return;
 	}
 
-	msg_get_buf(m, MIG_FIELD_ORIG_RECORD, &rr.orig_pickle, &rr.orig_pickle_sz,
+	msg_get_buf(m, MIG_FIELD_ORIG_RECORD, &orig_buf, &orig_buf_sz,
 			MSG_GET_DIRECT);
+
+	if (compression == MIGRATE_COMPRESSION_ZSTD) {
+		rr.pickle_sz = zstd_wire_decompress_buffer((void**)&rr.pickle,
+				record_buf, record_sz);
+
+		if (orig_buf != NULL) {
+			rr.orig_pickle_sz =
+					zstd_wire_decompress_buffer((void**)&rr.orig_pickle,
+							orig_buf, orig_buf_sz);
+		}
+	}
+	else {
+		rr.pickle = record_buf;
+		rr.pickle_sz = record_sz;
+		rr.orig_pickle = orig_buf;
+		rr.orig_pickle_sz = orig_buf_sz;
+	}
+
+	// A well-formed frame that we can't decode means memory pressure or bytes
+	// corrupted between here and the emigrator's compress - nothing we can
+	// negotiate our way out of. Drop it like any other unusable record and let
+	// the reinserter retransmit.
+	if (rr.pickle_sz == 0 || (orig_buf != NULL && rr.orig_pickle_sz == 0)) {
+		cf_warning(AS_MIGRATE, "handle insert: failed to decompress record");
+		// Free-keying must match alloc-keying (== ZSTD): only the codec path
+		// allocates - the else-branch pointers are owned by the msg.
+		if (compression == MIGRATE_COMPRESSION_ZSTD) {
+			cf_free(rr.pickle);
+			cf_free(rr.orig_pickle);
+		}
+		immigration_release(immig);
+		as_fabric_msg_put(m);
+		return;
+	}
 
 	if (! as_flat_unpack_remote_record_meta(rr.rsv->ns, &rr)) {
 		cf_warning(AS_MIGRATE, "handle insert: got bad record");
+		if (compression == MIGRATE_COMPRESSION_ZSTD) {
+			cf_free(rr.pickle);
+			cf_free(rr.orig_pickle);
+		}
 		immigration_release(immig);
 		as_fabric_msg_put(m);
 		return;
@@ -1367,20 +1638,22 @@ immigration_handle_insert_request(cf_node src, msg* m)
 	if (! (rv == AS_OK ||
 				// Migrations just treat these errors as successful no-ops:
 				rv == AS_ERR_RECORD_EXISTS || rv == AS_ERR_GENERATION)) {
+		if (compression == MIGRATE_COMPRESSION_ZSTD) {
+			cf_free(rr.pickle);
+			cf_free(rr.orig_pickle);
+		}
 		immigration_release(immig);
 		as_fabric_msg_put(m);
 		return;
 	}
 
-	immigration_release(immig);
-
-	msg_preserve_fields(m, 2, MIG_FIELD_EMIG_INSERT_ID, MIG_FIELD_EMIG_ID);
-
-	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_INSERT_ACK);
-
-	if (as_fabric_send(src, m, AS_FABRIC_CHANNEL_BULK) != AS_FABRIC_SUCCESS) {
-		as_fabric_msg_put(m);
+	if (compression == MIGRATE_COMPRESSION_ZSTD) {
+		cf_free(rr.pickle);
+		cf_free(rr.orig_pickle);
 	}
+
+	immigration_release(immig);
+	immigration_ack_insert_request(src, m);
 }
 
 void
@@ -1544,9 +1817,32 @@ emigration_handle_insert_ack(cf_node src, msg* m)
 	if (cf_shash_get_vlock(emig->reinsert_hash, &insert_id, (void**)&ri_ctrl,
 				&vlock) == CF_SHASH_OK) {
 		if (src == emig->dest) {
+			// An insert is acked only when the peer applied the record, so an
+			// ack always retires it. Anything the peer couldn't apply - a
+			// record it couldn't decompress included - is dropped there
+			// unacked, leaving this entry for the reinserter to retransmit.
+
 			if ((int32_t)as_aaf_uint32(&emig->bytes_emigrating,
 						-(int32_t)msg_get_wire_size(ri_ctrl->m)) < 0) {
 				cf_warning(AS_MIGRATE, "bytes_emigrating less than zero");
+			}
+
+			// Sample emigrate latency from first-send to ack. Gated on
+			// migrate_benchmarks_enabled so production clusters pay
+			// nothing; the histogram itself is always created so the
+			// flag can be flipped dynamically without restart.
+			as_namespace* ns = emig->rsv.ns;
+			if (ns->migrate_benchmarks_enabled && ri_ctrl->start_ns != 0) {
+				histogram_insert_data_point(ns->migrate_emigrate_hist,
+						ri_ctrl->start_ns);
+			}
+
+			// Credit bytes saved on the wire only now that the compressed
+			// send has landed - the counter tracks bytes actually saved, not
+			// bytes we hoped to save. Zero for a plain send.
+			if (ri_ctrl->bytes_saved != 0) {
+				as_add_uint64(&ns->migrate_wire_comp_stat.bytes_saved,
+						ri_ctrl->bytes_saved);
 			}
 
 			as_fabric_msg_put(ri_ctrl->m);
@@ -1586,6 +1882,12 @@ emigration_handle_ctrl_ack(cf_node src, msg* m, uint32_t op)
 	if (cf_rchash_get(g_emigration_hash, (void*)&emig_id, (void**)&emig) ==
 			CF_RCHASH_OK) {
 		if (emig->dest == src) {
+			if (op == OPERATION_START_ACK_OK) {
+				// Paired atomic store; the emigration worker reads this via
+				// as_load_uint32 in emigrate_tree_reduce_fn.
+				as_store_uint32(&emig->features, immig_features);
+			}
+
 			if ((immig_features & MIG_FEATURE_MERGE) == 0) {
 				// TODO - rethink where this should go after further refactor.
 				if (op == OPERATION_START_ACK_OK && emig->meta_q) {

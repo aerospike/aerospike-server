@@ -132,6 +132,42 @@ as_flat_unpack_remote_record_meta(as_namespace* ns, as_remote_record* rr)
 	return true;
 }
 
+bool
+as_flat_pickle_is_storage_compressed(const uint8_t* pickle, uint32_t pickle_sz)
+{
+	if (pickle == NULL || pickle_sz < sizeof(as_flat_record)) {
+		return false;
+	}
+
+	const as_flat_record* flat = (const as_flat_record*)pickle;
+	const uint8_t* end = pickle + pickle_sz;
+	as_flat_opt_meta opt_meta = { { 0 } };
+
+	return as_flat_unpack_record_meta(flat, end, &opt_meta) != NULL &&
+			opt_meta.cm.method != AS_COMPRESSION_NONE;
+}
+
+void
+as_flat_make_delta_canonical(void* dst, const void* src, uint32_t size)
+{
+	memcpy(dst, src, size);
+
+	// tree_id is per-partition-per-node — master and replica generally have
+	// different values for the same partition. zstd_wire would see the byte
+	// differ and the patch would fail to apply. Zero it before computing /
+	// applying the patch; the receiver's storage path stamps the local
+	// tree_id when the pickle is written back to disk.
+	((as_flat_record*)dst)->tree_id = 0;
+}
+
+void
+as_flat_canonicalize_delta_inplace(void* flat)
+{
+	// In-place tree_id neutralisation - see as_flat_make_delta_canonical() for
+	// why. The caller owns this buffer, so no copy is needed.
+	((as_flat_record*)flat)->tree_id = 0;
+}
+
 // Caller has already checked that end is within read buffer.
 const uint8_t*
 as_flat_unpack_record_meta(const as_flat_record* flat, const uint8_t* end,

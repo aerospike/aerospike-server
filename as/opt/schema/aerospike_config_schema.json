@@ -388,6 +388,13 @@
           "dynamic": true,
           "enterpriseOnly": false
         },
+        "enable-benchmarks-wire-compression": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable wire-compression codec profiling counters (compress/decompress CPU and call counts).",
+          "dynamic": true,
+          "enterpriseOnly": false
+        },
         "enable-health-check": {
           "type": "boolean",
           "default": false,
@@ -738,6 +745,26 @@
           "description": "",
           "dynamic": true,
           "enterpriseOnly": false
+        },
+        "smd-compression-mode": {
+          "type": "string",
+          "default": "none",
+          "description": "zstd compression policy for SMD full-sync messages. Independent of replication-compression-mode and migrate-compression-mode.",
+          "dynamic": true,
+          "enterpriseOnly": true,
+          "enum": [
+            "none",
+            "zstd"
+          ]
+        },
+        "smd-compression-level": {
+          "type": "integer",
+          "default": 1,
+          "minimum": -10,
+          "maximum": 22,
+          "description": "zstd compression level used for SMD full-sync messages when smd-compression-mode is zstd.",
+          "dynamic": true,
+          "enterpriseOnly": true
         },
         "stay-quiesced": {
           "type": "boolean",
@@ -1940,6 +1967,61 @@
               "description": "",
               "dynamic": true,
               "enterpriseOnly": false
+            },
+            "enable-benchmarks-migrate": {
+              "type": "boolean",
+              "default": false,
+              "description": "Enable the {ns}-migrate-emigrate latency histogram. Sampled at the migration insert-ack receipt path, capturing time from first send attempt to successful ack (retransmits included). Read via 'asinfo -v latencies:hist=benchmarks-migrate'.",
+              "dynamic": true,
+              "enterpriseOnly": false
+            },
+            "enable-benchmarks-repl": {
+              "type": "boolean",
+              "default": false,
+              "description": "Enable the {ns}-repl-write latency histogram. Sampled at every replica-write ack receipt across all transaction types (writes, UDF, batch sub-transactions, etc.). Read via 'asinfo -v latencies:hist=benchmarks-repl'. Distinct from the per-transaction-type *_repl_write_hist set covered by enable-benchmarks-write etc.",
+              "dynamic": true,
+              "enterpriseOnly": false
+            },
+            "replication-compression-mode": {
+              "type": "string",
+              "default": "none",
+              "description": "zstd compression policy for replica writes. 'zstd' compresses each replicated record pickle; 'delta-zstd' ships a zstd binary diff against the replica's prior version of the record (falling back to a full pickle when there is no prior version or the diff fails). Independent of migrate-compression-mode.",
+              "dynamic": true,
+              "enterpriseOnly": true,
+              "enum": [
+                "none",
+                "zstd",
+                "delta-zstd"
+              ]
+            },
+            "replication-compression-level": {
+              "type": "integer",
+              "default": 1,
+              "minimum": -10,
+              "maximum": 22,
+              "description": "zstd compression level used for replica writes when replication-compression-mode is zstd or delta-zstd.",
+              "dynamic": true,
+              "enterpriseOnly": true
+            },
+            "migrate-compression-mode": {
+              "type": "string",
+              "default": "none",
+              "description": "zstd compression policy for migration. Independent of replication-compression-mode.",
+              "dynamic": true,
+              "enterpriseOnly": true,
+              "enum": [
+                "none",
+                "zstd"
+              ]
+            },
+            "migrate-compression-level": {
+              "type": "integer",
+              "default": 1,
+              "minimum": -10,
+              "maximum": 22,
+              "description": "zstd compression level used for migration when migrate-compression-mode is zstd.",
+              "dynamic": true,
+              "enterpriseOnly": true
             },
             "enable-hist-proxy": {
               "type": "boolean",

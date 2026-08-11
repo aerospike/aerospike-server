@@ -301,6 +301,8 @@ repl_write_should_retransmit_replicas(rw_request* rw, uint32_t result_code)
 	case AS_ERR_CLUSTER_KEY_MISMATCH:
 		rw->xmit_ms = 0; // force retransmit on next cycle
 		return true;
+	case AS_ERR_RECORD_VERSION_MISMATCH:
+		return true;
 	default:
 		return false;
 	}

@@ -78,6 +78,7 @@
 #include "base/transaction_policy.h"
 #include "base/truncate.h"
 #include "base/xdr.h"
+#include "base/zstd_wire.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
 #include "fabric/migrate.h"
@@ -174,6 +175,7 @@ cfg_set_defaults()
 			true; // set false only to run in debugger & see console output
 	c->sindex_builder_threads = 4;
 	c->sindex_gc_period = 10; // every 10 seconds
+	c->smd_compression_level = 1; // default compression level for SMD full sync
 	c->ticker_interval = 10;
 	c->transaction_max_ns = 1000 * 1000 * 1000; // 1 second
 	c->transaction_retry_ms =
@@ -271,6 +273,7 @@ typedef enum {
 	CASE_SERVICE_DEBUG_ALLOCATIONS,
 	CASE_SERVICE_DISABLE_UDF_EXECUTION,
 	CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC,
+	CASE_SERVICE_ENABLE_BENCHMARKS_WIRE_COMPRESSION,
 	CASE_SERVICE_ENABLE_HEALTH_CHECK,
 	CASE_SERVICE_ENABLE_HIST_INFO,
 	CASE_SERVICE_ENFORCE_BEST_PRACTICES,
@@ -305,6 +308,8 @@ typedef enum {
 	CASE_SERVICE_SERVICE_THREADS,
 	CASE_SERVICE_SINDEX_BUILDER_THREADS,
 	CASE_SERVICE_SINDEX_GC_PERIOD,
+	CASE_SERVICE_SMD_COMPRESSION_MODE,
+	CASE_SERVICE_SMD_COMPRESSION_LEVEL,
 	CASE_SERVICE_STAY_QUIESCED,
 	CASE_SERVICE_TICKER_INTERVAL,
 	CASE_SERVICE_TLS_REFRESH_PERIOD,
@@ -340,6 +345,10 @@ typedef enum {
 	CASE_SERVICE_ERROR_DETAILS_MAX_VERBOSITY_CODES,
 	CASE_SERVICE_ERROR_DETAILS_MAX_VERBOSITY_MESSAGES,
 	CASE_SERVICE_ERROR_DETAILS_MAX_VERBOSITY_ALL,
+
+	// Service smd-compression-mode options (value tokens):
+	CASE_SERVICE_SMD_COMPRESSION_MODE_NONE,
+	CASE_SERVICE_SMD_COMPRESSION_MODE_ZSTD,
 
 	// Logging options:
 	// Sub-contexts:
@@ -475,6 +484,12 @@ typedef enum {
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF,
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF_SUB,
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_WRITE,
+	CASE_NAMESPACE_ENABLE_BENCHMARKS_MIGRATE,
+	CASE_NAMESPACE_ENABLE_BENCHMARKS_REPL,
+	CASE_NAMESPACE_REPLICATION_COMPRESSION_MODE,
+	CASE_NAMESPACE_REPLICATION_COMPRESSION_LEVEL,
+	CASE_NAMESPACE_MIGRATE_COMPRESSION_MODE,
+	CASE_NAMESPACE_MIGRATE_COMPRESSION_LEVEL,
 	CASE_NAMESPACE_ENABLE_HIST_PROXY,
 	CASE_NAMESPACE_EVICT_HIST_BUCKETS,
 	CASE_NAMESPACE_EVICT_INDEXES_MEMORY_PCT,
@@ -544,6 +559,16 @@ typedef enum {
 	CASE_NAMESPACE_WRITE_COMMIT_ALL,
 	CASE_NAMESPACE_WRITE_COMMIT_MASTER,
 	CASE_NAMESPACE_WRITE_COMMIT_OFF,
+
+	// Namespace replication-compression-mode options:
+	CASE_NAMESPACE_REPLICATION_COMPRESSION_MODE_NONE,
+	CASE_NAMESPACE_REPLICATION_COMPRESSION_MODE_ZSTD,
+	CASE_NAMESPACE_REPLICATION_COMPRESSION_MODE_DELTA_ZSTD,
+
+	// Namespace migrate-compression-mode options (no delta — migration ships
+	// full records). Opt-in: default NONE, set ZSTD to enable.
+	CASE_NAMESPACE_MIGRATE_COMPRESSION_MODE_NONE,
+	CASE_NAMESPACE_MIGRATE_COMPRESSION_MODE_ZSTD,
 
 	// Namespace index-type options (value tokens):
 	CASE_NAMESPACE_INDEX_TYPE_SHMEM,
@@ -866,6 +891,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "debug-allocations",				CASE_SERVICE_DEBUG_ALLOCATIONS },
 		{ "disable-udf-execution",			CASE_SERVICE_DISABLE_UDF_EXECUTION },
 		{ "enable-benchmarks-fabric",		CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC },
+		{ "enable-benchmarks-wire-compression",	CASE_SERVICE_ENABLE_BENCHMARKS_WIRE_COMPRESSION },
 		{ "enable-health-check",			CASE_SERVICE_ENABLE_HEALTH_CHECK },
 		{ "enable-hist-info",				CASE_SERVICE_ENABLE_HIST_INFO },
 		{ "enforce-best-practices",			CASE_SERVICE_ENFORCE_BEST_PRACTICES },
@@ -900,6 +926,8 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "service-threads",				CASE_SERVICE_SERVICE_THREADS },
 		{ "sindex-builder-threads",			CASE_SERVICE_SINDEX_BUILDER_THREADS },
 		{ "sindex-gc-period",				CASE_SERVICE_SINDEX_GC_PERIOD },
+		{ "smd-compression-mode",			CASE_SERVICE_SMD_COMPRESSION_MODE },
+		{ "smd-compression-level",			CASE_SERVICE_SMD_COMPRESSION_LEVEL },
 		{ "stay-quiesced",					CASE_SERVICE_STAY_QUIESCED },
 		{ "ticker-interval",				CASE_SERVICE_TICKER_INTERVAL },
 		{ "tls-refresh-period",				CASE_SERVICE_TLS_REFRESH_PERIOD },
@@ -938,6 +966,11 @@ const cfg_opt SERVICE_ERROR_DETAILS_MAX_VERBOSITY_OPTS[] = {
 		{ "codes",							CASE_SERVICE_ERROR_DETAILS_MAX_VERBOSITY_CODES },
 		{ "messages",						CASE_SERVICE_ERROR_DETAILS_MAX_VERBOSITY_MESSAGES },
 		{ "all",							CASE_SERVICE_ERROR_DETAILS_MAX_VERBOSITY_ALL }
+};
+
+const cfg_opt SERVICE_SMD_COMPRESSION_MODE_OPTS[] = {
+		{ "none",							CASE_SERVICE_SMD_COMPRESSION_MODE_NONE },
+		{ "zstd",							CASE_SERVICE_SMD_COMPRESSION_MODE_ZSTD }
 };
 
 const cfg_opt LOGGING_OPTS[] = {
@@ -1098,6 +1131,12 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "enable-benchmarks-udf",			CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF },
 		{ "enable-benchmarks-udf-sub",		CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF_SUB },
 		{ "enable-benchmarks-write",		CASE_NAMESPACE_ENABLE_BENCHMARKS_WRITE },
+		{ "enable-benchmarks-migrate",		CASE_NAMESPACE_ENABLE_BENCHMARKS_MIGRATE },
+		{ "enable-benchmarks-repl",			CASE_NAMESPACE_ENABLE_BENCHMARKS_REPL },
+		{ "replication-compression-mode",	CASE_NAMESPACE_REPLICATION_COMPRESSION_MODE },
+		{ "replication-compression-level",	CASE_NAMESPACE_REPLICATION_COMPRESSION_LEVEL },
+		{ "migrate-compression-mode",		CASE_NAMESPACE_MIGRATE_COMPRESSION_MODE },
+		{ "migrate-compression-level",		CASE_NAMESPACE_MIGRATE_COMPRESSION_LEVEL },
 		{ "enable-hist-proxy",				CASE_NAMESPACE_ENABLE_HIST_PROXY },
 		{ "evict-hist-buckets",				CASE_NAMESPACE_EVICT_HIST_BUCKETS },
 		{ "evict-indexes-memory-pct",		CASE_NAMESPACE_EVICT_INDEXES_MEMORY_PCT },
@@ -1171,6 +1210,17 @@ const cfg_opt NAMESPACE_WRITE_COMMIT_OPTS[] = {
 		{ "all",							CASE_NAMESPACE_WRITE_COMMIT_ALL },
 		{ "master",							CASE_NAMESPACE_WRITE_COMMIT_MASTER },
 		{ "off",							CASE_NAMESPACE_WRITE_COMMIT_OFF }
+};
+
+const cfg_opt NAMESPACE_REPLICATION_COMPRESSION_MODE_OPTS[] = {
+		{ "none",							CASE_NAMESPACE_REPLICATION_COMPRESSION_MODE_NONE },
+		{ "zstd",							CASE_NAMESPACE_REPLICATION_COMPRESSION_MODE_ZSTD },
+		{ "delta-zstd",						CASE_NAMESPACE_REPLICATION_COMPRESSION_MODE_DELTA_ZSTD }
+};
+
+const cfg_opt NAMESPACE_MIGRATE_COMPRESSION_MODE_OPTS[] = {
+		{ "none",							CASE_NAMESPACE_MIGRATE_COMPRESSION_MODE_NONE },
+		{ "zstd",							CASE_NAMESPACE_MIGRATE_COMPRESSION_MODE_ZSTD }
 };
 
 const cfg_opt NAMESPACE_INDEX_TYPE_OPTS[] = {
@@ -1504,6 +1554,7 @@ const int NUM_GLOBAL_OPTS							= sizeof(GLOBAL_OPTS) / sizeof(cfg_opt);
 const int NUM_SERVICE_OPTS							= sizeof(SERVICE_OPTS) / sizeof(cfg_opt);
 const int NUM_SERVICE_AUTO_PIN_OPTS					= sizeof(SERVICE_AUTO_PIN_OPTS) / sizeof(cfg_opt);
 const int NUM_SERVICE_ERROR_DETAILS_MAX_VERBOSITY_OPTS = sizeof(SERVICE_ERROR_DETAILS_MAX_VERBOSITY_OPTS) / sizeof(cfg_opt);
+const int NUM_SERVICE_SMD_COMPRESSION_MODE_OPTS		= sizeof(SERVICE_SMD_COMPRESSION_MODE_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_OPTS							= sizeof(LOGGING_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_CONTEXT_OPTS					= sizeof(LOGGING_CONTEXT_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_SYSLOG_OPTS					= sizeof(LOGGING_SYSLOG_OPTS) / sizeof(cfg_opt);
@@ -1520,6 +1571,8 @@ const int NUM_NAMESPACE_OPTS						= sizeof(NAMESPACE_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_CONFLICT_RESOLUTION_OPTS	= sizeof(NAMESPACE_CONFLICT_RESOLUTION_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_READ_CONSISTENCY_OPTS		= sizeof(NAMESPACE_READ_CONSISTENCY_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_WRITE_COMMIT_OPTS			= sizeof(NAMESPACE_WRITE_COMMIT_OPTS) / sizeof(cfg_opt);
+const int NUM_NAMESPACE_REPLICATION_COMPRESSION_MODE_OPTS = sizeof(NAMESPACE_REPLICATION_COMPRESSION_MODE_OPTS) / sizeof(cfg_opt);
+const int NUM_NAMESPACE_MIGRATE_COMPRESSION_MODE_OPTS = sizeof(NAMESPACE_MIGRATE_COMPRESSION_MODE_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_INDEX_TYPE_OPTS				= sizeof(NAMESPACE_INDEX_TYPE_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SINDEX_TYPE_OPTS			= sizeof(NAMESPACE_SINDEX_TYPE_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_STORAGE_OPTS				= sizeof(NAMESPACE_STORAGE_OPTS) / sizeof(cfg_opt);
@@ -1969,6 +2022,25 @@ cfg_u32_multiple_of(const cfg_line* p_line, uint32_t factor)
 	return value;
 }
 
+static int32_t
+cfg_i32(const cfg_line* p_line, int32_t min, int32_t max)
+{
+	if (*p_line->val_tok_1 == '\0') {
+		cf_crash_nostack(AS_CFG, "line %d :: %s must specify an integer value",
+				p_line->num, p_line->name_tok);
+	}
+
+	int value;
+
+	if (cf_str_atoi(p_line->val_tok_1, &value) != 0 || value < min ||
+			value > max) {
+		cf_crash_nostack(AS_CFG, "line %d :: %s must be >= %d and <= %d, not %s",
+				p_line->num, p_line->name_tok, min, max, p_line->val_tok_1);
+	}
+
+	return (int32_t)value;
+}
+
 static uint16_t
 cfg_u16_no_checks(const cfg_line* p_line)
 {
@@ -2357,6 +2429,9 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC:
 				c->fabric_benchmarks_enabled = cfg_bool(&line);
 				break;
+			case CASE_SERVICE_ENABLE_BENCHMARKS_WIRE_COMPRESSION:
+				zstd_wire_set_benchmarks_enabled(cfg_bool(&line));
+				break;
 			case CASE_SERVICE_ENABLE_HEALTH_CHECK:
 				c->health_check_enabled = cfg_bool(&line);
 				break;
@@ -2507,6 +2582,27 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_SINDEX_GC_PERIOD:
 				c->sindex_gc_period = cfg_u32_no_checks(&line);
+				break;
+			case CASE_SERVICE_SMD_COMPRESSION_MODE:
+				cfg_enterprise_only(&line);
+				switch (cfg_find_tok(line.val_tok_1,
+						SERVICE_SMD_COMPRESSION_MODE_OPTS,
+						NUM_SERVICE_SMD_COMPRESSION_MODE_OPTS)) {
+				case CASE_SERVICE_SMD_COMPRESSION_MODE_NONE:
+					c->smd_compression_mode = AS_SMD_COMPRESSION_MODE_NONE;
+					break;
+				case CASE_SERVICE_SMD_COMPRESSION_MODE_ZSTD:
+					c->smd_compression_mode = AS_SMD_COMPRESSION_MODE_ZSTD;
+					break;
+				case CASE_NOT_FOUND:
+				default:
+					cfg_unknown_val_tok_1(&line);
+					break;
+				}
+				break;
+			case CASE_SERVICE_SMD_COMPRESSION_LEVEL:
+				cfg_enterprise_only(&line);
+				c->smd_compression_level = cfg_i32(&line, -10, 22);
 				break;
 			case CASE_SERVICE_STAY_QUIESCED:
 				cfg_enterprise_only(&line);
@@ -3213,6 +3309,62 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_ENABLE_BENCHMARKS_WRITE:
 				ns->write_benchmarks_enabled = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_ENABLE_BENCHMARKS_MIGRATE:
+				ns->migrate_benchmarks_enabled = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_ENABLE_BENCHMARKS_REPL:
+				ns->repl_benchmarks_enabled = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_REPLICATION_COMPRESSION_MODE:
+				cfg_enterprise_only(&line);
+				switch (cfg_find_tok(line.val_tok_1,
+						NAMESPACE_REPLICATION_COMPRESSION_MODE_OPTS,
+						NUM_NAMESPACE_REPLICATION_COMPRESSION_MODE_OPTS)) {
+				case CASE_NAMESPACE_REPLICATION_COMPRESSION_MODE_NONE:
+					ns->repl_compression_mode =
+							AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_NONE;
+					break;
+				case CASE_NAMESPACE_REPLICATION_COMPRESSION_MODE_ZSTD:
+					ns->repl_compression_mode =
+							AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_ZSTD;
+					break;
+				case CASE_NAMESPACE_REPLICATION_COMPRESSION_MODE_DELTA_ZSTD:
+					ns->repl_compression_mode =
+							AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_DELTA_ZSTD;
+					break;
+				case CASE_NOT_FOUND:
+				default:
+					cfg_unknown_val_tok_1(&line);
+					break;
+				}
+				break;
+			case CASE_NAMESPACE_REPLICATION_COMPRESSION_LEVEL:
+				cfg_enterprise_only(&line);
+				ns->repl_compression_level = cfg_i32(&line, -10, 22);
+				break;
+			case CASE_NAMESPACE_MIGRATE_COMPRESSION_MODE:
+				cfg_enterprise_only(&line);
+				switch (cfg_find_tok(line.val_tok_1,
+						NAMESPACE_MIGRATE_COMPRESSION_MODE_OPTS,
+						NUM_NAMESPACE_MIGRATE_COMPRESSION_MODE_OPTS)) {
+				case CASE_NAMESPACE_MIGRATE_COMPRESSION_MODE_NONE:
+					ns->migrate_compression_mode =
+							AS_NAMESPACE_MIGRATE_COMPRESSION_MODE_NONE;
+					break;
+				case CASE_NAMESPACE_MIGRATE_COMPRESSION_MODE_ZSTD:
+					ns->migrate_compression_mode =
+							AS_NAMESPACE_MIGRATE_COMPRESSION_MODE_ZSTD;
+					break;
+				case CASE_NOT_FOUND:
+				default:
+					cfg_unknown_val_tok_1(&line);
+					break;
+				}
+				break;
+			case CASE_NAMESPACE_MIGRATE_COMPRESSION_LEVEL:
+				cfg_enterprise_only(&line);
+				ns->migrate_compression_level = cfg_i32(&line, -10, 22);
 				break;
 			case CASE_NAMESPACE_ENABLE_HIST_PROXY:
 				ns->proxy_hist_enabled = cfg_bool(&line);
@@ -4831,7 +4983,8 @@ as_config_post_process(as_config* c, const char* config_file)
 	cfg_post_process();
 
 	if (! c->mod_lua.unsafe_lua_disabled) {
-		cf_warning(AS_CFG, "mod-lua: allow-unsafe-lua is true - Lua UDFs have "
+		cf_warning(AS_CFG,
+				"mod-lua: allow-unsafe-lua is true - Lua UDFs have "
 				"access to os/io/debug and can load native .so modules; set "
 				"allow-unsafe-lua false in the mod-lua stanza to harden the "
 				"UDF sandbox");
@@ -5255,6 +5408,20 @@ as_config_post_process(as_config* c, const char* config_file)
 		ns->ops_sub_repl_write_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-ops-sub-response", ns->name);
 		ns->ops_sub_response_hist = histogram_create(hist_name, scale);
+
+		// Migration latency histogram — separate scope from
+		// enable-benchmarks-write because migration is its own data
+		// path with its own SLOs. Captures per-record emigrate time
+		// (first send → ack) sampled in migrate.c.
+		sprintf(hist_name, "{%s}-migrate-emigrate", ns->name);
+		ns->migrate_emigrate_hist = histogram_create(hist_name, scale);
+
+		// Replication-write latency histogram — separate from the
+		// per-transaction-type *_repl_write_hist set. Captures every
+		// replica-write ack regardless of which transaction class
+		// originated it. Gated on enable-benchmarks-repl.
+		sprintf(hist_name, "{%s}-repl-write", ns->name);
+		ns->repl_write_hist = histogram_create(hist_name, scale);
 
 		// 'nsup' histograms.
 
@@ -5889,6 +6056,8 @@ cfg_create_all_histograms()
 			histogram_create("batch-rec-count", HIST_COUNT);
 
 	g_stats.info_hist = histogram_create("info", scale);
+
+	zstd_wire_histograms_init(scale);
 
 	g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_BULK] =
 			histogram_create("fabric-bulk-send-init", scale);

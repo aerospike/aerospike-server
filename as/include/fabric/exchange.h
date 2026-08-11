@@ -61,8 +61,24 @@
  *      stand-in message and would treat its empty payload as an authoritative
  *      full replace, wiping already-converged local SMD. smd_mixed_cluster()
  *      must see a real id bump to gate the optimization away from such nodes.
+ * 17 - SERVER-487 - for wire compression: zstd-compressed SMD full sync
+ *      messages (SMD_FULL_ZSTD_COMPATIBILITY_ID) and the
+ *      RW_OP_REPL_WRITE_DELTA / RW_OP_REPL_WRITE_COMPRESSED replica ops
+ *      (RW_WIRE_COMPRESSION_COMPATIBILITY_ID).
+ *
+ *      This gets its own id rather than sharing 16 with SERVER-209. Sharing
+ *      would make both gates blind: min_compatibility_id is a single scalar
+ *      with no per-feature bits, and master already advertises 16 with
+ *      SERVER-209 merged and wire compression not. A build cut from that
+ *      state - a release where wire compression slips, an AER-6940 backport,
+ *      or a mixed-version dev cluster - reports 16 with zero wire-compression
+ *      code. The gate would pass, the master would emit an op the peer drops
+ *      at rw_msg_cb()'s default case, and because the plain-pickle fallback is
+ *      ack-driven, nothing would ever downgrade it: replication retransmits
+ *      that record forever. One id per independently-mergeable capability is
+ *      what keeps the gate meaningful.
  */
-#define AS_EXCHANGE_COMPATIBILITY_ID 16
+#define AS_EXCHANGE_COMPATIBILITY_ID 17
 
 /**
  * Number of quantum intervals in orphan state after which client transactions

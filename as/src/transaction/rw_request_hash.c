@@ -533,6 +533,16 @@ rw_msg_cb(cf_node id, msg* m, void* udata)
 	case RW_OP_REPL_WRITE:
 		repl_write_handle_op(id, m);
 		break;
+	case RW_OP_REPL_WRITE_DELTA:
+		cf_debug(AS_RW,
+				"repl_write_delta_handle_op: handling delta replica write");
+		repl_write_delta_handle_op(id, m);
+		break;
+	case RW_OP_REPL_WRITE_COMPRESSED:
+		cf_debug(AS_RW,
+				"repl_write_compressed_handle_op: handling compressed replica write");
+		repl_write_compressed_handle_op(id, m);
+		break;
 	case RW_OP_WRITE_ACK:
 		repl_write_handle_ack(id, m);
 		break;

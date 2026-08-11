@@ -99,6 +99,10 @@ as_namespace_create(const char* name)
 	ns->apply_ttl_reductions =
 			true; // TODO - may want to make this false by default later
 	ns->background_query_max_rps = 10000; // internal write generation limit
+	ns->repl_compression_level =
+			1; // default compression level for full replication compression
+	ns->migrate_compression_level = 1; // default compression level for migration
+	// ns->migrate_compression_mode defaults to NONE via zero-init.
 	ns->conflict_resolution_policy =
 			AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_UNDEF;
 	ns->evict_hist_buckets =

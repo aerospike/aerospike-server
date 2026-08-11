@@ -350,6 +350,25 @@ static void* run_fabric_accept(void* arg);
 static int fabric_rate_node_reduce_fn(const void* key, void* data, void* udata);
 static int fabric_rate_fc_reduce_fn(const void* key, void* data, void* udata);
 
+// Bytes-total capture helpers.
+static int fabric_bytes_total_node_reduce_fn(const void* key, void* data,
+		void* udata);
+static int fabric_bytes_total_fc_reduce_fn(const void* key, void* data,
+		void* udata);
+
+// Cumulative bytes from connections that have already been released.
+// Updated atomically in fabric_connection_release() so the live-plus-closed
+// total stays monotonic as peers churn.
+static uint64_t g_fabric_bytes_sent_closed[AS_FABRIC_N_CHANNELS];
+static uint64_t g_fabric_bytes_received_closed[AS_FABRIC_N_CHANNELS];
+
+// Output bookkeeping for as_fabric_bytes_total_capture() — held during a
+// single capture pass and read by the per-fc reduce fn.
+typedef struct {
+	uint64_t s_bytes[AS_FABRIC_N_CHANNELS];
+	uint64_t r_bytes[AS_FABRIC_N_CHANNELS];
+} fabric_bytes_total;
+
 // Heartbeat.
 static void fabric_hb_plugin_set_fn(msg* m);
 static void fabric_hb_plugin_parse_data_fn(msg* m, cf_node source,
@@ -652,6 +671,23 @@ void
 as_fabric_rate_capture(fabric_rate* rate)
 {
 	cf_rchash_reduce(g_fabric.node_hash, fabric_rate_node_reduce_fn, rate);
+}
+
+void
+as_fabric_bytes_total_capture(uint64_t s_bytes[AS_FABRIC_N_CHANNELS],
+		uint64_t r_bytes[AS_FABRIC_N_CHANNELS])
+{
+	fabric_bytes_total totals = { { 0 }, { 0 } };
+
+	cf_rchash_reduce(g_fabric.node_hash, fabric_bytes_total_node_reduce_fn,
+			&totals);
+
+	for (uint32_t ch = 0; ch < AS_FABRIC_N_CHANNELS; ch++) {
+		s_bytes[ch] = totals.s_bytes[ch] +
+				as_load_uint64(&g_fabric_bytes_sent_closed[ch]);
+		r_bytes[ch] = totals.r_bytes[ch] +
+				as_load_uint64(&g_fabric_bytes_received_closed[ch]);
+	}
 }
 
 void
@@ -1453,6 +1489,18 @@ fabric_connection_release(fabric_connection* fc)
 {
 	if (cf_rc_release(fc) == 0) {
 		fabric_connection_reroute_msg(fc);
+
+		// Roll this connection's lifetime byte counts into the closed-
+		// connection accumulators so as_fabric_bytes_total_capture() keeps
+		// reporting a monotonic total after the fc is freed. Guard with
+		// a pool check — early-failure paths can release before pool is
+		// assigned, and we'd rather drop those bytes than read a NULL.
+		if (fc->pool != NULL && fc->pool->pool_id < AS_FABRIC_N_CHANNELS) {
+			uint32_t ch = fc->pool->pool_id;
+			as_add_uint64(&g_fabric_bytes_sent_closed[ch], (int64_t)fc->s_bytes);
+			as_add_uint64(&g_fabric_bytes_received_closed[ch],
+					(int64_t)fc->r_bytes);
+		}
 
 		if (fc->node != NULL) {
 			fabric_node_release(fc->node);
@@ -2543,6 +2591,44 @@ fabric_rate_fc_reduce_fn(const void* key, void* data, void* udata)
 
 	fc->r_bytes_last = r_bytes;
 	fc->s_bytes_last = s_bytes;
+
+	return 0;
+}
+
+static int
+fabric_bytes_total_node_reduce_fn(const void* key, void* data, void* udata)
+{
+	fabric_node* node = (fabric_node*)data;
+	fabric_bytes_total* totals = (fabric_bytes_total*)udata;
+
+	cf_mutex_lock(&node->fc_hash_lock);
+	cf_shash_reduce(node->fc_hash, fabric_bytes_total_fc_reduce_fn, totals);
+	cf_mutex_unlock(&node->fc_hash_lock);
+
+	return 0;
+}
+
+static int
+fabric_bytes_total_fc_reduce_fn(const void* key, void* data, void* udata)
+{
+	fabric_connection* fc = *(fabric_connection**)key;
+	fabric_bytes_total* totals = (fabric_bytes_total*)udata;
+
+	if (! fc->pool) {
+		return 0;
+	}
+
+	uint32_t pool_id = fc->pool->pool_id;
+
+	if (pool_id >= AS_FABRIC_N_CHANNELS) {
+		return 0;
+	}
+
+	// Unlike the rate path, we want the raw cumulative counters — no
+	// subtraction against fc->_bytes_last. Reading non-atomically is
+	// fine: the values only ever grow, and capture is a snapshot.
+	totals->s_bytes[pool_id] += fc->s_bytes;
+	totals->r_bytes[pool_id] += fc->r_bytes;
 
 	return 0;
 }

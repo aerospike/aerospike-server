@@ -79,6 +79,11 @@ typedef enum {
 	AS_ERROR_DETAILS_VERBOSITY_ALL = 3
 } as_error_details_verbosity;
 
+typedef enum {
+	AS_SMD_COMPRESSION_MODE_NONE = 0,
+	AS_SMD_COMPRESSION_MODE_ZSTD = 1
+} as_smd_compression_mode;
+
 typedef struct as_config_s {
 
 	// The order here matches that in the configuration parser's enum,
@@ -127,6 +132,8 @@ typedef struct as_config_s {
 	uint32_t n_service_threads;
 	uint32_t sindex_builder_threads; // secondary index builder thread pool size
 	uint32_t sindex_gc_period; // same as nsup_period for sindex gc
+	as_smd_compression_mode smd_compression_mode;
+	int32_t smd_compression_level;
 	bool stay_quiesced; // enterprise-only
 	uint32_t ticker_interval;
 	uint64_t transaction_max_ns;

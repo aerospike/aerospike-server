@@ -57,6 +57,7 @@
 #include "base/transaction_policy.h"
 #include "base/truncate.h"
 #include "base/xdr.h"
+#include "base/zstd_wire.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
 #include "fabric/migrate.h"
@@ -236,6 +237,8 @@ cfg_get_service(cf_dyn_buf* db)
 			g_config.udf_execution_disabled);
 	info_append_bool(db, "enable-benchmarks-fabric",
 			g_config.fabric_benchmarks_enabled);
+	info_append_bool(db, "enable-benchmarks-wire-compression",
+			zstd_wire_get_benchmarks_enabled());
 	info_append_bool(db, "enable-health-check", g_config.health_check_enabled);
 	info_append_bool(db, "enable-hist-info", g_config.info_hist_enabled);
 	info_append_bool(db, "enforce-best-practices",
@@ -299,6 +302,18 @@ cfg_get_service(cf_dyn_buf* db)
 	info_append_uint32(db, "sindex-builder-threads",
 			g_config.sindex_builder_threads);
 	info_append_uint32(db, "sindex-gc-period", g_config.sindex_gc_period);
+	switch (g_config.smd_compression_mode) {
+	case AS_SMD_COMPRESSION_MODE_NONE:
+		info_append_string(db, "smd-compression-mode", "none");
+		break;
+	case AS_SMD_COMPRESSION_MODE_ZSTD:
+		info_append_string(db, "smd-compression-mode", "zstd");
+		break;
+	default:
+		info_append_string(db, "smd-compression-mode", "unknown");
+		break;
+	}
+	info_append_int(db, "smd-compression-level", g_config.smd_compression_level);
 	info_append_bool(db, "stay-quiesced", g_config.stay_quiesced);
 	info_append_uint32(db, "ticker-interval", g_config.ticker_interval);
 	info_append_uint32(db, "tls-refresh-period", tls_get_refresh_period());
@@ -478,6 +493,38 @@ cfg_get_namespace(const as_namespace* ns, cf_dyn_buf* db)
 	info_append_bool(db, "enable-benchmarks-udf-sub",
 			ns->udf_sub_benchmarks_enabled);
 	info_append_bool(db, "enable-benchmarks-write", ns->write_benchmarks_enabled);
+	info_append_bool(db, "enable-benchmarks-migrate",
+			ns->migrate_benchmarks_enabled);
+	info_append_bool(db, "enable-benchmarks-repl", ns->repl_benchmarks_enabled);
+	switch (ns->repl_compression_mode) {
+	case AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_NONE:
+		info_append_string(db, "replication-compression-mode", "none");
+		break;
+	case AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_ZSTD:
+		info_append_string(db, "replication-compression-mode", "zstd");
+		break;
+	case AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_DELTA_ZSTD:
+		info_append_string(db, "replication-compression-mode", "delta-zstd");
+		break;
+	default:
+		info_append_string(db, "replication-compression-mode", "unknown");
+		break;
+	}
+	info_append_int(db, "replication-compression-level",
+			ns->repl_compression_level);
+	switch (ns->migrate_compression_mode) {
+	case AS_NAMESPACE_MIGRATE_COMPRESSION_MODE_NONE:
+		info_append_string(db, "migrate-compression-mode", "none");
+		break;
+	case AS_NAMESPACE_MIGRATE_COMPRESSION_MODE_ZSTD:
+		info_append_string(db, "migrate-compression-mode", "zstd");
+		break;
+	default:
+		info_append_string(db, "migrate-compression-mode", "unknown");
+		break;
+	}
+	info_append_int(db, "migrate-compression-level",
+			ns->migrate_compression_level);
 	info_append_bool(db, "enable-hist-proxy", ns->proxy_hist_enabled);
 	info_append_uint32(db, "evict-hist-buckets", ns->evict_hist_buckets);
 	info_append_uint32(db, "evict-indexes-memory-pct",
@@ -1043,6 +1090,24 @@ cfg_set_service(const char* cmd)
 			return false;
 		}
 	}
+	else if (as_info_parameter_get(cmd, "enable-benchmarks-wire-compression", v,
+					 &v_len) == 0) {
+		if (strcmp(v, "true") == 0) {
+			cf_info(AS_INFO,
+					"Changing value of enable-benchmarks-wire-compression to %s",
+					v);
+			zstd_wire_set_benchmarks_enabled(true);
+		}
+		else if (strcmp(v, "false") == 0) {
+			cf_info(AS_INFO,
+					"Changing value of enable-benchmarks-wire-compression to %s",
+					v);
+			zstd_wire_set_benchmarks_enabled(false);
+		}
+		else {
+			return false;
+		}
+	}
 	else if (as_info_parameter_get(cmd, "enable-health-check", v, &v_len) == 0) {
 		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-health-check to %s", v);
@@ -1272,6 +1337,42 @@ cfg_set_service(const char* cmd)
 		cf_info(AS_INFO, "Changing value of sindex-gc-period from %d to %d ",
 				g_config.sindex_gc_period, val);
 		g_config.sindex_gc_period = (uint32_t)val;
+	}
+	else if (as_info_parameter_get(cmd, "smd-compression-mode", v, &v_len) == 0) {
+		if (as_error_enterprise_only()) {
+			cf_warning(AS_INFO, "smd-compression-mode is enterprise-only");
+			return false;
+		}
+		as_smd_compression_mode old_mode = g_config.smd_compression_mode;
+
+		if (strcmp(v, "none") == 0) {
+			g_config.smd_compression_mode = AS_SMD_COMPRESSION_MODE_NONE;
+		}
+		else if (strcmp(v, "zstd") == 0) {
+			g_config.smd_compression_mode = AS_SMD_COMPRESSION_MODE_ZSTD;
+		}
+		else {
+			return false;
+		}
+
+		const char* old_val = old_mode == AS_SMD_COMPRESSION_MODE_NONE ? "none"
+				: old_mode == AS_SMD_COMPRESSION_MODE_ZSTD			   ? "zstd"
+														   : "unknown";
+
+		cf_info(AS_INFO, "Changing value of smd-compression-mode from %s to %s",
+				old_val, v);
+	}
+	else if (as_info_parameter_get(cmd, "smd-compression-level", v, &v_len) == 0) {
+		if (as_error_enterprise_only()) {
+			cf_warning(AS_INFO, "smd-compression-level is enterprise-only");
+			return false;
+		}
+		if (cf_str_atoi(v, &val) != 0 || val < -10 || val > 22) {
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of smd-compression-level from %d to %d",
+				g_config.smd_compression_level, val);
+		g_config.smd_compression_level = val;
 	}
 	else if (as_info_parameter_get(cmd, "ticker-interval", v, &v_len) == 0) {
 		if (cf_str_atoi(v, &val) != 0) {
@@ -1860,6 +1961,155 @@ cfg_set_namespace(const char* cmd, as_namespace* ns)
 		else {
 			return false;
 		}
+	}
+	else if (as_info_parameter_get(cmd, "enable-benchmarks-migrate", v,
+					 &v_len) == 0) {
+		if (strcmp(v, "true") == 0) {
+			cf_info(AS_INFO,
+					"Changing value of enable-benchmarks-migrate of ns %s from %s to %s",
+					ns->name, bool_val[ns->migrate_benchmarks_enabled], v);
+			if (! ns->migrate_benchmarks_enabled) {
+				// Rescale to the current microsecond-histograms setting so
+				// the operator can flip msec↔usec before turning the flag
+				// on. histogram_rescale also clears the buckets.
+				histogram_rescale(ns->migrate_emigrate_hist,
+						as_config_histogram_scale());
+			}
+			ns->migrate_benchmarks_enabled = true;
+		}
+		else if (strcmp(v, "false") == 0) {
+			cf_info(AS_INFO,
+					"Changing value of enable-benchmarks-migrate of ns %s from %s to %s",
+					ns->name, bool_val[ns->migrate_benchmarks_enabled], v);
+			ns->migrate_benchmarks_enabled = false;
+			histogram_rescale(ns->migrate_emigrate_hist,
+					as_config_histogram_scale());
+		}
+		else {
+			return false;
+		}
+	}
+	else if (as_info_parameter_get(cmd, "enable-benchmarks-repl", v, &v_len) ==
+			0) {
+		if (strcmp(v, "true") == 0) {
+			cf_info(AS_INFO,
+					"Changing value of enable-benchmarks-repl of ns %s from %s to %s",
+					ns->name, bool_val[ns->repl_benchmarks_enabled], v);
+			if (! ns->repl_benchmarks_enabled) {
+				// Same rationale as migrate above: rescale to whatever
+				// microsecond-histograms is set to right now.
+				histogram_rescale(ns->repl_write_hist,
+						as_config_histogram_scale());
+			}
+			ns->repl_benchmarks_enabled = true;
+		}
+		else if (strcmp(v, "false") == 0) {
+			cf_info(AS_INFO,
+					"Changing value of enable-benchmarks-repl of ns %s from %s to %s",
+					ns->name, bool_val[ns->repl_benchmarks_enabled], v);
+			ns->repl_benchmarks_enabled = false;
+			histogram_rescale(ns->repl_write_hist, as_config_histogram_scale());
+		}
+		else {
+			return false;
+		}
+	}
+	else if (as_info_parameter_get(cmd, "replication-compression-mode", v,
+					 &v_len) == 0) {
+		if (as_error_enterprise_only()) {
+			cf_warning(AS_INFO,
+					"replication-compression-mode is enterprise-only");
+			return false;
+		}
+		replication_compression_mode old_mode = ns->repl_compression_mode;
+
+		if (strcmp(v, "none") == 0) {
+			ns->repl_compression_mode =
+					AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_NONE;
+		}
+		else if (strcmp(v, "zstd") == 0) {
+			ns->repl_compression_mode =
+					AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_ZSTD;
+		}
+		else if (strcmp(v, "delta-zstd") == 0) {
+			ns->repl_compression_mode =
+					AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_DELTA_ZSTD;
+		}
+		else {
+			return false;
+		}
+
+		const char* old_val =
+				old_mode == AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_NONE
+				? "none"
+				: old_mode == AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_ZSTD
+				? "zstd"
+				: old_mode == AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_DELTA_ZSTD
+				? "delta-zstd"
+				: "unknown";
+
+		cf_info(AS_INFO,
+				"Changing value of replication-compression-mode of ns %s from %s to %s",
+				ns->name, old_val, v);
+	}
+	else if (as_info_parameter_get(cmd, "replication-compression-level", v,
+					 &v_len) == 0) {
+		if (as_error_enterprise_only()) {
+			cf_warning(AS_INFO,
+					"replication-compression-level is enterprise-only");
+			return false;
+		}
+		if (cf_str_atoi(v, &val) != 0 || val < -10 || val > 22) {
+			return false;
+		}
+		cf_info(AS_INFO,
+				"Changing value of replication-compression-level of ns %s from %d to %d",
+				ns->name, ns->repl_compression_level, val);
+		ns->repl_compression_level = val;
+	}
+	else if (as_info_parameter_get(cmd, "migrate-compression-mode", v, &v_len) ==
+			0) {
+		if (as_error_enterprise_only()) {
+			cf_warning(AS_INFO, "migrate-compression-mode is enterprise-only");
+			return false;
+		}
+		ns_migrate_compression_mode old_mode = ns->migrate_compression_mode;
+
+		if (strcmp(v, "none") == 0) {
+			ns->migrate_compression_mode =
+					AS_NAMESPACE_MIGRATE_COMPRESSION_MODE_NONE;
+		}
+		else if (strcmp(v, "zstd") == 0) {
+			ns->migrate_compression_mode =
+					AS_NAMESPACE_MIGRATE_COMPRESSION_MODE_ZSTD;
+		}
+		else {
+			return false;
+		}
+
+		const char* old_val =
+				old_mode == AS_NAMESPACE_MIGRATE_COMPRESSION_MODE_NONE ? "none"
+				: old_mode == AS_NAMESPACE_MIGRATE_COMPRESSION_MODE_ZSTD
+				? "zstd"
+				: "unknown";
+
+		cf_info(AS_INFO,
+				"Changing value of migrate-compression-mode of ns %s from %s to %s",
+				ns->name, old_val, v);
+	}
+	else if (as_info_parameter_get(cmd, "migrate-compression-level", v,
+					 &v_len) == 0) {
+		if (as_error_enterprise_only()) {
+			cf_warning(AS_INFO, "migrate-compression-level is enterprise-only");
+			return false;
+		}
+		if (cf_str_atoi(v, &val) != 0 || val < -10 || val > 22) {
+			return false;
+		}
+		cf_info(AS_INFO,
+				"Changing value of migrate-compression-level of ns %s from %d to %d",
+				ns->name, ns->migrate_compression_level, val);
+		ns->migrate_compression_level = val;
 	}
 	else if (as_info_parameter_get(cmd, "enable-hist-proxy", v, &v_len) == 0) {
 		if (strcmp(v, "true") == 0) {
@@ -3092,6 +3342,10 @@ ops_sub_benchmarks_histogram_clear_all(as_namespace* ns)
 	histogram_rescale(ns->ops_sub_master_hist, scale);
 	histogram_rescale(ns->ops_sub_repl_write_hist, scale);
 	histogram_rescale(ns->ops_sub_response_hist, scale);
+
+	histogram_rescale(ns->migrate_emigrate_hist, scale);
+
+	histogram_rescale(ns->repl_write_hist, scale);
 }
 
 static bool
@@ -3101,6 +3355,7 @@ any_benchmarks_enabled(void)
 		as_namespace* ns = g_config.namespaces[ns_ix];
 
 		if (ns->read_benchmarks_enabled || ns->write_benchmarks_enabled ||
+				ns->migrate_benchmarks_enabled || ns->repl_benchmarks_enabled ||
 				ns->udf_benchmarks_enabled || ns->batch_sub_benchmarks_enabled ||
 				ns->udf_sub_benchmarks_enabled || ns->ops_sub_benchmarks_enabled) {
 			return true;

@@ -88,6 +88,7 @@
 #include "base/truncate.h"
 #include "base/udf_cask.h"
 #include "base/xdr.h"
+#include "base/zstd_wire.h"
 #include "fabric/exchange.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
@@ -260,6 +261,7 @@ static void cmd_truncate_undo(as_info_cmd_args* args);
 static void cmd_user_agent_set(as_info_cmd_args* args);
 static void cmd_user_agents(as_info_cmd_args* args);
 static void cmd_version(as_info_cmd_args* args);
+static void cmd_zstd_wire_stats(as_info_cmd_args* args);
 
 // Info command helpers.
 static const char* perm_to_string(as_sec_perm perm);
@@ -485,7 +487,8 @@ static const as_info_cmd SPECS[] = {
 	{ .name="user-agents",             .fn=cmd_user_agents,             .client_only=true,  .ee_only=false, .perm=PERM_NONE           },
 	{ .name="xdr-dc-state",            .fn=as_xdr_dc_state,             .client_only=false, .ee_only=true,  .perm=PERM_NONE           },
 	{ .name="xdr-get-filter",          .fn=as_xdr_get_filter,           .client_only=false, .ee_only=true,  .perm=PERM_NONE           },
-	{ .name="xdr-set-filter",          .fn=as_xdr_set_filter,           .client_only=false, .ee_only=true,  .perm=PERM_XDR_SET_FILTER }
+	{ .name="xdr-set-filter",          .fn=as_xdr_set_filter,           .client_only=false, .ee_only=true,  .perm=PERM_XDR_SET_FILTER },
+	{ .name="zstd-wire-stats",         .fn=cmd_zstd_wire_stats,         .client_only=false, .ee_only=false, .perm=PERM_NONE           }
 };
 // clang-format on
 
@@ -2414,6 +2417,12 @@ cmd_latencies(as_info_cmd_args* args)
 				histogram_get_latencies(ns->ops_sub_repl_write_hist, db);
 				histogram_get_latencies(ns->ops_sub_response_hist, db);
 			}
+			else if (strcmp(hist_name, "benchmarks-migrate") == 0) {
+				histogram_get_latencies(ns->migrate_emigrate_hist, db);
+			}
+			else if (strcmp(hist_name, "benchmarks-repl") == 0) {
+				histogram_get_latencies(ns->repl_write_hist, db);
+			}
 			else {
 				cf_info(AS_INFO, "%s command: unrecognized histogram: %s", name,
 						value_str);
@@ -3401,6 +3410,7 @@ cmd_statistics(as_info_cmd_args* args)
 	append_system_memory_statistics(db);
 
 	info_append_uint32(db, "process_cpu_pct", g_process_cpu_pct);
+	zstd_wire_statistics(db);
 
 	cf_thread_stats ts;
 
@@ -3541,6 +3551,30 @@ cmd_statistics(as_info_cmd_args* args)
 	info_append_uint64(db, "fabric_meta_recv_rate", g_stats.fabric_meta_r_rate);
 	info_append_uint64(db, "fabric_rw_send_rate", g_stats.fabric_rw_s_rate);
 	info_append_uint64(db, "fabric_rw_recv_rate", g_stats.fabric_rw_r_rate);
+
+	// Cumulative fabric bytes since process start, per channel. Used by
+	// the wire-compression benchmarks to compute bandwidth-savings ratios.
+	uint64_t fab_s_bytes[AS_FABRIC_N_CHANNELS];
+	uint64_t fab_r_bytes[AS_FABRIC_N_CHANNELS];
+
+	as_fabric_bytes_total_capture(fab_s_bytes, fab_r_bytes);
+
+	info_append_uint64(db, "fabric_bulk_bytes_sent",
+			fab_s_bytes[AS_FABRIC_CHANNEL_BULK]);
+	info_append_uint64(db, "fabric_bulk_bytes_received",
+			fab_r_bytes[AS_FABRIC_CHANNEL_BULK]);
+	info_append_uint64(db, "fabric_ctrl_bytes_sent",
+			fab_s_bytes[AS_FABRIC_CHANNEL_CTRL]);
+	info_append_uint64(db, "fabric_ctrl_bytes_received",
+			fab_r_bytes[AS_FABRIC_CHANNEL_CTRL]);
+	info_append_uint64(db, "fabric_meta_bytes_sent",
+			fab_s_bytes[AS_FABRIC_CHANNEL_META]);
+	info_append_uint64(db, "fabric_meta_bytes_received",
+			fab_r_bytes[AS_FABRIC_CHANNEL_META]);
+	info_append_uint64(db, "fabric_rw_bytes_sent",
+			fab_s_bytes[AS_FABRIC_CHANNEL_RW]);
+	info_append_uint64(db, "fabric_rw_bytes_received",
+			fab_r_bytes[AS_FABRIC_CHANNEL_RW]);
 
 	info_append_uint64(db, "deprecated_requests", g_stats.n_deprecated_requests);
 
@@ -3965,6 +3999,12 @@ cmd_version(as_info_cmd_args* args)
 }
 
 static void
+cmd_zstd_wire_stats(as_info_cmd_args* args)
+{
+	zstd_wire_info(args->db);
+}
+
+static void
 cmd_release(as_info_cmd_args* args)
 {
 	cf_dyn_buf* db = args->db;
@@ -4352,6 +4392,40 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 			ns->query_comp_stat.uncomp_pct);
 	info_append_format(db, "query_proto_compression_ratio", "%.3f", query_ratio);
 
+	// Wire compression stats.
+
+	uint64_t repl_delta_attempts =
+			as_load_uint64(&ns->repl_wire_comp_stat.delta_attempts);
+	uint64_t repl_delta_hits =
+			as_load_uint64(&ns->repl_wire_comp_stat.delta_hits);
+	double repl_delta_hit_pct = repl_delta_attempts == 0
+			? 0.0
+			: (double)repl_delta_hits * 100.0 / (double)repl_delta_attempts;
+
+	info_append_format(db, "repl_wire_compression_delta_hit_pct", "%.3f",
+			repl_delta_hit_pct);
+	info_append_uint64(db, "repl_wire_compression_delta_attempts",
+			repl_delta_attempts);
+	info_append_uint64(db, "repl_wire_compression_delta_hits", repl_delta_hits);
+	info_append_uint64(db, "repl_wire_compression_bytes_saved",
+			ns->repl_wire_comp_stat.bytes_saved);
+	info_append_uint64(db, "repl_wire_compression_fallbacks",
+			ns->repl_wire_comp_stat.fallback_count);
+	info_append_uint64(db, "repl_wire_compression_delta_reject_no_record",
+			ns->repl_wire_comp_stat.delta_reject_no_record);
+	info_append_uint64(db, "repl_wire_compression_delta_reject_version",
+			ns->repl_wire_comp_stat.delta_reject_version);
+	info_append_uint64(db, "repl_wire_compression_delta_reject_apply",
+			ns->repl_wire_comp_stat.delta_reject_apply);
+	info_append_uint64(db, "repl_wire_compression_delta_reject_other",
+			ns->repl_wire_comp_stat.delta_reject_other);
+	info_append_uint64(db, "repl_wire_compression_delta_not_beneficial",
+			ns->repl_wire_comp_stat.delta_not_beneficial);
+	info_append_uint64(db, "repl_wire_compression_not_beneficial",
+			ns->repl_wire_comp_stat.compression_not_beneficial);
+	info_append_uint64(db, "repl_wire_compression_delta_apply_device_reads",
+			ns->repl_wire_comp_stat.delta_apply_device_reads);
+
 	// Partition balance state.
 
 	as_exchange_info_lock();
@@ -4402,6 +4476,12 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 			ns->migrate_record_receives);
 	info_append_uint64(db, "migrate_records_unreadable",
 			ns->migrate_records_unreadable);
+	info_append_uint64(db, "migrate_wire_compression_bytes_saved",
+			ns->migrate_wire_comp_stat.bytes_saved);
+	info_append_uint64(db, "migrate_wire_compression_fallbacks",
+			ns->migrate_wire_comp_stat.fallback_count);
+	info_append_uint64(db, "migrate_wire_compression_not_beneficial",
+			ns->migrate_wire_comp_stat.compression_not_beneficial);
 
 	info_append_uint64(db, "migrate_signals_active", ns->migrate_signals_active);
 	info_append_uint64(db, "migrate_signals_remaining",

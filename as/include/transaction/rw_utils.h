@@ -151,6 +151,44 @@ void update_sindex(struct as_namespace_s* ns, struct as_index_ref_s* r_ref,
 void remove_from_sindex(struct as_namespace_s* ns, struct as_index_ref_s* r_ref);
 void remove_from_sindex_bins(struct as_namespace_s* ns,
 		struct as_index_ref_s* r_ref, struct as_bin_s* bins, uint32_t n_bins);
+// The two halves of the per-write wire-compression sequence, bracketing the
+// storage write. Both callers (write_master_apply, udf_master_write) used to
+// carry this sequence inline, statement for statement; the ordering it encodes
+// is load-bearing, so it lives in one place.
+//
+// The ctx carries the ONE read of ns->repl_compression_mode that both halves
+// share. That is not cosmetic: if capture and compute read the mode
+// independently, an info thread flipping none -> delta-zstd in the window
+// between them drives compute_delta_for_replication() down the delta path with
+// no pre-write base snapshot, which for an in-memory namespace is a read of the
+// arena block the storage write freed in place. One snapshot closes that race by
+// construction.
+//
+// Cost when compression is off: two cross-TU calls that each return on a compare
+// (this replaced one inline compare at each call site). Immaterial next to the
+// storage write, sindex updates and pickling between them.
+typedef struct repl_compression_ctx_s {
+	replication_compression_mode mode;
+	bool no_repl_ack;
+} repl_compression_ctx;
+
+void repl_compression_pre_write(struct rw_request_s* rw,
+		struct as_storage_rd_s* rd, struct as_transaction_s* tr,
+		repl_compression_ctx* ctx);
+void repl_compression_post_write(struct rw_request_s* rw,
+		struct as_storage_rd_s* rd, const struct as_index_s* old_r,
+		const repl_compression_ctx* ctx);
+
+void capture_delta_base_for_replication(struct rw_request_s* rw,
+		struct as_storage_rd_s* rd, replication_compression_mode mode,
+		bool no_repl_ack);
+void compute_delta_for_replication(struct rw_request_s* rw,
+		struct as_storage_rd_s* rd, const struct as_index_s* old_r,
+		replication_compression_mode mode, bool no_repl_ack,
+		bool pickle_storage_compressed);
+void compute_compression_for_replication(struct rw_request_s* rw,
+		struct as_storage_rd_s* rd, replication_compression_mode mode,
+		bool pickle_storage_compressed);
 
 static inline bool
 set_has_sindex(const as_record* r, as_namespace* ns)

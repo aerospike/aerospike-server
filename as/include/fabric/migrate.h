@@ -91,7 +91,7 @@ typedef enum {
 	MIG_FIELD_NAMESPACE,
 	MIG_FIELD_PARTITION,
 	MIG_FIELD_UNUSED_5,
-	MIG_FIELD_UNUSED_6,
+	MIG_FIELD_COMPRESSION,
 	MIG_FIELD_RECORD,
 	MIG_FIELD_CLUSTER_KEY,
 	MIG_FIELD_ORIG_RECORD,
@@ -134,14 +134,23 @@ typedef enum {
 #define OPERATION_MERGE_META_ACK 12
 #define OPERATION_ALL_DONE 13
 #define OPERATION_ALL_DONE_ACK 14
+#define OPERATION_UNUSED_15 15 // was DICT_UPDATE - removed
+#define OPERATION_UNUSED_16 16 // was DICT_UPDATE_ACK - removed
 
 #define MIG_INFO_UNUSED_1 0x0001
 #define MIG_INFO_UNUSED_2 0x0002
 #define MIG_INFO_UNREPLICATED 0x0004 // enterprise only
 
 #define MIG_FEATURE_MERGE 0x00000001U
+#define MIG_FEATURE_ZSTD 0x00000002U
+
 #define MIG_FEATURES_SEEN 0x80000000U // needed for backward compatibility
 extern const uint32_t MY_MIG_FEATURES;
+
+typedef enum {
+	MIGRATE_COMPRESSION_NONE = 0,
+	MIGRATE_COMPRESSION_ZSTD = 1
+} migrate_wire_compression;
 
 typedef struct emigration_s {
 	cf_node dest;
@@ -153,6 +162,7 @@ typedef struct emigration_s {
 	uint64_t wait_until_ms;
 
 	uint32_t bytes_emigrating;
+	uint32_t features;
 	cf_shash* reinsert_hash;
 	uint64_t insert_id;
 	cf_queue* ctrl_q;
@@ -184,6 +194,11 @@ typedef struct immigration_hkey_s {
 	cf_node src;
 	uint32_t emig_id;
 } __attribute__((__packed__)) immigration_hkey;
+
+// The per-record reinsert/retransmit bookkeeping (emigration_reinsert_ctrl) is
+// migrate.c-internal and intentionally NOT part of this public interface. It
+// lives in fabric/migrate_test_support.h, included only by migrate.c and the
+// migration unit tests.
 
 // Globals.
 extern cf_rchash* g_emigration_hash;

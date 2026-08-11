@@ -538,6 +538,64 @@ typedef enum {
 	AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_CP = 3
 } conflict_resolution_pol;
 
+typedef enum {
+	AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_NONE = 0,
+	AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_ZSTD = 1,
+	AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_DELTA_ZSTD = 2
+} replication_compression_mode;
+
+// Migration uses plain zstd only — there is no delta variant on migration,
+// since the receiver may have no prior version of the record. Migration
+// compression is opt-in: NONE (zero default) leaves it off regardless of
+// the replication mode; ZSTD turns it on regardless of the replication mode.
+//
+// Named ns_migrate_compression_mode to disambiguate from the on-wire
+// migrate_wire_compression enum in fabric/migrate.h (MIGRATE_COMPRESSION_NONE
+// vs MIGRATE_COMPRESSION_ZSTD), which describes the per-record compression
+// decision rather than the namespace-level policy.
+typedef enum {
+	AS_NAMESPACE_MIGRATE_COMPRESSION_MODE_NONE = 0,
+	AS_NAMESPACE_MIGRATE_COMPRESSION_MODE_ZSTD = 1
+} ns_migrate_compression_mode;
+
+typedef struct wire_compression_stats_s {
+	uint64_t delta_attempts;
+	uint64_t delta_hits;
+	// bytes_saved is credited at ack-time per successful destination so the
+	// counter reflects bytes actually saved on the wire — not bytes we hoped
+	// to save before sending. Fallbacks contribute 0.
+	uint64_t bytes_saved;
+	// Sends that went out plain instead of compressed. The trigger differs by
+	// transport, so read it per instance:
+	//  - repl_wire_comp_stat: the replica refused a delta/compressed op and
+	//    repl_write_handle_ack() rebuilt a full pickle (ack-driven fallback).
+	//  - migrate_wire_comp_stat: zstd_wire_compress_buffer() itself failed on
+	//    send. Migration has no ack-driven fallback, so nothing else feeds it.
+	// Named for the replica-write meaning, which came first; the info keys
+	// (repl_/migrate_wire_compression_fallbacks) predate the migration change.
+	uint64_t fallback_count;
+	// Receiver-side rejection causes. Summed across all nodes these equal the
+	// sender-side fallback_count for repl writes; split by which of the four
+	// return paths in apply_delta_replication() fired.
+	uint64_t delta_reject_no_record; // replica has no record at the digest
+	uint64_t delta_reject_version; // record exists but gen/LUT don't match
+	uint64_t delta_reject_apply; // zstd_wire_apply_patch failed on local bytes
+	uint64_t delta_reject_other; // load_bins / unpack_meta failed locally; receiver-only
+	// Compression-attempt outcome counters. delta_not_beneficial fires when
+	// zstd_wire_make_patch returned a patch larger than the plain pickle and
+	// we therefore skipped the delta path. compression_not_beneficial fires
+	// for the plain-zstd path under the same condition.
+	uint64_t delta_not_beneficial;
+	uint64_t compression_not_beneficial;
+	// Receiver-side: delta apply is the only replica-write mode that needs the
+	// old record's stored bytes, so it is the only one that can pay a device
+	// read on the replica. Without this an operator sees delta_hits climbing
+	// and read IOPS rising on proles with no way to connect the two. Counts
+	// loads that actually went to storage (rd.flat not already populated),
+	// including ones that then failed - the I/O was still spent.
+	uint64_t delta_apply_device_reads;
+} wire_compression_stats;
+
 /* Record function declarations */
 uint32_t clock_skew_stop_writes_sec(void);
 bool as_record_handle_clock_skew(struct as_namespace_s* ns, uint64_t skew_ms);
@@ -939,7 +997,13 @@ typedef struct as_namespace_s {
 	bool udf_benchmarks_enabled;
 	bool udf_sub_benchmarks_enabled;
 	bool write_benchmarks_enabled;
+	bool migrate_benchmarks_enabled;
+	bool repl_benchmarks_enabled;
 	bool proxy_hist_enabled;
+	replication_compression_mode repl_compression_mode; // relevant only for enterprise edition
+	int32_t repl_compression_level; // relevant only for enterprise edition
+	ns_migrate_compression_mode migrate_compression_mode; // NONE (default) or ZSTD, independent of repl_compression_mode
+	int32_t migrate_compression_level; // zstd level used when migrate_compression_mode == ZSTD
 	uint32_t evict_hist_buckets;
 	uint32_t evict_indexes_memory_pct;
 	uint32_t evict_tenths_pct;
@@ -1088,6 +1152,11 @@ typedef struct as_namespace_s {
 
 	as_proto_comp_stat record_comp_stat; // relevant only for enterprise edition
 	as_proto_comp_stat query_comp_stat; // relevant only for enterprise edition
+
+	// Wire-compression stats.
+
+	wire_compression_stats repl_wire_comp_stat; // relevant only for enterprise edition
+	wire_compression_stats migrate_wire_comp_stat; // relevant only for enterprise edition
 
 	// Migration stats.
 
@@ -1492,6 +1561,19 @@ typedef struct as_namespace_s {
 	histogram* write_master_hist; // split this?
 	histogram* write_repl_write_hist;
 	histogram* write_response_hist;
+
+	// Migration emigrate latency — sampled in migrate.c at insert-ack
+	// receipt. Captures end-to-end "first send → ack" time for one
+	// migrated record. Created lazily when enable-benchmarks-migrate is
+	// set; NULL otherwise so sites can cheaply skip the sample.
+	histogram* migrate_emigrate_hist;
+
+	// Replication-write latency — sampled in replica_write.c at every
+	// successful ack receipt, across all transaction types (writes, UDF,
+	// batch_sub, etc.). Distinct from the per-transaction-type
+	// `*_repl_write_hist` histograms (those need their respective
+	// enable-benchmarks-* flags). Gated on enable-benchmarks-repl.
+	histogram* repl_write_hist;
 
 	histogram* udf_start_hist;
 	histogram* udf_restart_hist;

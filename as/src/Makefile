@@ -45,6 +45,7 @@ BASE_HEADERS += udf_arglist.h
 BASE_HEADERS += udf_cask.h
 BASE_HEADERS += udf_record.h
 BASE_HEADERS += xdr.h
+BASE_HEADERS += zstd_wire.h
 
 BASE_SOURCES += aggr.c
 BASE_SOURCES += as.c
@@ -77,6 +78,7 @@ BASE_SOURCES += service.c
 BASE_SOURCES += set_index.c
 BASE_SOURCES += signal.c
 BASE_SOURCES += smd.c
+BASE_SOURCES += smd_compression.c
 BASE_SOURCES += thr_info.c
 BASE_SOURCES += thr_tsvc.c
 BASE_SOURCES += ticker.c
@@ -103,6 +105,7 @@ ifneq ($(USE_EE),1)
   BASE_SOURCES += set_index_ce.c
   BASE_SOURCES += truncate_ce.c
   BASE_SOURCES += xdr_ce.c
+  BASE_SOURCES += zstd_wire_ce.c
 endif
 
 FABRIC_HEADERS += clustering.h

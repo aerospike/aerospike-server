@@ -100,6 +100,21 @@ rw_request_create(cf_digest* keyd)
 
 	rw->pickle = NULL;
 	rw->pickle_sz = 0;
+	rw->use_delta = false;
+	rw->use_compressed = false;
+	rw->delta = NULL;
+	rw->delta_sz = 0;
+	rw->compressed = NULL;
+	rw->compressed_sz = 0;
+	rw->delta_base = NULL;
+	rw->delta_base_sz = 0;
+	rw->delta_base_storage_compressed = false;
+	rw->base_generation = 0;
+	rw->base_lut = 0;
+	rw->per_dest_bytes_saved = 0;
+	rw->wire_compressed_op_sent = false;
+	rw->repl_info_bits = 0;
+	rw->repl_info_bits_set = false;
 	rw->set_name = NULL;
 	rw->set_name_len = 0;
 	rw->key = NULL;
@@ -134,6 +149,7 @@ rw_request_create(cf_digest* keyd)
 	rw->tie_was_replicated = false;
 
 	rw->repl_start_us = 0;
+	rw->repl_start_ns = 0;
 
 	return rw;
 }
@@ -151,8 +167,24 @@ rw_request_destroy(rw_request* rw)
 		cf_free(rw->msgp);
 	}
 
-	if (rw->pickle) {
+	if (rw->pickle != NULL) {
 		cf_free(rw->pickle);
+		rw->pickle = NULL;
+	}
+
+	if (rw->delta != NULL) {
+		cf_free(rw->delta);
+		rw->delta = NULL;
+	}
+
+	if (rw->delta_base != NULL) {
+		cf_free(rw->delta_base);
+		rw->delta_base = NULL;
+	}
+
+	if (rw->compressed != NULL) {
+		cf_free(rw->compressed);
+		rw->compressed = NULL;
 	}
 
 	if (rw->key) {

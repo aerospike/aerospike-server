@@ -53,6 +53,7 @@
 #include "base/stats.h"
 #include "base/thr_info.h"
 #include "base/thr_tsvc.h"
+#include "base/zstd_wire.h"
 #include "fabric/clustering.h"
 #include "fabric/exchange.h"
 #include "fabric/fabric.h"
@@ -163,6 +164,8 @@ run_ticker(void* arg)
 void
 log_ticker_frame(uint64_t delta_time)
 {
+	zstd_wire_ticker(delta_time);
+
 	char cluster_name[AS_CLUSTER_NAME_SZ];
 	as_config_cluster_name_get(cluster_name);
 
@@ -1224,6 +1227,8 @@ dump_global_histograms()
 		histogram_dump(g_stats.info_hist);
 	}
 
+	zstd_wire_dump_histograms();
+
 	if (g_config.fabric_benchmarks_enabled) {
 		histogram_dump(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_BULK]);
 		histogram_dump(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_BULK]);
@@ -1347,6 +1352,14 @@ dump_namespace_histograms(as_namespace* ns)
 		histogram_dump(ns->ops_sub_master_hist);
 		histogram_dump(ns->ops_sub_repl_write_hist);
 		histogram_dump(ns->ops_sub_response_hist);
+	}
+
+	if (ns->migrate_benchmarks_enabled) {
+		histogram_dump(ns->migrate_emigrate_hist);
+	}
+
+	if (ns->repl_benchmarks_enabled) {
+		histogram_dump(ns->repl_write_hist);
 	}
 
 	if (ns->read_touch_hist_active) {

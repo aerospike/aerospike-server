@@ -32,6 +32,7 @@
 #include <string.h>
 
 #include "aerospike/as_atomic.h"
+#include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 
@@ -47,9 +48,11 @@
 #include "base/proto.h"
 #include "base/security.h"
 #include "base/transaction.h"
+#include "base/zstd_wire.h"
 #include "exp/exp.h"
 #include "fabric/fabric.h"
 #include "sindex/sindex.h"
+#include "storage/flat.h"
 #include "storage/storage.h"
 #include "transaction/mrt_utils.h"
 #include "transaction/rw_request.h"
@@ -1148,4 +1151,365 @@ update_sindex_exp(bins_old_new* old_new, as_bin** match_bins,
 	}
 
 	return n_populated;
+}
+
+void
+repl_compression_pre_write(rw_request* rw, as_storage_rd* rd,
+		as_transaction* tr, repl_compression_ctx* ctx)
+{
+	// The single mode read for this write - see the header. Everything below,
+	// and everything in repl_compression_post_write(), works off this snapshot
+	// and never re-reads ns->repl_compression_mode.
+	ctx->mode = rd->ns->repl_compression_mode;
+
+	// A commit-level-master write responds to the client on master completion
+	// and the replica suppresses its ack, so a delta the replica cannot apply
+	// against its base version is never reported and never rebuilt as a full
+	// pickle - no deltas for these writes. Plain zstd is unaffected (it needs
+	// nothing from the replica) - see compute_compression_for_replication.
+	//
+	// So this is read by the delta helpers only, and only in DELTA_ZSTD mode -
+	// in plain-ZSTD mode it is computed and never consumed. Computed uniformly
+	// anyway rather than under a mode test, so there is exactly one place that
+	// decides it for this write.
+	ctx->no_repl_ack =
+			ctx->mode != AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_NONE &&
+			respond_on_master_complete(tr);
+
+	if (ctx->mode == AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_NONE) {
+		return;
+	}
+
+	// Snapshot the old record's flat bytes for delta replication BEFORE the
+	// storage write frees them. For in-memory namespaces rd->flat aliases the
+	// arena block the write frees in place, so reading it post-write (in
+	// compute_delta_for_replication) is a use-after-free.
+	capture_delta_base_for_replication(rw, rd, ctx->mode, ctx->no_repl_ack);
+}
+
+void
+repl_compression_post_write(rw_request* rw, as_storage_rd* rd,
+		const as_record* old_r, const repl_compression_ctx* ctx)
+{
+	if (ctx->mode == AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_NONE) {
+		return;
+	}
+
+	// Computed once and passed to both helpers; they would otherwise each re-run
+	// the full flat meta-unpack on the same pickle (every fresh create in
+	// delta-zstd mode hits both).
+	bool pickle_storage_compressed = rd->pickle != NULL &&
+			as_flat_pickle_is_storage_compressed(rd->pickle, rd->pickle_sz);
+
+	compute_delta_for_replication(rw, rd, old_r, ctx->mode, ctx->no_repl_ack,
+			pickle_storage_compressed);
+	compute_compression_for_replication(rw, rd, ctx->mode,
+			pickle_storage_compressed);
+}
+
+void
+capture_delta_base_for_replication(rw_request* rw, as_storage_rd* rd,
+		replication_compression_mode mode, bool no_repl_ack)
+{
+	// Snapshot the OLD record's flat bytes BEFORE as_storage_record_write()
+	// runs. For in-memory namespaces rd->flat aliases the storage arena, and
+	// the write frees that block in place - reading rd->flat afterward in
+	// compute_delta_for_replication() is a use-after-free (device-backed
+	// namespaces are safe because rd->flat is a private read buffer, but we
+	// snapshot uniformly). compute_delta_for_replication() patches against this
+	// snapshot.
+	//
+	// Mirrors the cheap, pre-write-knowable guards in
+	// compute_delta_for_replication(); the storage-compressed check there needs
+	// the post-write pickle, so a snapshot is occasionally taken and then
+	// dropped - freed with the rw_request.
+	if (no_repl_ack) {
+		return; // no delta for these writes - see compute_delta_for_replication
+	}
+
+	// Caller snapshots repl_compression_mode once before the storage write and
+	// passes the same value here and to compute_delta_for_replication(). If the
+	// two disagreed - an info thread flipping the mode to delta-zstd in the
+	// window between the calls - capture could skip the snapshot while compute
+	// still ran the delta path, reading the freed-in-place rd->flat (a UAF for
+	// in-memory namespaces). One snapshot for both closes that race.
+	if (mode != AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_DELTA_ZSTD) {
+		return;
+	}
+
+	// Delete ops never compute delta/compressed ops - don't pay a record-sized
+	// snapshot for a delta the tombstone guard in
+	// compute_delta_for_replication() will never compute. The caller runs
+	// transition_delete_metadata() before this, so the tombstone bit already
+	// reflects this write.
+	if (rd->r->tombstone == 1) {
+		return;
+	}
+
+	if (rw->n_dest_nodes == 0 || rd->flat == NULL) {
+		return; // no destinations, or a new-record create (no old version)
+	}
+
+	// Storage-compressed old record: the bin-load path
+	// (as_flat_decompress_bins()) repointed rd->flat_end and rd->flat_bins
+	// into a separate decompression buffer, so rd->flat_end - rd->flat spans
+	// two unrelated allocations and the memcpy below would run wild. There is
+	// no coherent base to snapshot - and compressed bytes wouldn't match the
+	// replica's stored flat anyway. Record the skip on the rw_request so
+	// compute_delta_for_replication() also skips - post-write it cannot
+	// safely re-inspect rd->flat (freed in place for in-memory namespaces).
+	if (rd->flat->is_compressed == 1) {
+		rw->delta_base_storage_compressed = true;
+		return;
+	}
+
+	uint32_t flat_sz = rd->flat_end - (const uint8_t*)rd->flat;
+
+	rw->delta_base = cf_malloc(flat_sz);
+	memcpy(rw->delta_base, rd->flat, flat_sz);
+	rw->delta_base_sz = flat_sz;
+}
+
+void
+compute_delta_for_replication(rw_request* rw, as_storage_rd* rd,
+		const as_record* old_r, replication_compression_mode mode,
+		bool no_repl_ack, bool pickle_storage_compressed)
+{
+	// A commit-level-master (FROM_CLIENT) write responds to the client on
+	// master completion, and the replica suppresses its ack
+	// (RW_INFO_NO_REPL_ACK). A delta is the one wire form whose apply can fail
+	// for an ordinary, expected reason - the replica must hold the exact base
+	// version the patch was built against, and a replica that missed a prior
+	// write, or never had the record, simply does not. Normally that miss is
+	// reported and repl_write_handle_ack() rebuilds a full pickle; with no ack
+	// the miss is silent and the replica stays divergent. So deltas are off for
+	// these writes.
+	//
+	// This does NOT extend to plain zstd - see
+	// compute_compression_for_replication. A compressed pickle is
+	// self-contained: decoding it needs nothing from the replica, so there is no
+	// expected-failure case for the missing ack to hide.
+	if (no_repl_ack) {
+		return;
+	}
+
+	// mode is the caller's pre-write snapshot, shared with
+	// capture_delta_base_for_replication() so the two cannot disagree.
+	if (mode != AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_DELTA_ZSTD) {
+		return;
+	}
+
+	if (rw->n_dest_nodes == 0) {
+		return;
+	}
+
+	// Delete ops never compute delta/compressed ops. Non-durable deletes never
+	// get here (no tombstone is written, so rd->pickle stays NULL below), but
+	// a durable delete writes a tombstone pickle and would otherwise fall
+	// through - bumping delta_attempts and building a delta for a delete.
+	if (rd->r->tombstone == 1) {
+		return;
+	}
+
+	if (rd->pickle == NULL) {
+		return;
+	}
+
+	if (pickle_storage_compressed) {
+		cf_debug(AS_RW,
+				"compute_delta_for_replication: skipping delta for storage-compressed pickle %pD",
+				&rw->keyd);
+		return;
+	}
+
+	if (rd->flat == NULL) {
+		// New record creation, no old version
+		return;
+	}
+
+	// Capture saw a storage-compressed old flat and took no snapshot - the
+	// flat/flat_end pair is incoherent (flat_end points into the bin-
+	// decompression buffer) so there is no base to patch against. Trust the
+	// pre-write flag rather than re-inspecting rd->flat, which the storage
+	// write may have freed in place. Fall through to the plain-zstd path via
+	// compute_compression_for_replication().
+	if (rw->delta_base_storage_compressed) {
+		return;
+	}
+
+	// Patch against the pre-write snapshot when we took one - the only
+	// arena-stable source of the old bytes for in-memory namespaces, where
+	// rd->flat has been freed in place by as_storage_record_write().
+	// Fall back to rd->flat when no snapshot exists (device-backed namespaces
+	// keep it valid post-write; unit tests supply it directly).
+	const uint8_t* base_flat;
+	uint32_t flat_sz;
+
+	if (rw->delta_base != NULL) {
+		base_flat = rw->delta_base;
+		flat_sz = rw->delta_base_sz;
+	}
+	else {
+		// Direct-call path (no capture ran - unit tests supply rd->flat, and
+		// device-backed namespaces keep it valid post-write): same skip as
+		// the delta_base_storage_compressed flag above, derived from the flat itself.
+		if (rd->flat->is_compressed == 1) {
+			return;
+		}
+
+		base_flat = (const uint8_t*)rd->flat;
+		flat_sz = rd->flat_end - (const uint8_t*)rd->flat;
+	}
+
+	if (flat_sz < sizeof(as_flat_record)) {
+		// A valid flat is always at least the header; a shorter base means
+		// local corruption. Skip the delta rather than zero a tree_id past the
+		// end of the buffer in as_flat_*_canonical().
+		return;
+	}
+
+	as_incr_uint64(&rd->ns->repl_wire_comp_stat.delta_attempts);
+
+	// Strip master's tree_id from the source flat so the replica's apply,
+	// running against its own (different) tree_id, sees byte-identical input.
+	// When we own a private pre-write snapshot (rw->delta_base), canonicalize it
+	// in place - no second record-sized copy. Only when falling back to
+	// rd->flat (the stored record, which must not be mutated) do we copy.
+	const uint8_t* canonical_base;
+	uint8_t* canonical_owned = NULL;
+
+	if (rw->delta_base != NULL) {
+		as_flat_canonicalize_delta_inplace(rw->delta_base);
+		canonical_base = rw->delta_base;
+	}
+	else {
+		canonical_owned = cf_malloc(flat_sz);
+		as_flat_make_delta_canonical(canonical_owned, base_flat, flat_sz);
+		canonical_base = canonical_owned;
+	}
+
+	rw->delta_sz = zstd_wire_make_patch((void**)&rw->delta, canonical_base,
+			flat_sz, rd->pickle, rd->pickle_sz, rd->ns->repl_compression_level);
+
+	if (canonical_owned != NULL) {
+		cf_free(canonical_owned);
+	}
+
+	if (rw->delta_sz == 0) {
+		return;
+	}
+
+	// Don't ship a delta that's bigger than the plain pickle. Drop it
+	// and let compute_compression_for_replication or the plain path take
+	// over. delta_hits is NOT counted here - the increment below is after this
+	// early return, so it only counts deltas we actually ship. The counter that
+	// does include this case is delta_attempts, incremented above BEFORE
+	// zstd_wire_make_patch() runs - so it also counts patches that failed to
+	// build (delta_sz == 0, the early return just above). delta_not_beneficial
+	// records how often this particular outcome fires, so
+	// attempts - hits - not_beneficial isolates the other failure modes,
+	// make_patch failures among them.
+	if (rw->delta_sz >= rd->pickle_sz) {
+		cf_free(rw->delta);
+		rw->delta = NULL;
+		rw->delta_sz = 0;
+		as_incr_uint64(&rd->ns->repl_wire_comp_stat.delta_not_beneficial);
+		return;
+	}
+
+	as_incr_uint64(&rd->ns->repl_wire_comp_stat.delta_hits);
+
+	// Per-destination savings; credited to ns->bytes_saved at ack-time so the
+	// counter only reflects bytes actually saved on the wire.
+	rw->per_dest_bytes_saved = (uint64_t)(rd->pickle_sz - rw->delta_sz);
+
+	rw->use_delta = true;
+	rw->use_compressed = false;
+	rw->base_generation = old_r->generation;
+	rw->base_lut = old_r->last_update_time;
+}
+
+// Deliberately NOT gated on no_repl_ack (commit-level=master), unlike the delta
+// helpers above. A compressed pickle carries the whole record, so the replica
+// decodes it without needing any local state - there is no expected-failure case
+// the missing ack could hide. The only way the decode fails is a fault we can't
+// guard against anyway (allocation failure, memory or wire corruption, a codec
+// bug), and commit-level=master is already fire-and-forget for those: a plain
+// repl write refused for overload, a failed partition reservation, or a failed
+// apply is dropped just as silently today. Nor is an acknowledged write at
+// stake - strong consistency forces write-commit-level all (see cfg_ee.c), so
+// respond_on_master_complete() is only ever true in an AP namespace, where a
+// dropped replica write is repaired by migration/duplicate resolution.
+//
+// Gating compression on the ack would mean every commit-level=master namespace
+// quietly gets no wire compression at all - the config would read as on and
+// save nothing.
+void
+compute_compression_for_replication(rw_request* rw, as_storage_rd* rd,
+		replication_compression_mode mode, bool pickle_storage_compressed)
+{
+	// Delta path already produced a wire payload — leave it alone.
+	if (rw->use_delta) {
+		return;
+	}
+
+	// Plain-zstd is the wire compression for both ZSTD and DELTA_ZSTD
+	// modes. In DELTA_ZSTD mode it's the fallback when the delta path
+	// couldn't engage (no prior, storage-compressed pickle, zero dest
+	// nodes, etc.) — every fresh-create record hits that path. Without
+	// this fallback, the entire load phase of any workload, plus
+	// migration receipt, XDR-receipt, and post-eviction recreates,
+	// ship uncompressed on the wire.
+	// mode is the caller's pre-write snapshot, shared with the delta helpers so
+	// all three agree on a single value for this write.
+	if (mode != AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_ZSTD &&
+			mode != AS_NAMESPACE_REPLICATION_COMPRESSION_MODE_DELTA_ZSTD) {
+		return;
+	}
+
+	if (rw->n_dest_nodes == 0 || rd->pickle == NULL) {
+		return;
+	}
+
+	// Delete ops never compute delta/compressed ops - see
+	// compute_delta_for_replication. A durable delete's tombstone pickle ships
+	// plain.
+	if (rd->r->tombstone == 1) {
+		return;
+	}
+
+	if (pickle_storage_compressed) {
+		cf_debug(AS_RW,
+				"compute_compression_for_replication: skipping wire zstd for storage-compressed pickle %pD",
+				&rw->keyd);
+		return;
+	}
+
+	// Don't pay a full compress + ZSTD_compressBound allocation for a record
+	// too small to plausibly beat zstd's framing overhead - common for small
+	// OLTP writes. Skip outright rather than compress-then-discard.
+	if (rd->pickle_sz < ZSTD_WIRE_COMPRESS_MIN_SZ) {
+		return;
+	}
+
+	rw->compressed_sz = zstd_wire_compress_buffer((void**)&rw->compressed,
+			rd->pickle, rd->pickle_sz, rd->ns->repl_compression_level);
+
+	if (rw->compressed_sz == 0) {
+		return;
+	}
+
+	// Don't ship a compressed payload that's bigger than the plain pickle.
+	// Drop it and let the plain RW_OP_REPL_WRITE path take over.
+	if (rw->compressed_sz >= rd->pickle_sz) {
+		cf_free(rw->compressed);
+		rw->compressed = NULL;
+		rw->compressed_sz = 0;
+		as_incr_uint64(&rd->ns->repl_wire_comp_stat.compression_not_beneficial);
+		return;
+	}
+
+	// Per-destination savings; credited to ns->bytes_saved at ack-time
+	rw->per_dest_bytes_saved = (uint64_t)(rd->pickle_sz - rw->compressed_sz);
+	rw->use_compressed = true;
 }

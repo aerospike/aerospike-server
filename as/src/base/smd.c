@@ -74,10 +74,10 @@ typedef enum {
 	SMD_MSG_UNUSED_9, // used to be SMD_MSG_GEN_ARRAY
 	SMD_MSG_TS_ARRAY,
 	SMD_MSG_UNUSED_11, // used to be SMD_MSG_MODULE_NAME
-	SMD_MSG_UNUSED_12, // used to be SMD_MSG_OPTIONS
+	SMD_MSG_COMPRESSION, // used to be SMD_MSG_OPTIONS
 
 	SMD_MSG_VERSION_LIST,
-	SMD_MSG_UNUSED_14, // used to be SMD_MSG_MODULE_COUNTS
+	SMD_MSG_COMPRESSED_ITEMS, // used to be SMD_MSG_MODULE_COUNTS
 	SMD_MSG_KEY_LIST,
 	SMD_MSG_VALUE_LIST,
 	SMD_MSG_GEN_LIST,
@@ -112,10 +112,10 @@ static const msg_template smd_mt[] = {
 		{ SMD_MSG_UNUSED_9, M_FT_ARRAY_UINT32 },
 		{ SMD_MSG_TS_ARRAY, M_FT_ARRAY_UINT64 },
 		{ SMD_MSG_UNUSED_11, M_FT_STR },
-		{ SMD_MSG_UNUSED_12, M_FT_UINT32 },
+		{ SMD_MSG_COMPRESSION, M_FT_UINT32 },
 
 		{ SMD_MSG_VERSION_LIST, M_FT_MSGPACK },
-		{ SMD_MSG_UNUSED_14, M_FT_MSGPACK },
+		{ SMD_MSG_COMPRESSED_ITEMS, M_FT_BUF },
 		{ SMD_MSG_KEY_LIST, M_FT_MSGPACK },
 		{ SMD_MSG_VALUE_LIST, M_FT_MSGPACK },
 		{ SMD_MSG_GEN_LIST, M_FT_MSGPACK },
@@ -134,6 +134,12 @@ COMPILER_ASSERT(sizeof(smd_mt) / sizeof(msg_template) == NUM_SMD_FIELDS);
 // clang-format on
 
 #define SMD_MSG_SCRATCH_SIZE 64 // TODO - rethink... could be smaller?
+// Minimum cluster compatibility id at which compressed SMD full-sync messages
+// may exist. Gates both the send side (smd_can_compress_full()) and the receive
+// side (smd_msg_parse_items_compressed()). Distinct from the literal 16 in
+// smd_mixed_cluster(), which means "has the SERVER-209 clean-path protocol" and
+// must not move - see the reasoning on 17 in exchange.h.
+#define SMD_FULL_ZSTD_COMPATIBILITY_ID 17
 
 typedef enum {
 	// These values are used on the wire - don't change them.
@@ -188,6 +194,11 @@ typedef enum {
 	NUM_SMD_STATES
 } smd_state;
 
+typedef enum {
+	SMD_COMPRESSION_NONE = 0,
+	SMD_COMPRESSION_ZSTD = 1
+} smd_compression_mode;
+
 static const char* const state_str[] = { [STATE_PR] = "pr",
 	[STATE_NPR] = "npr",
 	[STATE_MERGING] = "merging",
@@ -209,6 +220,11 @@ typedef struct smd_s {
 
 	uint32_t set_tid;
 	cf_shash* set_h;
+
+	uint64_t compression_attempts;
+	uint64_t compression_hits;
+	uint64_t compression_bytes_saved;
+	uint64_t compression_fallbacks;
 } smd;
 
 typedef struct smd_hash_ele_s {
@@ -390,6 +406,7 @@ static void smd_set_blocking_cb(bool result, void* udata);
 // Parse fabric msg.
 static bool smd_msg_parse(msg* m, smd_op* op);
 static bool smd_msg_parse_items(msg* m, smd_op* op);
+static bool smd_msg_parse_items_compressed(msg* m, smd_op* op);
 
 // Event loop.
 static void* run_smd(void* udata);
@@ -440,6 +457,7 @@ static void module_accept_list(smd_module* module, const cf_vector* list);
 static void module_accept_startup(smd_module* module);
 
 // Module.
+static bool module_fill_msg_compressed(smd_module* module, msg* m);
 static void module_regen_key2index(smd_module* module);
 static void module_append_item(smd_module* module, as_smd_item* item);
 static void module_fill_msg(smd_module* module, msg* m);
@@ -461,6 +479,7 @@ static bool smd_hash_get(const smd_hash* h, const char* key, uint32_t* value);
 static uint32_t smd_hash_get_row_i(const smd_hash* h, const char* key);
 
 // as_smd_item.
+static bool smd_can_compress_full(void);
 static as_smd_item* smd_item_create_copy(const char* key, const char* value,
 		uint64_t ts, uint32_t gen);
 static as_smd_item* smd_item_create_handoff(char* key, char* value, uint64_t ts,
@@ -764,6 +783,21 @@ as_smd_get_info(cf_dyn_buf* db)
 	cf_dyn_buf_append_char(db, ',');
 	cf_dyn_buf_append_string(db, "cluster_key=");
 	cf_dyn_buf_append_uint64_x(db, g_smd.cl_key);
+	cf_dyn_buf_append_char(db, ',');
+	uint64_t compression_attempts = as_load_uint64(&g_smd.compression_attempts);
+	uint64_t compression_hits = as_load_uint64(&g_smd.compression_hits);
+
+	cf_dyn_buf_append_string(db, "compression_hit_pct=");
+	cf_dyn_buf_append_format(db, "%.3f",
+			compression_attempts == 0 ? 0.0
+									  : (double)compression_hits * 100.0 /
+							(double)compression_attempts);
+	cf_dyn_buf_append_char(db, ',');
+	cf_dyn_buf_append_string(db, "compression_bytes_saved=");
+	cf_dyn_buf_append_uint64(db, as_load_uint64(&g_smd.compression_bytes_saved));
+	cf_dyn_buf_append_char(db, ',');
+	cf_dyn_buf_append_string(db, "compression_fallbacks=");
+	cf_dyn_buf_append_uint64(db, as_load_uint64(&g_smd.compression_fallbacks));
 	cf_dyn_buf_append_char(db, ';');
 
 	for (uint32_t i = 0; i < AS_SMD_NUM_MODULES; i++) {
@@ -1207,6 +1241,10 @@ smd_msg_parse_items(msg* m, smd_op* op)
 {
 	char* key;
 
+	// Single-key updates are never compressed - compression applies only to
+	// full item-list messages (see module_fill_msg_compressed). The
+	// SMD_MSG_COMPRESSION branch below is therefore reached only by the
+	// multi-item path.
 	if (msg_get_str(m, SMD_MSG_SINGLE_KEY, &key, MSG_GET_DIRECT) == 0) {
 		char* value = NULL;
 		uint32_t gen = 0;
@@ -1222,6 +1260,10 @@ smd_msg_parse_items(msg* m, smd_op* op)
 		return true;
 	}
 	// else - multiple items.
+
+	if (msg_is_set(m, SMD_MSG_COMPRESSION)) {
+		return smd_msg_parse_items_compressed(m, op);
+	}
 
 	uint32_t count;
 
@@ -1302,6 +1344,118 @@ smd_msg_parse_items(msg* m, smd_op* op)
 	cf_vector_destroy(&key_vec);
 	cf_vector_destroy(&value_vec);
 	cf_free(gen_list);
+
+	return true;
+}
+
+// Whether this op may legitimately carry a compressed item list, checked before
+// decompressing anything.
+//
+// smd_msg_parse() runs inline on the fabric META receive thread, so without this
+// a peer that has merely completed a fabric handshake - anyone who can reach the
+// fabric port, on a cluster without fabric TLS - can make that thread allocate
+// and zstd-decode up to SMD_FULL_ZSTD_MAX_DECOMPRESSED_SIZE (128 MiB) for a few
+// KB on the wire, times n_fabric_channel_recv_threads[META], for as long as it
+// likes. Every real SMD operation (namespace create, UDF register, sindex DDL,
+// roster change, security policy) queues behind those threads cluster-wide.
+//
+// Three cheap checks, none of which needs the item list:
+//
+//   1. Op type. module_fill_msg_compressed() is reached only from the two
+//      full-item-list sends, SMD_OP_FULL_TO_PR and SMD_OP_FULL_FROM_PR, so a
+//      compressed list on any other op is malformed by construction. This is
+//      also what removes the SMD_OP_SET_TO_PR exposure, which is the dangerous
+//      one: SET_TO_PR is deliberately exempt from the membership check in
+//      smd_event() ("these don't care about src or cluster key"), so it is the
+//      one compressed-capable op with no downstream validation at all.
+//
+//   2. Compat gate. The send side already requires smd_can_compress_full();
+//      applying it here too means a node never decodes a frame the cluster
+//      should not be producing, whatever a peer claims.
+//
+//   3. Membership and cluster key. For FULL_TO_PR / FULL_FROM_PR this is not a
+//      new rule - smd_event() applies exactly this check to both ops via its
+//      default: branch and drops them on failure. Doing it here only moves an
+//      existing drop ahead of the 128 MiB decode, so acceptance semantics are
+//      unchanged and no legitimate startup or rejoin flow can be newly refused.
+//      op->src is the fabric-level node id, not a peer-declared field.
+//
+// Check 3 reads g_smd.succession / node_count / cl_key from the receive thread
+// while the SMD event thread may be updating them. That is deliberate: this is
+// a pre-filter, not the authority. A stale view can only cost a spurious drop
+// during a cluster change, which SMD's own retransmit recovers, and the
+// authoritative check still runs later on the SMD thread. node_count is bounded
+// by the fixed succession array, so a torn read cannot index out of range.
+static bool
+smd_compressed_items_allowed(const smd_op* op)
+{
+	if (op->type != SMD_OP_FULL_TO_PR && op->type != SMD_OP_FULL_FROM_PR) {
+		cf_warning(AS_SMD, "compressed items on op %s from %lx - refusing",
+				OP_TYPE_AS_STRING(op->type), op->src);
+		return false;
+	}
+
+	if (! smd_can_compress_full()) {
+		cf_warning(AS_SMD,
+				"compressed items from %lx below compat id %u - refusing",
+				op->src, SMD_FULL_ZSTD_COMPATIBILITY_ID);
+		return false;
+	}
+
+	// Split from the cluster-key check below on purpose - the two mean opposite
+	// things to an operator. This one says a peer that is not in our succession
+	// list reached the fabric META receive thread, which is the case this
+	// pre-filter exists for.
+	if (index_of_node(g_smd.succession, g_smd.node_count, op->src) < 0) {
+		cf_warning(AS_SMD, "compressed items from non-member %lx - refusing",
+				op->src);
+		return false;
+	}
+
+	// Whereas this one is an expected, benign transient during a cluster
+	// change: a stale view costs a spurious drop that SMD's own retransmit
+	// recovers. Same refusal, different thing to go look at.
+	if (g_smd.cl_key != op->cl_key) {
+		cf_warning(AS_SMD,
+				"compressed items from %lx with stale key - refusing", op->src);
+		return false;
+	}
+
+	return true;
+}
+
+static bool
+smd_msg_parse_items_compressed(msg* m, smd_op* op)
+{
+	if (! smd_compressed_items_allowed(op)) {
+		return false;
+	}
+
+	uint32_t compression = SMD_COMPRESSION_NONE;
+
+	if (msg_get_uint32(m, SMD_MSG_COMPRESSION, &compression) != 0) {
+		cf_warning(AS_SMD, "msg missing compression mode");
+		return false;
+	}
+
+	if (compression != SMD_COMPRESSION_ZSTD) {
+		cf_warning(AS_SMD, "invalid compression mode %u", compression);
+		return false;
+	}
+
+	uint8_t* compressed = NULL;
+	size_t compressed_sz = 0;
+
+	if (msg_get_buf(m, SMD_MSG_COMPRESSED_ITEMS, &compressed, &compressed_sz,
+				MSG_GET_DIRECT) != 0) {
+		cf_warning(AS_SMD, "msg missing compressed items");
+		return false;
+	}
+
+	if (! as_smd_decompress_items(compressed, compressed_sz, &op->items)) {
+		cf_warning(AS_SMD, "failed to decompress full items");
+		return false;
+	}
 
 	return true;
 }
@@ -2588,6 +2742,10 @@ module_fill_msg(smd_module* module, msg* m)
 	msg_set_uint64(m, SMD_MSG_COMMITTED_CL_KEY, module->cv_key);
 	msg_set_uint64(m, SMD_MSG_TID, module->cv_tid);
 
+	if (module_fill_msg_compressed(module, m)) {
+		return;
+	}
+
 	uint32_t count = cf_vector_size(&module->db);
 
 	cf_vector key_vec;
@@ -2626,6 +2784,54 @@ module_fill_msg(smd_module* module, msg* m)
 	cf_vector_destroy(&key_vec);
 	cf_vector_destroy(&val_vec);
 	cf_free(gen_list);
+}
+
+static bool
+module_fill_msg_compressed(smd_module* module, msg* m)
+{
+	if (g_config.smd_compression_mode != AS_SMD_COMPRESSION_MODE_ZSTD) {
+		return false;
+	}
+
+	if (! smd_can_compress_full()) {
+		return false;
+	}
+
+	void* compressed = NULL;
+	size_t compressed_sz = 0;
+	size_t orig_sz = 0;
+
+	// These counters are written here (SMD thread) and read by the info thread
+	// in as_smd_get_info(); use atomics for a consistent cross-thread read,
+	// matching the repl/migrate wire-comp stats.
+	as_incr_uint64(&g_smd.compression_attempts);
+
+	if (! as_smd_compress_items(&module->db, (uint8_t**)&compressed,
+				&compressed_sz, &orig_sz, g_config.smd_compression_level)) {
+		as_incr_uint64(&g_smd.compression_fallbacks);
+		return false;
+	}
+
+	as_incr_uint64(&g_smd.compression_hits);
+
+	if (compressed_sz < orig_sz) {
+		// Bytes saved by compressing this full-sync message, credited per
+		// message built. We deliberately do NOT multiply by a guessed recipient
+		// count: module_fill_msg() doesn't know the caller's fan-out (a
+		// single-peer answer vs the principal's broadcast), so the old
+		// (orig - compressed) * node_count over-counted on the common
+		// single-recipient paths and re-counted on every retransmit rebuild.
+		// Cast is safe under the guard above (and silences -Wsign-conversion on
+		// as_add_uint64's int64_t delta): compressed_sz < orig_sz, so the
+		// difference is positive and far below INT64_MAX.
+		as_add_uint64(&g_smd.compression_bytes_saved,
+				(int64_t)(orig_sz - compressed_sz));
+	}
+
+	msg_set_uint32(m, SMD_MSG_COMPRESSION, SMD_COMPRESSION_ZSTD);
+	msg_set_buf(m, SMD_MSG_COMPRESSED_ITEMS, compressed, compressed_sz,
+			MSG_SET_HANDOFF_MALLOC);
+	return true;
 }
 
 // Lightweight FULL_FROM_PR with no items - lets an NPR that already has
@@ -3143,6 +3349,12 @@ smd_hash_get_row_i(const smd_hash* h, const char* key)
 //==========================================================
 // Local helpers - as_smd_item.
 //
+
+static bool
+smd_can_compress_full(void)
+{
+	return as_exchange_min_compatibility_id() >= SMD_FULL_ZSTD_COMPATIBILITY_ID;
+}
 
 static as_smd_item*
 smd_item_create_copy(const char* key, const char* value, uint64_t ts, uint32_t gen)

@@ -57,6 +57,7 @@
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
 #include "sindex/sindex.h"
+#include "storage/flat.h"
 #include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
 #include "transaction/mrt_utils.h"
@@ -1452,6 +1453,13 @@ write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		return result;
 	}
 
+	// Wire-compression pre-write half: takes the single mode snapshot both halves
+	// share and captures the delta base before the storage write frees it. See
+	// repl_compression_ctx in rw_utils.h for why one snapshot is load-bearing.
+	repl_compression_ctx repl_comp;
+
+	repl_compression_pre_write(rw, rd, tr, &repl_comp);
+
 	//------------------------------------------------------
 	// Write the record to storage.
 	//
@@ -1466,6 +1474,8 @@ write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		unwind_index_metadata(&old_r, r);
 		return -result;
 	}
+
+	repl_compression_post_write(rw, rd, &old_r, &repl_comp);
 
 	as_mrt_monitor_update_hist(rd);
 

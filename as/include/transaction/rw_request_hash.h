@@ -77,6 +77,18 @@ typedef enum {
 #define RW_OP_REPL_PING 6
 #define RW_OP_REPL_PING_ACK 7
 #define RW_OP_REPL_WRITE 8
+#define RW_OP_REPL_WRITE_DELTA 9
+#define RW_OP_REPL_WRITE_COMPRESSED 10
+
+// Minimum cluster compatibility id at which every peer understands the
+// RW_OP_REPL_WRITE_DELTA / RW_OP_REPL_WRITE_COMPRESSED ops. Below this an older
+// peer would silently drop them and the master would retransmit forever, so the
+// master only emits them once min_compatibility_id reaches this value.
+//
+// Must stay equal to the AS_EXCHANGE_COMPATIBILITY_ID that shipped these ops
+// (17, SERVER-487) and must not be folded into a neighbouring feature's id -
+// see the reasoning on 17 in exchange.h.
+#define RW_WIRE_COMPRESSION_COMPATIBILITY_ID 17
 
 #define RW_INFO_UNUSED_1 0x0001 // was XDR (used in 4.9 & 5.0.0.3)
 #define RW_INFO_NO_REPL_ACK 0x0002

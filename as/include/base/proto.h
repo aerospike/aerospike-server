@@ -104,7 +104,7 @@ extern __thread struct as_error_exp_trace_s g_error_exp_trace;
 // Ill-formed or unrepresentable encoding
 // (e.g. invalid UTF-8, UTF-16 that cannot be written as UTF-8 per ICU).
 #define AS_ERR_INVALID_ENCODING         29
-#define AS_ERR_UNUSED_30                30 // safe to recycle (never shipped)
+#define AS_ERR_RECORD_VERSION_MISMATCH  30
 #define AS_ERR_UNUSED_31                31 // safe to recycle (never shipped)
 #define AS_ERR_XDR_KEY_BUSY             32
 

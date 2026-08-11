@@ -64,6 +64,7 @@
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
 #include "sindex/sindex.h"
+#include "storage/flat.h"
 #include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
 #include "transaction/mrt_utils.h"
@@ -1196,6 +1197,12 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 	set_xdr_write(tr, r);
 	transition_delete_metadata(tr, r, is_delete, is_delete && rd->n_bins != 0);
 
+	// Wire-compression pre-write half - see write_master and
+	// repl_compression_ctx in rw_utils.h.
+	repl_compression_ctx repl_comp;
+
+	repl_compression_pre_write(rw, rd, tr, &repl_comp);
+
 	//------------------------------------------------------
 	// Write the record to storage.
 	//
@@ -1205,6 +1212,8 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 		unwind_index_metadata(&old_r, r);
 		return (uint8_t)(-result);
 	}
+
+	repl_compression_post_write(rw, rd, &old_r, &repl_comp);
 
 	as_record_transition_stats(r, ns, &old_r);
 	pickle_all(rd, rw);

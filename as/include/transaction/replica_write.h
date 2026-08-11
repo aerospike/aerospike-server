@@ -26,6 +26,9 @@
 // Includes.
 //
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include "msg.h"
 #include "node.h"
 
@@ -36,6 +39,8 @@
 //
 
 struct as_transaction_s;
+struct as_namespace_s;
+struct as_remote_record_s;
 struct rw_request_s;
 
 //==========================================================
@@ -50,4 +55,13 @@ void repl_write_reset_rw(struct rw_request_s* rw, struct as_transaction_s* tr,
 		repl_write_done_cb cb);
 void repl_write_reset_replicas(struct rw_request_s* rw);
 void repl_write_handle_op(cf_node node, msg* m);
+void repl_write_delta_handle_op(cf_node node, msg* m);
+void repl_write_compressed_handle_op(cf_node node, msg* m);
 void repl_write_handle_ack(cf_node node, msg* m);
+
+// The pure decision helpers replica_write.c keeps non-static for its unit tests
+// (repl_write_needs_pickle_fallback, repl_write_get_orig_pickle,
+// repl_write_ack_credits_bytes_saved) are intentionally NOT declared here. They
+// have no production caller outside that file, and one of them is order-
+// dependent. They live in transaction/replica_write_test_support.h, included
+// only by replica_write.c and the replica-write unit tests.
