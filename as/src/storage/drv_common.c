@@ -29,11 +29,15 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
+#include <string.h>
 #include <unistd.h>
 
+#include "log.h"
 #include "vmapx.h"
 
 #include "base/datamodel.h"
+#include "base/index.h"
 #include "storage/flat.h"
 
 //==========================================================
@@ -55,6 +59,36 @@ drv_is_set_evictable(const as_namespace* ns, const as_flat_opt_meta* opt_meta)
 	}
 
 	return ! p_set->eviction_disabled;
+}
+
+// The edition-neutral half of drv_cold_start_adopt_set() - the halves live in
+// drv_common_ce.c and drv_common_ee.c.
+//
+// Returns true if the element already has a set, which the caller must then
+// leave alone - the first set swept wins, as on the create path.
+bool
+drv_cold_start_set_already_assigned(cf_log_context log_ctx, as_namespace* ns,
+		const as_flat_record* flat, const as_flat_opt_meta* opt_meta,
+		const as_index* r)
+{
+	if (as_index_get_set_id(r) == INVALID_SET_ID) {
+		return false;
+	}
+
+	const char* set_name = as_index_get_set_name(r, ns);
+
+	if (set_name == NULL ||
+			strncmp(set_name, opt_meta->set_name, opt_meta->set_name_len) != 0 ||
+			set_name[opt_meta->set_name_len] != 0) {
+		// Takes a writer that reuses a digest across two set names, which the
+		// server permits. Note - the on-device name is not null-terminated.
+		cf_warning(log_ctx,
+				"{%s} %pD on-device set %.*s does not match indexed set %s",
+				ns->name, &flat->keyd, (int)opt_meta->set_name_len,
+				opt_meta->set_name, set_name == NULL ? "(null)" : set_name);
+	}
+
+	return true;
 }
 
 bool

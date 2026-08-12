@@ -2119,6 +2119,12 @@ cold_start_add_record(drv_mems* mems, drv_mem* mem, const as_flat_record* flat,
 		mem->record_add_unique_counter++;
 	}
 	else {
+		// Before the update, so its set stats and set index use the new set-id.
+		if (opt_meta.set_name != NULL) {
+			drv_cold_start_adopt_set(AS_DRV_MEM, ns, flat, &opt_meta,
+					p_partition->tree, &r_ref);
+		}
+
 		cold_start_record_update(mems, flat, &opt_meta, p_partition->tree,
 				&r_ref);
 
