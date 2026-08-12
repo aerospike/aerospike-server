@@ -1487,8 +1487,96 @@ apply_network_tls_context(std::string name, const nlohmann::json& tls_json,
 // Namespace Handlers.
 //
 
+// Cross-field namespace validation. The .conf parser runs these when a stanza
+// closes (cfg.c CASE_CONTEXT_END); YAML has no contexts, so they run once every
+// field of the namespace has been applied.
+//
+// Checks the schema already enforces are deliberately absent here: it requires
+// 'storage-engine', requires exactly one of 'devices'/'files' (plus
+// 'data-size' for memory storage), requires 'mounts'/'mounts-budget' for flash
+// and pmem indexes, and makes 'filesize' mandatory wherever 'files' appears.
+
+// Applies to every storage engine.
 static void
-apply_namespace(std::string name, const nlohmann::json& namespace_json)
+validate_storage_common(const as_namespace* ns, const std::string& path)
+{
+	if (ns->storage_commit_to_device && ns->storage_disable_odsync) {
+		throw config_error(path,
+				"can't configure both 'commit-to-device' and 'disable-odsync'");
+	}
+
+	if (ns->storage_compression_acceleration != 0 &&
+			ns->storage_compression != AS_COMPRESSION_LZ4) {
+		throw config_error(path + "/compression-acceleration",
+				"is only relevant for 'compression lz4'");
+	}
+
+	if (ns->storage_compression_level != 0 &&
+			ns->storage_compression != AS_COMPRESSION_ZSTD) {
+		throw config_error(path + "/compression-level",
+				"is only relevant for 'compression zstd'");
+	}
+}
+
+// May adjust 'ns' - applies the memory/shadow 'flush-size' default.
+static void
+validate_namespace_storage(as_namespace* ns, const std::string& ns_path)
+{
+	if (ns->storage_type == AS_STORAGE_ENGINE_UNDEFINED) {
+		// The schema requires 'storage-engine', so this is reachable only if
+		// schema validation was bypassed - none of the below applies.
+		return;
+	}
+
+	const std::string path = ns_path + "/storage-engine";
+
+	if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY) {
+		if (ns->n_storage_shadows == 0 && ns->storage_flush_size != 0) {
+			throw config_error(path + "/flush-size",
+					"can't configure 'flush-size' if not using storage backing");
+		}
+
+		// Shadow writes only reach disk with a non-zero flush size. Leaving it
+		// at 0 makes ssd_flush_buf's loop never run - silent data loss showing
+		// up later as 'bad magic' on read.
+		if (ns->n_storage_shadows != 0 && ns->storage_flush_size == 0) {
+			ns->storage_flush_size = DEFAULT_FLUSH_SIZE;
+		}
+
+		if (ns->n_storage_shadows == 0 &&
+				ns->storage_encryption_key_file != NULL) {
+			throw config_error(path + "/encryption-key-file",
+					"is only relevant if using storage backing");
+		}
+
+		if (ns->storage_commit_to_device && ns->n_storage_shadows == 0) {
+			throw config_error(path + "/commit-to-device",
+					"guarantee is automatic if not using storage backing");
+		}
+	}
+
+	validate_storage_common(ns, path);
+}
+
+static void
+validate_namespace(const as_namespace* ns, const std::string& ns_path)
+{
+	if (ns->pi_xmem_type == CF_XMEM_TYPE_FLASH &&
+			ns->storage_type != AS_STORAGE_ENGINE_SSD) {
+		throw config_error(ns_path + "/index-type",
+				"'index-type flash' can only be used with 'storage-engine device'");
+	}
+
+	if (ns->default_ttl != 0 && ns->nsup_period == 0 &&
+			! ns->allow_ttl_without_nsup) {
+		throw config_error(ns_path + "/default-ttl",
+				"must configure non-zero 'nsup-period' or 'allow-ttl-without-nsup' true if 'default-ttl' is non-zero");
+	}
+}
+
+static void
+apply_namespace(std::string name, const nlohmann::json& namespace_json,
+		as_config* config)
 {
 	if (! namespace_json.is_object()) {
 		throw config_error("/namespaces/" + name, "must be an object");
@@ -1500,23 +1588,32 @@ apply_namespace(std::string name, const nlohmann::json& namespace_json)
 		apply_field(namespace_struct, namespace_json, desc);
 	}
 
-	// Match the .conf parser's NAMESPACE_STORAGE_MEMORY context-end checks
-	// (cfg.c:3784-3792). 'flush-size' is only meaningful for memory storage
-	// when shadow devices/files are configured: configuring it without
-	// shadows is a misconfiguration, and configuring shadows without an
-	// explicit flush-size needs the same default the .conf parser applies.
-	// (For 'storage-engine: device', the default is already applied when the
-	// 'type' field is processed.)
-	if (namespace_struct->storage_type == AS_STORAGE_ENGINE_MEMORY) {
-		if (namespace_struct->n_storage_shadows == 0 &&
-				namespace_struct->storage_flush_size != 0) {
-			throw config_error("/namespaces/storage-engine/flush-size",
-					"can't configure 'flush-size' if not using storage backing");
-		}
-		if (namespace_struct->n_storage_shadows != 0 &&
-				namespace_struct->storage_flush_size == 0) {
-			namespace_struct->storage_flush_size = DEFAULT_FLUSH_SIZE;
-		}
+	const std::string ns_path = "/namespaces/" + name;
+
+	// Order mirrors the .conf parser, where the inner storage-engine stanza
+	// closes before the namespace stanza.
+	validate_namespace_storage(namespace_struct, ns_path);
+	validate_namespace(namespace_struct, ns_path);
+
+	// Mirrors the .conf parser's namespace context end. A namespace backed by
+	// a device - or by shadows it commits to - is not inlined, which raises the
+	// default 'service-threads' to 5x the CPU count in as_config_post_process()
+	// and the 'service-threads' best-practice floor to 3x. Counted only after
+	// validation, so a rejected namespace never contributes.
+	//
+	// as_namespace_create() registers the namespace on g_config, so 'config'
+	// and g_config are necessarily the same instance here - assert it, since
+	// the counters below must land on the same config the namespace did.
+	cf_assert(config == &g_config, AS_CFG,
+			"applying namespace counters to a config other than g_config");
+
+	if (namespace_struct->storage_type == AS_STORAGE_ENGINE_SSD ||
+			(namespace_struct->storage_commit_to_device &&
+					namespace_struct->n_storage_shadows != 0)) {
+		config->n_namespaces_not_inlined++;
+	}
+	else {
+		config->n_namespaces_inlined++;
 	}
 }
 
@@ -1528,11 +1625,13 @@ handle_namespaces(void* target, const FieldDescriptor& desc,
 		throw config_error("/namespaces", "must be an object");
 	}
 
+	as_config* config = static_cast<as_config*>(target);
+
 	// rely on config being initialized to 0
 	// config->n_namespaces = 0;
 
 	for (auto& el : value.items()) {
-		apply_namespace(el.key(), el.value());
+		apply_namespace(el.key(), el.value(), config);
 	}
 }
 
@@ -2119,6 +2218,15 @@ handle_network_heartbeat(void* target, const FieldDescriptor& desc,
 	for (const auto& desc : NETWORK_HEARTBEAT_FIELD_DESCRIPTORS) {
 		apply_field(config, value, desc);
 	}
+
+	// The .conf parser checks this when the heartbeat stanza closes. Not
+	// expressible in the schema - it relates three fields arithmetically.
+	// Unset fields hold their cfg_set_defaults() values, as they do there.
+	if (config->hb_config.connect_timeout_ms > config->hb_config.tx_interval *
+					config->hb_config.max_intervals_missed / 3) {
+		throw config_error("/network/heartbeat/connect-timeout-ms",
+				"must be <= 'interval' * 'timeout' / 3");
+	}
 }
 
 static void
@@ -2500,6 +2608,19 @@ handle_network_fabric(void* target, const FieldDescriptor& desc,
 	as_config* config = static_cast<as_config*>(target);
 	for (const auto& desc : NETWORK_FABRIC_FIELD_DESCRIPTORS) {
 		apply_field(config, value, desc);
+	}
+
+	// The .conf parser checks this when the fabric stanza closes. Not
+	// expressible in the schema - it's a modulo relation. The schema's
+	// minimum of 1 on 'channel-rw-recv-pools' keeps the divisor safe, but
+	// guard anyway since apply may run against a laxer schema in tests.
+	uint32_t rw_pools = config->n_fabric_channel_recv_pools[AS_FABRIC_CHANNEL_RW];
+	uint32_t rw_threads =
+			config->n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_RW];
+
+	if (rw_pools != 0 && rw_threads % rw_pools != 0) {
+		throw config_error("/network/fabric/channel-rw-recv-threads",
+				"must be a multiple of 'channel-rw-recv-pools'");
 	}
 }
 
