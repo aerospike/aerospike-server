@@ -512,9 +512,16 @@ static const string_op_def string_modify_op_table[] = {
 	STRING_MODIFY_OP_ENTRY(AS_STRING_OP_REPEAT, "string_repeat",
 			string_modify_op_repeat, (STRING_FLAGS_CREATE_CAPABLE), 1, 2,
 			string_parse_int1, string_parse_flags),
+	// Client must send regex flags (int1) before policy flags -- (list, flags)
+	// will parse flags as int1, so a client sending only policy flags must
+	// still pass int1 explicitly (0 for no special regex behavior). The
+	// bad_flags mask cannot catch a misdirected value here: AS_STRING_FLAG_
+	// NO_FAIL and AS_STRING_REGEX_DOTALL are both 1 << 2, and UPDATE_ONLY and
+	// MULTILINE are both 1 << 1, so a two-arg send silently selects a regex
+	// behavior instead of a policy.
 	STRING_MODIFY_OP_ENTRY(AS_STRING_OP_REGEX_REPLACE, "string_regex_replace",
-			string_modify_op_regex_replace, (STRING_FLAGS_UPDATE_ONLY), 1, 2,
-			string_parse_list, string_parse_int1),
+			string_modify_op_regex_replace, (STRING_FLAGS_UPDATE_ONLY), 1, 3,
+			string_parse_list, string_parse_int1, string_parse_flags),
 	STRING_MODIFY_OP_ENTRY(AS_STRING_OP_APPEND, "string_append",
 			string_modify_op_append, (STRING_FLAGS_CREATE_CAPABLE), 1, 2,
 			string_parse_buf, string_parse_flags),
