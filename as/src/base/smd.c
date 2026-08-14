@@ -1248,28 +1248,36 @@ smd_msg_parse_items(msg* m, smd_op* op)
 		return false;
 	}
 
+	// count is non-zero here - the empty-list case returned above, so the
+	// deferred macros never see a zero size.
+	//
+	// Both vectors are presized to their exact final element count and must
+	// never grow: with-buf vectors don't own their backing store (flags = 0),
+	// but increase_capacity() would malloc a fresh buffer and set
+	// VECTOR_FLAG_FREE_ELES, and only cf_vector_destroy() - which the deferred
+	// conversion removed - frees that. msg_msgpack_list_get_buf_array_presized()
+	// fills exactly count elements, so capacity is never exceeded.
+	define_deferred_memory(key_vec_buf, (size_t)count * sizeof(msg_buf_ele));
 	cf_vector key_vec;
+
+	cf_vector_init_with_buf(&key_vec, sizeof(msg_buf_ele), count, key_vec_buf, 0);
+
+	define_deferred_memory(val_vec_buf, (size_t)count * sizeof(msg_buf_ele));
 	cf_vector value_vec;
 
-	cf_vector_init(&key_vec, sizeof(msg_buf_ele), count, 0);
-	cf_vector_init(&value_vec, sizeof(msg_buf_ele), count, 0);
+	cf_vector_init_with_buf(&value_vec, sizeof(msg_buf_ele), count, val_vec_buf,
+			0);
 
-	uint32_t* gen_list = cf_malloc(count * sizeof(uint32_t));
+	define_deferred_array(gen_list, uint32_t, count);
 
 	if (! msg_msgpack_list_get_buf_array_presized(m, SMD_MSG_KEY_LIST, &key_vec)) {
 		cf_warning(AS_SMD, "msg missing key list");
-		cf_vector_destroy(&key_vec);
-		cf_vector_destroy(&value_vec);
-		cf_free(gen_list);
 		return false;
 	}
 
 	if (! msg_msgpack_list_get_buf_array_presized(m, SMD_MSG_VALUE_LIST,
 				&value_vec)) {
 		cf_warning(AS_SMD, "msg missing value list");
-		cf_vector_destroy(&key_vec);
-		cf_vector_destroy(&value_vec);
-		cf_free(gen_list);
 		return false;
 	}
 
@@ -1277,9 +1285,6 @@ smd_msg_parse_items(msg* m, smd_op* op)
 				&check) &&
 			check != count) {
 		cf_warning(AS_SMD, "msg missing gen list");
-		cf_vector_destroy(&key_vec);
-		cf_vector_destroy(&value_vec);
-		cf_free(gen_list);
 		return false;
 	}
 
@@ -1297,10 +1302,6 @@ smd_msg_parse_items(msg* m, smd_op* op)
 						smd_item_value_ndup(val_p->ptr, val_p->sz), ts,
 						gen_list[i]));
 	}
-
-	cf_vector_destroy(&key_vec);
-	cf_vector_destroy(&value_vec);
-	cf_free(gen_list);
 
 	return true;
 }
@@ -2666,13 +2667,34 @@ module_fill_msg(smd_module* module, msg* m)
 
 	uint32_t count = cf_vector_size(&module->db);
 
+	// An empty db is ordinary - a fresh cluster's NPR sends FULL_TO_PR with no
+	// items. Size the scratch buffers for at least one element: a zero size
+	// makes define_deferred_memory() declare a zero-length VLA, which C11
+	// 6.7.6.2p5 leaves undefined. The wire content is unaffected - the fill
+	// loop and every msg_*_set below are bounded by count, not by this.
+	uint32_t scratch_count = count != 0 ? count : 1;
+
+	// Both vectors are presized to their exact final element count and must
+	// never grow: with-buf vectors don't own their backing store (flags = 0),
+	// but increase_capacity() would malloc a fresh buffer and set
+	// VECTOR_FLAG_FREE_ELES, and only cf_vector_destroy() - which the deferred
+	// conversion removed - frees that. The fill loop appends exactly count
+	// elements, so capacity is never exceeded.
+	define_deferred_memory(key_vec_buf,
+			(size_t)scratch_count * sizeof(msg_buf_ele));
 	cf_vector key_vec;
+
+	cf_vector_init_with_buf(&key_vec, sizeof(msg_buf_ele), scratch_count,
+			key_vec_buf, 0);
+
+	define_deferred_memory(val_vec_buf,
+			(size_t)scratch_count * sizeof(msg_buf_ele));
 	cf_vector val_vec;
 
-	cf_vector_init(&key_vec, sizeof(msg_buf_ele), count, 0);
-	cf_vector_init(&val_vec, sizeof(msg_buf_ele), count, 0);
+	cf_vector_init_with_buf(&val_vec, sizeof(msg_buf_ele), scratch_count,
+			val_vec_buf, 0);
 
-	uint32_t* gen_list = cf_malloc(count * sizeof(uint32_t));
+	define_deferred_array(gen_list, uint32_t, scratch_count);
 
 	msg_set_uint64_array_size(m, SMD_MSG_TS_ARRAY, count);
 
@@ -2698,10 +2720,6 @@ module_fill_msg(smd_module* module, msg* m)
 	msg_msgpack_list_set_buf(m, SMD_MSG_KEY_LIST, &key_vec);
 	msg_msgpack_list_set_buf(m, SMD_MSG_VALUE_LIST, &val_vec);
 	msg_msgpack_list_set_uint32(m, SMD_MSG_GEN_LIST, gen_list, count);
-
-	cf_vector_destroy(&key_vec);
-	cf_vector_destroy(&val_vec);
-	cf_free(gen_list);
 }
 
 static bool
