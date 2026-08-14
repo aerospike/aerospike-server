@@ -655,6 +655,11 @@ typedef enum {
 	AS_SUB_OPNOT_STRING_CONVERSION_FAILED = 10,
 	// Source blob/string is not valid UTF-8 for an OP_NOT_APPLICABLE path.
 	AS_SUB_OPNOT_STRING_UTF8_INVALID = 11,
+	// 12 is reserved for AS_SUB_OPNOT_STRING_REGEX_LIMIT_EXCEEDED, in review
+	// on the SERVER-1372 branch and already carried by preview/string-APIs-3.
+	// String is not valid base64 - a length that is not a multiple of 4, a
+	// character outside the alphabet, or misplaced '=' padding.
+	AS_SUB_OPNOT_STRING_B64_INVALID = 13,
 } as_sub_opnot_t;
 
 // Subcodes paired with AS_ERR_MRT_BLOCKED.

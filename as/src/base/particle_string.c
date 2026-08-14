@@ -4106,14 +4106,20 @@ string_read_op_b64_decode(const string_op* op, const uint8_t* from, uint32_t sz,
 
 	uint32_t max_decoded = cf_b64_decoded_buf_size(sz);
 	string_mem* answer = cf_malloc(sizeof(string_mem) + max_decoded);
-	uint32_t decoded_sz;
+	uint32_t decoded_sz = 0;
 
-	if (! cf_b64_validate_and_decode((const char*)from, sz, answer->data,
-				&decoded_sz)) {
+	// Empty decodes to an empty blob, closing the round trip with
+	// bit_b64_encode of an empty blob. cf_b64_validate_and_decode() rejects a
+	// zero length - right for its config and sindex callers, where a missing
+	// value is not an empty one - so the empty case never reaches it.
+	if (sz != 0 &&
+			! cf_b64_validate_and_decode((const char*)from, sz, answer->data,
+					&decoded_sz)) {
 		cf_free(answer);
+		as_error_details_set_fmt(AS_SUB_OPNOT_STRING_B64_INVALID,
+				"string_b64_decode: value is not valid base64");
 		cf_ticker_warning(AS_PARTICLE,
-				"string_read_op_b64_decode -"
-				"error %u - invalid base64",
+				"string_read_op_b64_decode - error %u - invalid base64",
 				AS_ERR_OP_NOT_APPLICABLE);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
