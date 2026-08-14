@@ -279,13 +279,15 @@ typedef struct smd_module_s {
 	smd_state state;
 
 	// For NPR settle confirmation - true once this node has received an
-	// authoritative signal (a full, a cv_key-only confirm, a set, or - in a
-	// mixed cluster - fail-open inference) that the principal has spoken for
-	// the current cluster key. This is the ONLY settle signal; cv_key is a
-	// pure merge-protocol token and must never be used to infer settledness
-	// (see smd_all_modules_settled_locked()).
+	// authoritative signal (a full, a cv_key-only confirm, or a set) that the
+	// principal has spoken for the current cluster key. This is the ONLY settle
+	// signal; cv_key is a pure merge-protocol token and must never be used to
+	// infer settledness (see smd_all_modules_settled_locked()).
+	//
+	// Only ever set by real principal traffic - never inferred. A cluster that
+	// can't produce that traffic (one carrying a node from before this feature)
+	// is handled whole-node by the gate, not per-module here.
 	bool settle_confirmed;
-	uint64_t fail_open_confirm_at_ms;
 
 	// For set ack/nack.
 	cf_node set_src;
@@ -394,8 +396,6 @@ COMPILER_ASSERT(sizeof(g_module_table) / sizeof(smd_module) == AS_SMD_NUM_MODULE
 static bool smd_all_modules_settled_locked(void);
 static void smd_maybe_set_initial_sync_done(void);
 static bool smd_mixed_cluster(void);
-static void npr_try_mixed_fail_open_confirm(void);
-static int npr_mixed_fail_open_wait_ms(void);
 
 // Callbacks.
 static int smd_msg_recv_cb(cf_node node_id, msg* m, void* udata);
@@ -781,6 +781,17 @@ as_smd_get_info(cf_dyn_buf* db)
 	cf_dyn_buf_append_string(db, "principal=");
 	cf_dyn_buf_append_uint64_x(db, g_smd.succession[0]);
 	cf_dyn_buf_append_char(db, ',');
+	// Whole-node gate state. The per-module settled= field below is only the
+	// per-module term - a node whose gate opened because the cluster is mixed
+	// still reports settled=false for every module, so these two are the only
+	// way to tell "gate open by policy" from "still waiting".
+	cf_dyn_buf_append_string(db, "initial_sync_done=");
+	cf_dyn_buf_append_string(db,
+			as_load_bool_acq(&g_smd_initial_sync_done) ? "true" : "false");
+	cf_dyn_buf_append_char(db, ',');
+	cf_dyn_buf_append_string(db, "mixed_cluster=");
+	cf_dyn_buf_append_string(db, smd_mixed_cluster() ? "true" : "false");
+	cf_dyn_buf_append_char(db, ',');
 	cf_dyn_buf_append_string(db, "cluster_key=");
 	cf_dyn_buf_append_uint64_x(db, g_smd.cl_key);
 	cf_dyn_buf_append_char(db, ',');
@@ -899,23 +910,37 @@ smd_all_modules_settled_locked(void)
 		return false;
 	}
 
+	// POLICY: fail open while any node predates this feature. Such a node may
+	// lack an SMD module this build has, and it silently drops every message
+	// naming that module's id - so the module's round never completes, and a
+	// fail-closed gate would hold client service and immigrations for as long
+	// as that node is in the cluster. That converts a historically-tolerated
+	// degradation (one module doesn't sync until the cluster is homogeneous)
+	// into a node-level outage, which is the worse of the two.
+	//
+	// Deliberately whole-node and not per-module: the wire cannot distinguish
+	// "your build lacks this module" from "your build has it and is slow", so
+	// any per-module test is an inference. Until every node understands this
+	// protocol, serve requests and take migrations rather than reason about
+	// which module a peer might be missing.
+	//
+	// NOTE - scoped to the compat-id skew that exists today. A module added in
+	// some FUTURE compat id is invisible here: smd_mixed_cluster() tests a hard
+	// literal < 16, so a cluster already at 16 or above is not "mixed", whatever
+	// later ids it carries. That is deliberate. Adding another SMD module is
+	// expected to require the SMD redesign - a per-module principal with its own
+	// leader election - rather than another inference layer bolted onto this
+	// gate.
+	if (smd_mixed_cluster()) {
+		return true;
+	}
+
 	for (uint32_t i = 0; i < AS_SMD_NUM_MODULES; i++) {
 		smd_module* module = smd_get_module((as_smd_id)i);
 
 		if (! module->in_use) {
 			continue;
 		}
-
-		// POLICY: this gate requires every in-use module to settle, including
-		// leaving STATE_MERGING. A module that older peers lack (e.g. a module
-		// added in a newer release) never leaves STATE_MERGING in a mixed
-		// cluster - those peers drop its REQ_VER_FROM_PR for an unknown module
-		// id and never report - which would wedge the whole node's client
-		// service, converting a historically-tolerated degradation (that one
-		// module doesn't sync until the cluster is homogeneous) into an outage.
-		// So any new SMD module that older builds lack MUST gate its inclusion
-		// here on as_exchange_min_compatibility_id() < <the compat id it ships
-		// in>. All current modules predate this gate, so none need it yet.
 
 		if (module->state == STATE_PR) {
 			continue;
@@ -954,74 +979,6 @@ smd_mixed_cluster(void)
 	// cluster as "mixed" on every future unrelated bump (e.g. 16+17), needlessly
 	// disabling the cv_key-only fast path during upgrades that all understand it.
 	return as_exchange_min_compatibility_id() < 16;
-}
-
-// Fail-open inference for NPRs in a mixed cluster: if a report to an old
-// principal hasn't drawn a FULL_FROM_PR within one principal retry interval,
-// infer the module was clean (an old principal would have already responded
-// if it had anything - dirty or full - to send) and mark it settle_confirmed.
-// This ONLY sets the settle-confirm flag - it must never touch cv_key, which
-// stays at its last real merge-commit value (see cv_key's declaration); an
-// old principal never advances its own cv_key on the clean path either, so
-// leaving it untouched here keeps this node's reported key matching what an
-// old principal expects on every subsequent cluster change. A later, delayed
-// FULL_FROM_PR still applies normally and simply re-confirms.
-static void
-npr_try_mixed_fail_open_confirm(void)
-{
-	if (smd_is_pr() || ! smd_mixed_cluster()) {
-		return;
-	}
-
-	uint64_t now_ms = cf_getms();
-
-	for (uint32_t i = 0; i < AS_SMD_NUM_MODULES; i++) {
-		smd_module* module = smd_get_module((as_smd_id)i);
-
-		if (! module->in_use || module->state != STATE_NPR ||
-				module->fail_open_confirm_at_ms == 0 ||
-				module->fail_open_confirm_at_ms > now_ms) {
-			continue;
-		}
-
-		cf_detail(AS_SMD, "{%s} mixed cluster fail-open settle confirm",
-				module->name);
-
-		module->settle_confirmed = true;
-		module->fail_open_confirm_at_ms = 0;
-	}
-
-	smd_maybe_set_initial_sync_done();
-}
-
-static int
-npr_mixed_fail_open_wait_ms(void)
-{
-	if (smd_is_pr() || ! smd_mixed_cluster()) {
-		return INT_MAX;
-	}
-
-	uint64_t next_ms = UINT64_MAX;
-	uint64_t now_ms = cf_getms();
-
-	for (uint32_t i = 0; i < AS_SMD_NUM_MODULES; i++) {
-		smd_module* module = smd_get_module((as_smd_id)i);
-
-		if (! module->in_use || module->state != STATE_NPR ||
-				module->fail_open_confirm_at_ms == 0) {
-			continue;
-		}
-
-		if (module->fail_open_confirm_at_ms <= now_ms) {
-			return 0;
-		}
-
-		if (module->fail_open_confirm_at_ms < next_ms) {
-			next_ms = module->fail_open_confirm_at_ms;
-		}
-	}
-
-	return next_ms == UINT64_MAX ? INT_MAX : (int)(next_ms - now_ms);
 }
 
 static void
@@ -1502,24 +1459,8 @@ run_smd(void* udata)
 				}
 			}
 		}
-		else {
-			// npr_try_mixed_fail_open_confirm() writes the module's settle
-			// fields, and as_smd_get_info() reads module state under
-			// g_smd.lock - so this must hold the lock too, like every other
-			// module-state mutation. (pr_try_retransmit() above is lock-free
-			// but read-only.)
-			smd_lock();
-
-			npr_try_mixed_fail_open_confirm();
-
-			int npr_wait_ms = npr_mixed_fail_open_wait_ms();
-
-			smd_unlock();
-
-			if (npr_wait_ms < wait_ms) {
-				wait_ms = npr_wait_ms;
-			}
-		}
+		// else - a NPR has no timer of its own. It settles only on real
+		// principal traffic, which arrives on the event queue below.
 
 		smd_op* op;
 
@@ -1743,7 +1684,6 @@ op_cluster_changed(smd_op* op)
 
 			module->state = STATE_NPR;
 			module->settle_confirmed = false;
-			module->fail_open_confirm_at_ms = 0;
 		}
 	}
 
@@ -1754,18 +1694,6 @@ op_cluster_changed(smd_op* op)
 		usleep(REPORT_VER_DELAY_US); // allow principal time to advance
 
 		send_report_all_ver_to_pr();
-
-		if (smd_mixed_cluster()) {
-			uint64_t advance_at_ms = cf_getms() + SMD_RETRY_MS;
-
-			for (uint32_t i = 0; i < AS_SMD_NUM_MODULES; i++) {
-				smd_module* module = smd_get_module((as_smd_id)i);
-
-				if (module->in_use && module->state == STATE_NPR) {
-					module->fail_open_confirm_at_ms = advance_at_ms;
-				}
-			}
-		}
 
 		smd_op* pending_op;
 
@@ -2156,7 +2084,6 @@ op_set_from_pr(smd_op* op)
 	// current cluster key - as good a settle signal as a full or a cv_key-only
 	// confirm (see smd_all_modules_settled_locked()).
 	module->settle_confirmed = true;
-	module->fail_open_confirm_at_ms = 0;
 
 	module_set_npr(module, item_vec_get(&op->items, 0));
 	item_vec_disown_items(&op->items);
@@ -2196,7 +2123,6 @@ op_full_from_pr(smd_op* op)
 	// Any reply from the principal - real or old-code default-zero - confirms
 	// this NPR is no longer waiting on a signal an old principal never sends.
 	module->settle_confirmed = true;
-	module->fail_open_confirm_at_ms = 0;
 
 	if (op->committed_key == module->cv_key && op->tid == module->cv_tid) {
 		smd_maybe_set_initial_sync_done(); // already applied, still check settle
@@ -2277,14 +2203,6 @@ op_req_full_from_pr(smd_op* op)
 	if (module->state != STATE_NPR) {
 		return;
 	}
-
-	// Receiving REQ_FULL_FROM_PR is positive evidence the principal has a dirty
-	// merge in flight - it collects fulls from every NPR, merges, and only then
-	// sends FULL_FROM_PR, which can exceed the fail-open interval for the large
-	// modules this stack targets. Cancel the mixed-cluster fail-open timer so it
-	// can't fire mid-merge and settle this node on pre-merge metadata; the
-	// upcoming FULL_FROM_PR is the authoritative signal and re-confirms settle.
-	module->fail_open_confirm_at_ms = 0;
 
 	OP_DETAIL("sending all");
 
