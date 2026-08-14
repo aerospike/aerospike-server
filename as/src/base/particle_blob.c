@@ -144,6 +144,10 @@ typedef struct bits_state_s {
 	uint32_t n_args;
 	bits_op_def* def;
 
+	// Subflag bit values are only unique per op, so the subflags parsers - who
+	// each know their own domain - translate to op-independent state here.
+	bool invert_size;
+
 	uint32_t n_bytes_head;
 	uint32_t n_bytes_expand;
 	uint32_t n_bytes_op;
@@ -167,6 +171,7 @@ static bool bits_parse_byte_offset(bits_state* state, bits_op* op);
 static bool bits_parse_offset(bits_state* state, bits_op* op);
 static bool bits_parse_byte_size(bits_state* state, bits_op* op);
 static bool bits_parse_byte_size_allow_zero(bits_state* state, bits_op* op);
+static bool bits_parse_read_subflags(bits_state* state, bits_op* op);
 static bool bits_parse_integer_size(bits_state* state, bits_op* op);
 static bool bits_parse_size(bits_state* state, bits_op* op);
 static bool bits_parse_boolean_value(bits_state* state, bits_op* op);
@@ -236,6 +241,9 @@ static bool bits_read_op_rscan(const bits_op* op, const uint8_t* from,
 		as_bin* rb, uint32_t n_bytes);
 static bool bits_read_op_get_integer(const bits_op* op, const uint8_t* from,
 		as_bin* rb, uint32_t n_bytes);
+static bool bits_read_op_b64_encode(const bits_op* op, const uint8_t* from,
+		as_bin* rb, uint32_t n_bytes);
+static int blob_b64_encode(const uint8_t* from, uint32_t sz, as_bin* rb);
 
 static void lshift(const bits_op* op, uint8_t* to, const uint8_t* from,
 		uint32_t n_bytes);
@@ -414,12 +422,13 @@ blob_particle_type_to_bytes_type(as_particle_type type)
 	{                                                                          \
 		__VA_ARGS__                                                            \
 	}
-#define BITS_READ_OP_ENTRY(_op, _name, _op_fn, _min_args, _max_args, ...)             \
-	[_op].name = _name, [_op].prepare = bits_prepare_read_op, [_op].fn.read = _op_fn, \
-	[_op].bad_flags = ~((uint64_t)(0)), [_op].min_args = _min_args,                   \
-	[_op].max_args = _max_args, [_op].args = (bits_parse_fn[])                        \
-	{                                                                                 \
-		__VA_ARGS__                                                                   \
+#define BITS_READ_OP_ENTRY(_op, _name, _op_fn, _prep_fn, _min_args, _max_args, \
+		...)                                                                   \
+	[_op].name = _name, [_op].prepare = _prep_fn, [_op].fn.read = _op_fn,      \
+	[_op].bad_flags = ~((uint64_t)(0)), [_op].min_args = _min_args,            \
+	[_op].max_args = _max_args, [_op].args = (bits_parse_fn[])                 \
+	{                                                                          \
+		__VA_ARGS__                                                            \
 	}
 
 //==========================================================
@@ -502,17 +511,23 @@ static const bits_op_def bits_modify_op_table[] = {
 };
 
 static const bits_op_def bits_read_op_table[] = {
-	BITS_READ_OP_ENTRY(AS_BITS_OP_GET, "bit_get", bits_read_op_get, 2, 2,
-			bits_parse_offset, bits_parse_size),
-	BITS_READ_OP_ENTRY(AS_BITS_OP_COUNT, "bit_count", bits_read_op_count, 2, 2,
-			bits_parse_offset, bits_parse_size),
-	BITS_READ_OP_ENTRY(AS_BITS_OP_LSCAN, "bit_lscan", bits_read_op_lscan, 3, 3,
-			bits_parse_offset, bits_parse_size, bits_parse_boolean_value),
-	BITS_READ_OP_ENTRY(AS_BITS_OP_RSCAN, "bit_rscan", bits_read_op_rscan, 3, 3,
-			bits_parse_offset, bits_parse_size, bits_parse_boolean_value),
-	BITS_READ_OP_ENTRY(AS_BITS_OP_GET_INT, "bit_get_int",
-			bits_read_op_get_integer, 2, 3, bits_parse_offset,
+	BITS_READ_OP_ENTRY(AS_BITS_OP_GET, "bit_get", bits_read_op_get,
+			bits_prepare_read_op, 2, 2, bits_parse_offset, bits_parse_size),
+	BITS_READ_OP_ENTRY(AS_BITS_OP_COUNT, "bit_count", bits_read_op_count,
+			bits_prepare_read_op, 2, 2, bits_parse_offset, bits_parse_size),
+	BITS_READ_OP_ENTRY(AS_BITS_OP_LSCAN, "bit_lscan", bits_read_op_lscan,
+			bits_prepare_read_op, 3, 3, bits_parse_offset, bits_parse_size,
+			bits_parse_boolean_value),
+	BITS_READ_OP_ENTRY(AS_BITS_OP_RSCAN, "bit_rscan", bits_read_op_rscan,
+			bits_prepare_read_op, 3, 3, bits_parse_offset, bits_parse_size,
+			bits_parse_boolean_value),
+	BITS_READ_OP_ENTRY(AS_BITS_OP_GET_INT, "bit_get_int", bits_read_op_get_integer,
+			bits_prepare_read_op, 2, 3, bits_parse_offset,
 			bits_parse_integer_size, bits_parse_get_integer_subflags),
+	BITS_READ_OP_ENTRY(AS_BITS_OP_B64_ENCODE, "bit_b64_encode",
+			bits_read_op_b64_encode, bits_prepare_read_op, 0, 3,
+			bits_parse_byte_offset, bits_parse_byte_size_allow_zero,
+			bits_parse_read_subflags),
 };
 
 //==========================================================
@@ -1330,6 +1345,31 @@ bits_parse_byte_size_allow_zero(bits_state* state, bits_op* op)
 	return true;
 }
 
+// Read ops' subflags arg. AS_BITS_READ_SUBFLAG_INVERT_SIZE translates to
+// state->invert_size here since subflag bit values are only unique per op.
+static bool
+bits_parse_read_subflags(bits_state* state, bits_op* op)
+{
+	if (! bits_parse_subflags(state, op)) {
+		return false;
+	}
+
+	uint64_t bad_flags = (uint64_t)~AS_BITS_READ_SUBFLAG_INVERT_SIZE;
+
+	if ((op->subflags & bad_flags) != 0) {
+		cf_warning(AS_PARTICLE,
+				"bits_parse_read_subflags - error %u op %s (%u) invalid subflags (0x%lx)",
+				AS_ERR_PARAMETER, state->def->name, state->op_type, op->subflags);
+		return false;
+	}
+
+	if ((op->subflags & AS_BITS_READ_SUBFLAG_INVERT_SIZE) != 0) {
+		state->invert_size = true;
+	}
+
+	return true;
+}
+
 static bool
 bits_parse_size(bits_state* state, bits_op* op)
 {
@@ -1614,6 +1654,13 @@ bits_prepare_modify(bits_state* state, bits_op* op, const as_bin* b)
 static int
 bits_prepare_read(bits_state* state, bits_op* op, const as_bin* b)
 {
+	// Every read op takes its size as the second arg, so omitting it means the
+	// same as an inverted size of 0 - "to the end". Ops that require the arg
+	// have already rejected the short arg list in bits_parse_op.
+	if (state->n_args < 2) {
+		state->invert_size = true;
+	}
+
 	return bits_prepare_op(state, op, b);
 }
 
@@ -1636,6 +1683,28 @@ bits_prepare_op(bits_state* state, bits_op* op, const as_bin* b)
 
 	if (byte_offset < 0) {
 		return byte_offset;
+	}
+
+	// Resolve an inverted size now that the blob's size is known: size counts
+	// back from the blob's end to fix the op end, e.g. byte spans [2, 3,
+	// INVERT_SIZE] on a 10-byte blob span [2, 10 - 3). An end at or before the
+	// offset resolves to an empty span, which the op's prepare then accepts or
+	// rejects as it sees fit; an end before the blob's start is out of bounds.
+	if (state->invert_size) {
+		uint32_t n_bits = state->old_size * 8;
+
+		if (op->size > n_bits) {
+			cf_warning(AS_PARTICLE,
+					"bits_prepare_op - error %u op %s (%u) inverted size (%u bits) larger than blob (%u bits)",
+					AS_ERR_OP_NOT_APPLICABLE, state->def->name, state->op_type,
+					op->size, n_bits);
+			return -AS_ERR_OP_NOT_APPLICABLE;
+		}
+
+		uint32_t bit_end = n_bits - op->size;
+		uint32_t bit_offset = ((uint32_t)byte_offset * 8) + (uint32_t)op->offset;
+
+		op->size = bit_offset < bit_end ? bit_end - bit_offset : 0;
 	}
 
 	uint32_t op_size = ((uint32_t)op->offset + op->size + 7) / 8;
@@ -1847,25 +1916,20 @@ static int
 bits_prepare_read_op(bits_state* state, bits_op* op, uint32_t byte_offset,
 		uint32_t op_size)
 {
-	if (byte_offset >= state->old_size) {
-		if ((op->flags & AS_BITS_FLAG_NO_FAIL) != 0) {
-			return AS_OK;
-		}
-
-		cf_warning(AS_PARTICLE,
-				"bits_prepare_read_op - error %u op %s (%u) operation would expand blob",
-				AS_ERR_OP_NOT_APPLICABLE, state->def->name, state->op_type);
-		return -AS_ERR_OP_NOT_APPLICABLE;
-	}
-
+	// The span must end within the blob. An empty span may sit exactly at the
+	// end - it reads nothing. Ops whose size arg rejects 0 can't get here with
+	// an empty span.
 	if (byte_offset + op_size > state->old_size) {
 		if ((op->flags & AS_BITS_FLAG_NO_FAIL) != 0) {
 			return AS_OK;
 		}
 
-		cf_warning(AS_PARTICLE,
-				"bits_prepare_read_op - error %u op %s (%u) operation too large for blob",
+		cf_ticker_warning(AS_PARTICLE,
+				"bits_prepare_read_op - error %u op %s (%u) operation extends past end of blob",
 				AS_ERR_OP_NOT_APPLICABLE, state->def->name, state->op_type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"bits %s: byte span (offset %u, size %u) extends past end of blob (%u bytes)",
+				state->def->name, byte_offset, op_size, state->old_size);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -2362,6 +2426,15 @@ bits_read_op_get_integer(const bits_op* op, const uint8_t* from, as_bin* rb,
 	as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_INTEGER);
 
 	return true;
+}
+
+static bool
+bits_read_op_b64_encode(const bits_op* op, const uint8_t* from, as_bin* rb,
+		uint32_t n_bytes)
+{
+	(void)op;
+
+	return blob_b64_encode(from, n_bytes, rb) == AS_OK;
 }
 
 //==========================================================

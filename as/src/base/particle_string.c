@@ -250,8 +250,6 @@ as_bin_particle_string_ptr(const as_bin* b, char** p_value)
 	return p_string_mem->sz;
 }
 
-// WIP for SERVER-97
-
 typedef struct string_op_s {
 	int64_t int_arg1;
 	int64_t int_arg2;

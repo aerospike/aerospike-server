@@ -778,6 +778,7 @@ typedef enum {
 	AS_BITS_OP_LSCAN        = 52,
 	AS_BITS_OP_RSCAN        = 53,
 	AS_BITS_OP_GET_INT      = 54,
+	AS_BITS_OP_B64_ENCODE   = 55,
 
 	AS_BITS_READ_OP_END
 } as_bits_op_type;
@@ -788,6 +789,13 @@ typedef enum {
 	AS_BITS_FLAG_NO_FAIL        = 1 << 2,
 	AS_BITS_FLAG_PARTIAL        = 1 << 3
 } as_bits_flags;
+
+typedef enum {
+	// Inverts the size arg: size counts back from the particle's end to fix
+	// where the op ends - the span becomes [offset, particle_size - size) - so
+	// size 0 means "to the end".
+	AS_BITS_READ_SUBFLAG_INVERT_SIZE    = 1 << 0
+} as_bits_read_subflags;
 
 typedef enum {
 	AS_BITS_INT_SUBFLAG_SIGNED      = 1 << 0,
