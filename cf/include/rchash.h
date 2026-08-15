@@ -1,7 +1,7 @@
 /*
  * rchash.h
  *
- * Copyright (C) 2018-2021 Aerospike, Inc.
+ * Copyright (C) 2018-2025 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -26,9 +26,13 @@
 // Includes.
 //
 
+#include <stddef.h>
 #include <stdint.h>
 
+#include "citrusleaf/alloc.h"
+
 #include "cf_mutex.h"
+#include "hash_table.h"
 
 //==========================================================
 // Typedefs & constants.
@@ -38,11 +42,11 @@
 #define CF_RCHASH_ERR_FOUND -4
 #define CF_RCHASH_ERR_NOT_FOUND -3
 #define CF_RCHASH_ERR -1
-#define CF_RCHASH_OK 0
-#define CF_RCHASH_REDUCE_DELETE 1
+#define CF_RCHASH_OK HASH_TABLE_REDUCE_CONTINUE
+#define CF_RCHASH_REDUCE_DELETE HASH_TABLE_REDUCE_DELETE
 
 // User must provide the hash function at create time.
-typedef uint32_t (*cf_rchash_hash_fn)(const void* key);
+typedef hash_table_hash_fn cf_rchash_hash_fn;
 
 // The "reduce" function called for every element. Returned value governs
 // behavior during reduce as follows:
@@ -50,7 +54,7 @@ typedef uint32_t (*cf_rchash_hash_fn)(const void* key);
 // - CF_RCHASH_REDUCE_DELETE - delete the current element, continue iterating
 // - anything else (e.g. CF_RCHASH_ERR) - stop iterating and return reduce_fn's
 //   returned value
-typedef int (*cf_rchash_reduce_fn)(const void* key, void* object, void* udata);
+typedef hash_table_reduce_fn cf_rchash_reduce_fn;
 
 // User may provide an object "destructor" at create time. The destructor is
 // called - and the deleted element's object freed - from cf_rchash_delete(),
@@ -58,41 +62,82 @@ typedef int (*cf_rchash_reduce_fn)(const void* key, void* object, void* udata);
 // The destructor should not free the object itself - that is always done after
 // releasing the object if its ref-count hits 0. The destructor should only
 // clean up the object's "internals".
-typedef void (*cf_rchash_destructor_fn)(void* object);
+typedef hash_table_destructor_fn cf_rchash_destructor_fn;
 
-// Private data.
-typedef struct cf_rchash_s {
-	cf_rchash_hash_fn h_fn;
-	cf_rchash_destructor_fn d_fn;
-	uint32_t key_size;
-	uint32_t n_buckets;
-	uint32_t n_elements;
-	void* table;
-	cf_mutex* bucket_locks;
-} cf_rchash;
+typedef hash_table cf_rchash;
 
 //==========================================================
 // Public API - useful hash functions.
 //
 
-uint32_t cf_rchash_fn_u32(const void* key);
-uint32_t cf_rchash_fn_zstr(const void* key);
+#define cf_rchash_fn_u32 hash_table_fn_u32
+#define cf_rchash_fn_zstr hash_table_fn_zstr
 
 //==========================================================
 // Public API.
 //
 
+void cf_rchash_init(cf_rchash* h, cf_rchash_hash_fn h_fn,
+		cf_rchash_destructor_fn d_fn, uint32_t key_size, uint32_t n_buckets);
 cf_rchash* cf_rchash_create(cf_rchash_hash_fn h_fn,
 		cf_rchash_destructor_fn d_fn, uint32_t key_size, uint32_t n_buckets);
 void cf_rchash_destroy(cf_rchash* h);
-uint32_t cf_rchash_get_size(const cf_rchash* h);
 
-void cf_rchash_put(cf_rchash* h, const void* key, void* object);
-int cf_rchash_put_unique(cf_rchash* h, const void* key, void* object);
+// O(n_buckets) - rchash has no shared element counter (see RCHASH_FLAGS).
+static inline uint32_t
+cf_rchash_get_size(const cf_rchash* h)
+{
+	return hash_table_get_size(h);
+}
 
-int cf_rchash_get(cf_rchash* h, const void* key, void** object_r);
+static inline void
+cf_rchash_put(cf_rchash* h, const void* key, void* object)
+{
+	hash_table_put(h, key, &object);
+}
 
-int cf_rchash_delete(cf_rchash* h, const void* key);
-int cf_rchash_delete_object(cf_rchash* h, const void* key, void* object);
+static inline int
+cf_rchash_put_unique(cf_rchash* h, const void* key, void* object)
+{
+	return hash_table_put_unique(h, key, &object) ? CF_RCHASH_OK
+												  : CF_RCHASH_ERR_FOUND;
+}
 
-int cf_rchash_reduce(cf_rchash* h, cf_rchash_reduce_fn reduce_fn, void* udata);
+static inline int
+cf_rchash_get(cf_rchash* h, const void* key, void** object_r)
+{
+	cf_mutex* m;
+
+	if (! hash_table_get(h, key, object_r, &m)) {
+		return CF_RCHASH_ERR_NOT_FOUND;
+	}
+
+	if (object_r != NULL) {
+		cf_rc_reserve(*object_r);
+	}
+
+	cf_mutex_unlock(m);
+
+	return CF_RCHASH_OK;
+}
+
+static inline int
+cf_rchash_delete_object(cf_rchash* h, const void* key, void* object)
+{
+	return hash_table_delete(h, key, (object == NULL) ? NULL : (void*)(&object),
+				   NULL, false)
+			? CF_RCHASH_OK
+			: CF_RCHASH_ERR_NOT_FOUND;
+}
+
+static inline int
+cf_rchash_delete(cf_rchash* h, const void* key)
+{
+	return cf_rchash_delete_object(h, key, NULL);
+}
+
+static inline int
+cf_rchash_reduce(cf_rchash* h, cf_rchash_reduce_fn reduce_fn, void* udata)
+{
+	return hash_table_reduce(h, reduce_fn, udata) ? CF_RCHASH_OK : CF_RCHASH_ERR;
+}

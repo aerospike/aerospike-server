@@ -29,6 +29,9 @@
 
 #include "arenax.h"
 
+// Size of a CPU cache line, in bytes.
+#define CF_CACHELINE_SZ 64
+
 typedef enum {
 	CF_TOPO_AUTO_PIN_NONE,
 	CF_TOPO_AUTO_PIN_CPU,

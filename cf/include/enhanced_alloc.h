@@ -78,6 +78,7 @@ void* cf_alloc_try_malloc(size_t sz);
 #define cf_calloc(_n, _sz) calloc(_n, _sz)
 #define cf_realloc(_p, _sz) realloc(_p, _sz)
 #define cf_valloc(_sz) valloc(_sz)
+#define cf_aligned_alloc(_align, _sz) aligned_alloc(_align, _sz)
 
 #define cf_strdup(_s) strdup(_s)
 #define cf_strndup(_s, _n) strndup(_s, _n)

@@ -1,7 +1,7 @@
 /*
  * shash.h
  *
- * Copyright (C) 2017-2021 Aerospike, Inc.
+ * Copyright (C) 2017-2025 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -30,6 +30,7 @@
 #include <stdint.h>
 
 #include "cf_mutex.h"
+#include "hash_table.h"
 
 //==========================================================
 // Typedefs & constants.
@@ -39,11 +40,11 @@
 #define CF_SHASH_ERR_FOUND -4
 #define CF_SHASH_ERR_NOT_FOUND -3
 #define CF_SHASH_ERR -1
-#define CF_SHASH_OK 0
-#define CF_SHASH_REDUCE_DELETE 1
+#define CF_SHASH_OK HASH_TABLE_REDUCE_CONTINUE
+#define CF_SHASH_REDUCE_DELETE HASH_TABLE_REDUCE_DELETE
 
 // User must provide the hash function at create time.
-typedef uint32_t (*cf_shash_hash_fn)(const void* key);
+typedef hash_table_hash_fn cf_shash_hash_fn;
 
 // The "reduce" function called for every element. Returned value governs
 // behavior during reduce as follows:
@@ -51,51 +52,103 @@ typedef uint32_t (*cf_shash_hash_fn)(const void* key);
 // - CF_SHASH_REDUCE_DELETE - delete the current element, continue iterating
 // - anything else (e.g. CF_SHASH_ERR) - stop iterating and return reduce_fn's
 //   returned value
-typedef int (*cf_shash_reduce_fn)(const void* key, void* value, void* udata);
+typedef hash_table_reduce_fn cf_shash_reduce_fn;
 
-// Private data.
-typedef struct cf_shash_s {
-	cf_shash_hash_fn h_fn;
-	uint32_t key_size;
-	uint32_t value_size;
-	uint32_t ele_size;
-	uint32_t n_buckets;
-	bool thread_safe;
-	uint32_t n_elements;
-	void* table;
-	cf_mutex* bucket_locks;
-} cf_shash;
+typedef hash_table cf_shash;
 
 //==========================================================
 // Public API - useful hash functions.
 //
 
-// TODO - hash function signature may change.
-uint32_t cf_shash_fn_u32(const void* key);
-uint32_t cf_shash_fn_ptr(const void* key);
-uint32_t cf_shash_fn_zstr(const void* key);
+#define cf_shash_fn_u32 hash_table_fn_u32
+#define cf_shash_fn_ptr hash_table_fn_ptr
+#define cf_shash_fn_zstr hash_table_fn_zstr
 
 //==========================================================
 // Public API.
 //
 
+void cf_shash_init(cf_shash* h, cf_shash_hash_fn h_fn, uint32_t key_size,
+		uint32_t value_size, uint32_t n_buckets, bool thread_safe);
 cf_shash* cf_shash_create(cf_shash_hash_fn h_fn, uint32_t key_size,
 		uint32_t value_size, uint32_t n_buckets, bool thread_safe);
 void cf_shash_destroy(cf_shash* h);
-uint32_t cf_shash_get_size(const cf_shash* h);
 
-void cf_shash_put(cf_shash* h, const void* key, const void* value);
-int cf_shash_put_unique(cf_shash* h, const void* key, const void* value);
+static inline uint32_t
+cf_shash_get_size(const cf_shash* h)
+{
+	return hash_table_get_size(h);
+}
 
-int cf_shash_get(cf_shash* h, const void* key, void* value);
-int cf_shash_get_vlock(cf_shash* h, const void* key, void** value_r,
-		cf_mutex** vlock_r);
-int cf_shash_get_p(cf_shash* h, const void* key, void** value_r);
+static inline void
+cf_shash_put(cf_shash* h, const void* key, const void* value)
+{
+	hash_table_put(h, key, value);
+}
 
-int cf_shash_pop(cf_shash* h, const void* key, void* value);
+static inline int
+cf_shash_put_unique(cf_shash* h, const void* key, const void* value)
+{
+	return hash_table_put_unique(h, key, (void*)value) ? CF_SHASH_OK
+													   : CF_SHASH_ERR_FOUND;
+}
 
-int cf_shash_delete(cf_shash* h, const void* key);
-int cf_shash_delete_lockfree(cf_shash* h, const void* key);
-void cf_shash_delete_all(cf_shash* h);
+static inline int
+cf_shash_get(cf_shash* h, const void* key, void* value)
+{
+	return hash_table_get(h, key, value, NULL) ? CF_SHASH_OK
+											   : CF_SHASH_ERR_NOT_FOUND;
+}
 
-int cf_shash_reduce(cf_shash* h, cf_shash_reduce_fn reduce_fn, void* udata);
+// value_r aliases bucket storage and is invalidated by any delete in the same
+// bucket, even under the held lock.
+static inline int
+cf_shash_get_vlock(cf_shash* h, const void* key, void** value_r, cf_mutex** m_r)
+{
+	return hash_table_get_direct_ptr(h, key, value_r, m_r, false)
+			? CF_SHASH_OK
+			: CF_SHASH_ERR_NOT_FOUND;
+}
+
+// returns value pointer instead of copy and without lock.
+static inline int
+cf_shash_get_p(cf_shash* h, const void* key, void** value_r)
+{
+	return hash_table_get_direct_ptr(h, key, value_r, NULL, true)
+			? CF_SHASH_OK
+			: CF_SHASH_ERR_NOT_FOUND;
+}
+
+static inline int
+cf_shash_pop(cf_shash* h, const void* key, void* value)
+{
+	return hash_table_delete(h, key, NULL, value, false)
+			? CF_SHASH_OK
+			: CF_SHASH_ERR_NOT_FOUND;
+}
+
+static inline int
+cf_shash_delete(cf_shash* h, const void* key)
+{
+	return hash_table_delete(h, key, NULL, NULL, false) ? CF_SHASH_OK
+														: CF_SHASH_ERR_NOT_FOUND;
+}
+
+static inline int
+cf_shash_delete_lockfree(cf_shash* h, const void* key)
+{
+	return hash_table_delete(h, key, NULL, NULL, true) ? CF_SHASH_OK
+													   : CF_SHASH_ERR_NOT_FOUND;
+}
+
+static inline void
+cf_shash_delete_all(cf_shash* h)
+{
+	return hash_table_clear(h);
+}
+
+static inline int
+cf_shash_reduce(cf_shash* h, cf_shash_reduce_fn reduce_fn, void* udata)
+{
+	return hash_table_reduce(h, reduce_fn, udata) ? CF_SHASH_OK : CF_SHASH_ERR;
+}
