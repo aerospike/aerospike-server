@@ -323,6 +323,8 @@ static bool string_parse_int2(string_state* state, string_op* op);
 static bool string_parse_buf(string_state* state, string_op* op);
 static bool string_parse_list(string_state* state, string_op* op);
 static bool string_parse_flags(string_state* state, string_op* op);
+static bool string_parse_regex_flags_compare(string_state* state, string_op* op);
+static bool string_parse_regex_flags_replace(string_state* state, string_op* op);
 
 // Prepare functions
 static int string_prepare_read_op(string_state* state, string_op* op);
@@ -453,6 +455,15 @@ string_op_allows_bin_create(as_string_op_type op_type)
 #define STRING_FLAGS_UPDATE_ONLY                                               \
 	(AS_STRING_FLAG_UPDATE_ONLY | AS_STRING_FLAG_NO_FAIL)
 
+// Regex flag bits each op accepts. GLOBAL is replace-only: there is no first-
+// match-only regex form, and on a boolean compare it has nothing to mean.
+#define STRING_REGEX_FLAGS_COMPARE                                             \
+	(AS_STRING_REGEX_CASE_INSENSITIVE | AS_STRING_REGEX_MULTILINE |            \
+			AS_STRING_REGEX_DOTALL | AS_STRING_REGEX_UNIX_LINES_ONLY)
+
+#define STRING_REGEX_FLAGS_REPLACE                                             \
+	(STRING_REGEX_FLAGS_COMPARE | AS_STRING_REGEX_GLOBAL)
+
 //==========================================================
 // Op tables.
 //
@@ -519,7 +530,8 @@ static const string_op_def string_modify_op_table[] = {
 	// behavior instead of a policy.
 	STRING_MODIFY_OP_ENTRY(AS_STRING_OP_REGEX_REPLACE, "string_regex_replace",
 			string_modify_op_regex_replace, (STRING_FLAGS_UPDATE_ONLY), 1, 3,
-			string_parse_list, string_parse_int1, string_parse_flags),
+			string_parse_list, string_parse_regex_flags_replace,
+			string_parse_flags),
 	STRING_MODIFY_OP_ENTRY(AS_STRING_OP_APPEND, "string_append",
 			string_modify_op_append, (STRING_FLAGS_CREATE_CAPABLE), 1, 2,
 			string_parse_buf, string_parse_flags),
@@ -563,7 +575,7 @@ static const string_op_def string_read_op_table[] = {
 			string_read_op_b64_decode, 0, 0),
 	STRING_READ_OP_ENTRY(AS_STRING_OP_REGEX_COMPARE, "string_regex_compare",
 			string_read_op_regex_compare, 1, 2, string_parse_buf,
-			string_parse_int1),
+			string_parse_regex_flags_compare),
 };
 
 //==========================================================
@@ -1447,7 +1459,8 @@ string_parse_op(string_state* state, string_op* op)
 // Parses the first integer argument into op->int_arg1.
 // Meaning is op-dependent: code-point index (INSERT, OVERWRITE, CHAR_AT, SUBSTR, SNIP),
 // occurrence number (FIND), target length (PAD_START, PAD_END), repeat count (REPEAT),
-// numeric type selector (IS_NUMERIC), or regex flags (REGEX_COMPARE, REGEX_REPLACE).
+// or numeric type selector (IS_NUMERIC). REGEX_COMPARE and REGEX_REPLACE reach
+// it through string_parse_regex_flags(), which adds the per-op flag check.
 static bool
 string_parse_int1(string_state* state, string_op* op)
 {
@@ -1477,6 +1490,55 @@ string_parse_int1(string_state* state, string_op* op)
 	op->int_arg1 = val;
 
 	return true;
+}
+
+// Unknown flag bits are rejected at parse time, not ignored: rejecting keeps
+// feature detection possible on this argument and stays reversible, where
+// accepting-and-ignoring could not be tightened later without breaking
+// clients. Parse time also blames the flag itself, ahead of engine routing
+// and pattern compilation.
+static bool
+string_parse_regex_flags(string_state* state, string_op* op, uint64_t accepted)
+{
+	if (! string_parse_int1(state, op)) {
+		return false;
+	}
+
+	uint64_t bad = (uint64_t)op->int_arg1 & ~accepted;
+
+	if (bad == 0) {
+		return true;
+	}
+
+	cf_ticker_warning(AS_PARTICLE,
+			"string_parse_regex_flags - error %u op %s (%u) unsupported regex flag bits 0x%lx",
+			AS_ERR_PARAMETER, state->def->name, state->op_type, bad);
+
+	// GLOBAL can only land here on compare - replace accepts it - so name it
+	// rather than leave the caller to decode a bit mask.
+	if ((bad & AS_STRING_REGEX_GLOBAL) != 0) {
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"%s: regex flag GLOBAL is valid only for string_regex_replace",
+				state->def->name);
+	}
+	else {
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"%s: unsupported regex flag bits 0x%lx", state->def->name, bad);
+	}
+
+	return false;
+}
+
+static bool
+string_parse_regex_flags_compare(string_state* state, string_op* op)
+{
+	return string_parse_regex_flags(state, op, STRING_REGEX_FLAGS_COMPARE);
+}
+
+static bool
+string_parse_regex_flags_replace(string_state* state, string_op* op)
+{
+	return string_parse_regex_flags(state, op, STRING_REGEX_FLAGS_REPLACE);
 }
 
 // Parses the second integer argument into op->int_arg2.
@@ -4331,6 +4393,7 @@ static __thread pcre2_code* tl_pcre2;
 static __thread uint8_t* tl_pcre2_pattern;
 static __thread uint32_t tl_pcre2_pattern_sz;
 static __thread uint32_t tl_pcre2_flags;
+static __thread bool tl_pcre2_unix_lines;
 static __thread pcre2_match_data* tl_pcre2_md;
 static __thread pcre2_match_context* tl_pcre2_mctx;
 static __thread bool tls_regex_exit_registered;
@@ -4359,6 +4422,7 @@ regex_tls_exit(void* udata)
 	tl_pcre2_pattern = NULL;
 	tl_pcre2_pattern_sz = 0;
 	tl_pcre2_flags = 0;
+	tl_pcre2_unix_lines = false;
 
 	if (tl_regex != NULL) {
 		uregex_close(tl_regex);
@@ -4453,20 +4517,32 @@ get_cached_regex(const uint8_t* pattern, uint32_t pattern_sz, uint32_t flags)
 	return tl_regex;
 }
 
+// Explicit bit tests, not a table indexed by bit value - this form cannot
+// go out of bounds no matter who calls it or which flag is defined next.
+// string_parse_regex_flags() rejects unknown bits before they get here, so
+// this is defense in depth.
+//
+// GLOBAL has no ICU compile-flag counterpart - regex_replace consumes it
+// directly - so it belongs nowhere in this mapping.
 static uint32_t
 translate_regex_flags(uint8_t flags)
 {
 	uint32_t result = 0;
-	static const uint32_t map[] = {
-		[AS_STRING_REGEX_CASE_INSENSITIVE] = UREGEX_CASE_INSENSITIVE,
-		[AS_STRING_REGEX_MULTILINE] = UREGEX_MULTILINE,
-		[AS_STRING_REGEX_DOTALL] = UREGEX_DOTALL,
-		[AS_STRING_REGEX_UNIX_LINES_ONLY] = UREGEX_UNIX_LINES,
-	};
 
-	while (flags != 0) {
-		result |= map[flags & -flags];
-		flags &= flags - 1;
+	if (flags & AS_STRING_REGEX_CASE_INSENSITIVE) {
+		result |= UREGEX_CASE_INSENSITIVE;
+	}
+
+	if (flags & AS_STRING_REGEX_MULTILINE) {
+		result |= UREGEX_MULTILINE;
+	}
+
+	if (flags & AS_STRING_REGEX_DOTALL) {
+		result |= UREGEX_DOTALL;
+	}
+
+	if (flags & AS_STRING_REGEX_UNIX_LINES_ONLY) {
+		result |= UREGEX_UNIX_LINES;
 	}
 
 	return result;
@@ -4592,11 +4668,116 @@ pattern_has_class_set_syntax(const uint8_t* pattern, uint32_t pattern_sz)
 	return false;
 }
 
+// Line semantics are the second place the dialects diverge. Aligning the
+// newline convention (see get_cached_pcre2) fixes which characters end a line,
+// but not two behaviors that have no flag: ICU consumes "\r\n" as a single
+// unit for '.' while PCRE2 sees two characters, and the engines disagree about
+// whether a pattern may match empty after a trailing terminator.
+//
+// Neither is reachable when the text holds no line terminator at all - with a
+// single line there are no line boundaries to disagree about, so '^', '$', '.'
+// and '\R' must behave identically. Multi-line text goes to ICU, single-line
+// text keeps the fast path.
+//
+// NEL, LS and PS are line terminators for ICU too, but they are non-ASCII and
+// the caller's is_ascii() check has already routed that text to ICU.
+static bool
+text_has_line_terminator(const uint8_t* text, uint32_t sz)
+{
+	// '\n', '\v', '\f', '\r' are the contiguous byte range 0x0A..0x0D.
+	// Branchless accumulation with no early exit, so the compiler can
+	// vectorize the loop; an early-exit byte scan dominates the fast path
+	// this guards.
+	uint8_t acc = 0;
+
+	for (uint32_t i = 0; i < sz; i++) {
+		acc |= (uint8_t)((uint8_t)(text[i] - 0x0A) < 4);
+	}
+
+	return acc != 0;
+}
+
+// The third divergence: constructs one engine parses and the other rejects.
+// PCRE2 accepts Python-style '(?P<n>)' and '(?P=n)', Perl's "(?'n')" and
+// branch reset '(?|...)', '\N' for "any character except a newline", and the
+// open-ended '{,n}' quantifier; ICU rejects all of them. ICU in turn reads
+// '\g' as a literal 'g' where PCRE2 takes it as a subroutine/backreference.
+//
+// Whichever way the disagreement runs, the pattern must not mean one thing on
+// ASCII data and another on non-ASCII data, so these skip the fast path and
+// let ICU give the same answer - or the same error - either way.
+//
+// Conservative like pattern_has_class_set_syntax(): a false positive costs the
+// fast path, never correctness.
+static bool
+pattern_has_pcre2_only_syntax(const uint8_t* pattern, uint32_t pattern_sz)
+{
+	for (uint32_t i = 0; i < pattern_sz; i++) {
+		if (pattern[i] == '\\') {
+			if (i + 1 == pattern_sz) {
+				return false;
+			}
+
+			if (pattern[i + 1] == 'N' || pattern[i + 1] == 'g') {
+				return true;
+			}
+
+			i++; // an escaped character is never itself a construct
+			continue;
+		}
+
+		if (pattern[i] == '(' && i + 2 < pattern_sz && pattern[i + 1] == '?' &&
+				(pattern[i + 2] == 'P' || pattern[i + 2] == '\'' ||
+						pattern[i + 2] == '|')) {
+			return true;
+		}
+
+		if (pattern[i] == '{' && i + 1 < pattern_sz && pattern[i + 1] == ',') {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+// The replacement string is a dialect of its own. The engines agree on plain
+// text and '$<digit>' group references, and on nothing else: ICU reads '\' as
+// an escape ('\$' is a literal dollar) and rejects a '$' that references no
+// group, while PCRE2 reads '\' literally and '$$' as a literal dollar. Route
+// anything beyond the agreed subset to ICU so both routes give the same
+// answer - or the same error - either way.
+//
+// Conservative like the pattern gates: a false positive costs the fast path,
+// never correctness.
+static bool
+replacement_has_dialect_syntax(const uint8_t* repl, uint32_t repl_sz)
+{
+	for (uint32_t i = 0; i < repl_sz; i++) {
+		if (repl[i] == '\\') {
+			return true;
+		}
+
+		if (repl[i] == '$' &&
+				(i + 1 == repl_sz || repl[i + 1] < '0' || repl[i + 1] > '9')) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
 static pcre2_code*
 get_cached_pcre2(const uint8_t* pattern, uint32_t pattern_sz, uint32_t flags,
 		bool unix_lines)
 {
+	// unix_lines belongs in the key: it is not part of 'flags' (it has no
+	// PCRE2 compile-flag counterpart, only a newline convention) yet it
+	// changes the compiled program, so leaving it out returns a pattern
+	// compiled for the other convention. Like the convention itself, this is
+	// unobservable while the routing gate holds - kept so a relaxed gate
+	// cannot serve a stale compilation.
 	if (tl_pcre2 != NULL && tl_pcre2_flags == flags &&
+			tl_pcre2_unix_lines == unix_lines &&
 			tl_pcre2_pattern_sz == pattern_sz &&
 			memcmp(tl_pcre2_pattern, pattern, pattern_sz) == 0) {
 		return tl_pcre2;
@@ -4617,12 +4798,24 @@ get_cached_pcre2(const uint8_t* pattern, uint32_t pattern_sz, uint32_t flags,
 		tl_pcre2_md = NULL;
 	}
 
-	pcre2_compile_context* cctx = NULL;
+	pcre2_compile_context* cctx = pcre2_compile_context_create(NULL);
 
-	if (unix_lines) {
-		cctx = pcre2_compile_context_create(NULL);
-		pcre2_set_newline(cctx, PCRE2_NEWLINE_ANY);
-	}
+	// Both conventions must be set explicitly - never left to PCRE2's build
+	// default. AS_STRING_REGEX_UNIX_LINES_ONLY maps to UREGEX_UNIX_LINES,
+	// where only '\n' ends a line - PCRE2's LF. Without the flag ICU also
+	// ends a line on '\v', '\f', '\r' and "\r\n", which is PCRE2's ANY once
+	// the ASCII gate has excluded the non-ASCII terminators NEL, LS and PS.
+	//
+	// The routing gate (text_has_line_terminator) currently sends every
+	// terminator-bearing subject to ICU, so neither convention is observable
+	// on this path today. It is pinned anyway so that relaxing that gate
+	// cannot silently change line semantics.
+	pcre2_set_newline(cctx, unix_lines ? PCRE2_NEWLINE_LF : PCRE2_NEWLINE_ANY);
+
+	// '\R' must mean ICU's "any Unicode line break". That is also the bundled
+	// build's default, but it is a build option (BSR_ANYCRLF) - pin it so a
+	// rebuilt module cannot silently change what '\R' matches.
+	pcre2_set_bsr(cctx, PCRE2_BSR_UNICODE);
 
 	int errorcode;
 	PCRE2_SIZE erroroffset;
@@ -4630,9 +4823,7 @@ get_cached_pcre2(const uint8_t* pattern, uint32_t pattern_sz, uint32_t flags,
 	tl_pcre2 = pcre2_compile(pattern, pattern_sz, flags, &errorcode,
 			&erroroffset, cctx);
 
-	if (cctx != NULL) {
-		pcre2_compile_context_free(cctx);
-	}
+	pcre2_compile_context_free(cctx);
 
 	if (tl_pcre2 == NULL) {
 		return NULL;
@@ -4656,6 +4847,7 @@ get_cached_pcre2(const uint8_t* pattern, uint32_t pattern_sz, uint32_t flags,
 	memcpy(tl_pcre2_pattern, pattern, pattern_sz);
 	tl_pcre2_pattern_sz = pattern_sz;
 	tl_pcre2_flags = flags;
+	tl_pcre2_unix_lines = unix_lines;
 
 	return tl_pcre2;
 }
@@ -4673,10 +4865,13 @@ string_read_op_regex_compare(const string_op* op, const uint8_t* from,
 	// PCRE2 byte-mode fast path requires both haystack AND pattern to be
 	// ASCII. A non-ASCII pattern needs ICU's full (1-to-many) Unicode case
 	// folding under CASE_INSENSITIVE (e.g. 'ß' -> "ss"); PCRE2_CASELESS
-	// without PCRE2_UCP only folds within ASCII. Class-set syntax goes to ICU
-	// too - the two engines read it differently.
+	// without PCRE2_UCP only folds within ASCII. Class-set syntax, PCRE2-only
+	// syntax and multi-line text go to ICU too - the two engines read each of
+	// them differently.
 	if (is_ascii(from, sz) && is_ascii(op->buf, op->buf_sz) &&
-			! pattern_has_class_set_syntax(op->buf, op->buf_sz)) {
+			! pattern_has_class_set_syntax(op->buf, op->buf_sz) &&
+			! pattern_has_pcre2_only_syntax(op->buf, op->buf_sz) &&
+			! text_has_line_terminator(from, sz)) {
 		uint8_t raw_flags = op->int_arg1;
 		uint32_t pcre2_flags = translate_pcre2_flags(raw_flags);
 		bool unix_lines = (raw_flags & AS_STRING_REGEX_UNIX_LINES_ONLY) != 0;
@@ -4858,14 +5053,19 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 	}
 
 	// PCRE2 byte-mode fast path mirrors string_read_op_regex_compare's
-	// routing: pattern, text, AND replacement must all be ASCII, and the
-	// pattern must not use class-set syntax. Anything else goes to ICU so
-	// replace agrees with compare on what matches — PCRE2 has only simple case
-	// folding under CASELESS (even with UTF/UCP), not ICU's full (1-to-many)
-	// folding (e.g. 'ß' -> "ss").
+	// routing - pattern, text, AND replacement must all be ASCII, the pattern
+	// gates apply, and the text must be single-line - plus one gate of its
+	// own: the replacement must stay inside the dialect subset both engines
+	// agree on (see replacement_has_dialect_syntax). Anything else goes to
+	// ICU so replace agrees with compare on what matches - PCRE2 has only
+	// simple case folding under CASELESS (even with UTF/UCP), not ICU's full
+	// (1-to-many) folding (e.g. 'ß' -> "ss").
 	if (is_ascii(pattern_raw, pattern_raw_sz) && is_ascii(from, old_sz) &&
 			is_ascii(repl_raw, repl_raw_sz) &&
-			! pattern_has_class_set_syntax(pattern_raw, pattern_raw_sz)) {
+			! pattern_has_class_set_syntax(pattern_raw, pattern_raw_sz) &&
+			! pattern_has_pcre2_only_syntax(pattern_raw, pattern_raw_sz) &&
+			! replacement_has_dialect_syntax(repl_raw, repl_raw_sz) &&
+			! text_has_line_terminator(from, old_sz)) {
 		uint32_t pcre2_flags = translate_pcre2_flags(raw_flags);
 		bool unix_lines = (raw_flags & AS_STRING_REGEX_UNIX_LINES_ONLY) != 0;
 		pcre2_code* re = get_cached_pcre2(pattern_raw, pattern_raw_sz,
