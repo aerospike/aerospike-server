@@ -89,7 +89,7 @@ static uint32_t plan_build_range_payload(uint8_t* buf,
 static uint8_t* plan_append_bytes_bound(uint8_t* p, const uint8_t* val,
 		uint32_t val_sz);
 static uint8_t* plan_append_int64_bound(uint8_t* p, int64_t val);
-static int plan_wire_result_code(const plan_ctx* ctx);
+static uint8_t plan_wire_result_code(const plan_ctx* ctx);
 static const char* plan_result_str(as_query_plan_result result);
 
 //==========================================================
@@ -309,7 +309,7 @@ plan_send_response(const as_transaction* tr, const plan_ctx* ctx)
 
 	msgp->proto.version = PROTO_VERSION;
 	msgp->proto.type = PROTO_TYPE_AS_MSG;
-	msgp->proto.sz = sizeof(as_msg) + fields_sz;
+	msgp->proto.sz = (uint32_t)(sizeof(as_msg) + fields_sz);
 	as_proto_swap(&msgp->proto);
 
 	as_msg* m = &msgp->msg;
@@ -397,7 +397,7 @@ plan_append_int64_bound(uint8_t* p, int64_t val)
 	return plan_append_bytes_bound(p, (const uint8_t*)&net, sizeof(net));
 }
 
-static int
+static uint8_t
 plan_wire_result_code(const plan_ctx* ctx)
 {
 	switch (ctx->selection.result) {
