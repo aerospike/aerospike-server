@@ -1964,18 +1964,28 @@ string_prepare_modify_op(string_state* state, string_op* op)
 		return string_modify_set_estimated_size(state, v);
 	}
 	case AS_STRING_OP_OVERWRITE: {
+		// A negative index counts from the end, as it does for insert, char_at,
+		// substr and snip. Unlike those, an index that resolves outside the
+		// string is an error rather than a clamp - overwriting past the end
+		// would have to fill the gap, and this op carries no fill string.
+		int64_t requested_idx = op->int_arg1;
+		int64_t resolved_idx = requested_idx < 0
+				? (int64_t)state->old_cp_len + requested_idx
+				: requested_idx;
 		int64_t max_idx = state->old_cp_len > 0 ? (int64_t)state->old_cp_len - 1
 												: 0;
 
-		if (op->int_arg1 < 0 || op->int_arg1 > max_idx) {
+		if (resolved_idx < 0 || resolved_idx > max_idx) {
 			cf_ticker_warning(AS_PARTICLE,
 					"string_prepare_modify_op - error %u op %s - invalid overwrite index",
 					AS_ERR_PARAMETER, state->def->name);
 			as_error_details_set_fmt(AS_SUB_PARAM_STRING_INDEX_OUT_OF_BOUNDS,
 					"%s: index %ld out of bounds for string length %u",
-					state->def->name, op->int_arg1, state->old_cp_len);
+					state->def->name, requested_idx, state->old_cp_len);
 			return -AS_ERR_PARAMETER;
 		}
+
+		op->int_arg1 = resolved_idx;
 	} // fall through — same allocation bound as concat (payload appended by op).
 	case AS_STRING_OP_CONCAT: {
 		uint64_t v;
