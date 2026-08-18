@@ -21,6 +21,7 @@
  */
 
 //clang-format off
+#include <ctype.h> // for isspace()
 #include <errno.h> // for strtoX() validation
 #include <math.h> // for isinf(), isnan()
 #include <stdint.h> // for uint#_t
@@ -3813,6 +3814,14 @@ string_read_op_to_integer(const string_op* op, const uint8_t* from, uint32_t sz,
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
+	// Reject the leading whitespace strtoll() would silently skip. (Trailing
+	// whitespace already fails the endptr check below.)
+	if (isspace(from[0])) {
+		as_error_details_set_fmt(AS_SUB_OPNOT_STRING_CONVERSION_FAILED,
+				"string_to_integer: string is not a valid integer");
+		return -AS_ERR_OP_NOT_APPLICABLE;
+	}
+
 	char buf[INT64_MAX_STRLEN + 1] = { 0 };
 
 	memcpy(buf, from, sz);
@@ -3847,6 +3856,31 @@ string_read_op_to_double(const string_op* op, const uint8_t* from, uint32_t sz,
 		as_error_details_set_fmt(AS_SUB_OPNOT_STRING_CONVERSION_FAILED,
 				"string_to_double: string length %u is invalid (must be 1-%d)",
 				sz, DOUBLE_MAX_STRLEN);
+		return -AS_ERR_OP_NOT_APPLICABLE;
+	}
+
+	// Reject the strtod() extras outside the documented grammar: leading
+	// whitespace, hex forms ("0x10", "0x1p3"), a '.' with no digit after it
+	// ("5.", "5.e3"), and nan payloads ("nan(0x1)"). What remains is decimal
+	// digits, exponent form, and the case-insensitive inf/nan literals - a
+	// superset of is_numeric's grammar only where to_string's %g output
+	// requires it.
+	uint32_t digits_at = (from[0] == '+' || from[0] == '-') ? 1 : 0;
+	bool bad_form = isspace(from[0]) ||
+			(sz > digits_at + 1 && from[digits_at] == '0' &&
+					(from[digits_at + 1] == 'x' || from[digits_at + 1] == 'X'));
+
+	for (uint32_t i = 0; ! bad_form && i < sz; i++) {
+		if (from[i] == '(' ||
+				(from[i] == '.' &&
+						(i + 1 == sz || from[i + 1] < '0' || from[i + 1] > '9'))) {
+			bad_form = true;
+		}
+	}
+
+	if (bad_form) {
+		as_error_details_set_fmt(AS_SUB_OPNOT_STRING_CONVERSION_FAILED,
+				"string_to_double: string is not a valid double");
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
