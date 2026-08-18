@@ -126,7 +126,7 @@ cold_start_sweep_device(drv_mems* mems, drv_mem* mem)
 }
 
 void
-cold_start_fill_orig(drv_mem* mem, const as_flat_record* flat,
+cold_start_fill_orig(const drv_cold_start_dev* dev, const as_flat_record* flat,
 		uint64_t rblock_id, const as_flat_opt_meta* opt_meta,
 		as_index_tree* tree, as_index_ref* r_ref)
 {
@@ -142,33 +142,6 @@ cold_start_record_update(drv_mems* mems, const as_flat_record* flat,
 	cf_assert(r->rblock_id != 0, AS_DRV_MEM, "invalid rblock-id");
 
 	block_free(&mems->mems[r->file_id], r->rblock_id, r->n_rblocks, "record-add");
-}
-
-conflict_resolution_pol
-cold_start_policy(const as_namespace* ns)
-{
-	return AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_LAST_UPDATE_TIME;
-}
-
-void
-cold_start_adjust_cenotaph(const as_namespace* ns, const as_flat_record* flat,
-		uint32_t block_void_time, as_record* r)
-{
-}
-
-void
-cold_start_init_repl_state(const as_namespace* ns, as_record* r)
-{
-}
-
-void
-cold_start_set_unrepl_stat(as_namespace* ns)
-{
-}
-
-void
-cold_start_init_xdr_state(const as_flat_record* flat, as_record* r)
-{
 }
 
 void

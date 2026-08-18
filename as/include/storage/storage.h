@@ -33,6 +33,8 @@
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
 
+#include "storage/storage_ops_slots.h"
+
 //==========================================================
 // Forward declarations.
 //
@@ -55,7 +57,7 @@ struct drv_ssd_s;
 #endif
 
 typedef enum {
-	// Used as storage table function indexes.
+	// Selects the as_storage_ops bound by as_storage_bind_ops().
 	AS_STORAGE_ENGINE_MEMORY = 0,
 	AS_STORAGE_ENGINE_PMEM = 1,
 	AS_STORAGE_ENGINE_SSD = 2,
@@ -175,6 +177,20 @@ typedef struct storage_device_stats_s {
 	uint32_t shadow_write_q_sz;
 } storage_device_stats;
 
+// Expanded here, not at the include site: the slot list names as_storage_rd and
+// storage_device_stats, so both typedefs must already be complete.
+typedef struct as_storage_ops_s {
+#define AS_STORAGE_OPS_STRUCT_FIELD(name, ret, params) ret(*name) params;
+	AS_STORAGE_OPS_LIST(AS_STORAGE_OPS_STRUCT_FIELD)
+#undef AS_STORAGE_OPS_STRUCT_FIELD
+} as_storage_ops;
+
+// The three engine ops tables are declared in drv_common.h, not here: their
+// only consumer is as_storage_bind_ops() below, and base/datamodel.h includes
+// this header, so declaring them here would make engine-specific dispatch
+// reachable from every translation unit in the server.
+void as_storage_bind_ops(struct as_namespace_s* ns);
+
 //==========================================================
 // Public API.
 //
@@ -183,7 +199,7 @@ extern uint64_t g_unique_data_size;
 
 //------------------------------------------------
 // Generic "base class" functions that call
-// through storage-engine "v-tables".
+// through per-namespace storage-engine ops.
 //
 
 void as_storage_init(void);
@@ -237,7 +253,7 @@ void as_storage_dump_wb_summary(const struct as_namespace_s* ns, bool verbose);
 void as_storage_histogram_clear_all(struct as_namespace_s* ns); // clears all SSD histograms
 
 //------------------------------------------------
-// Generic functions that don't use "v-tables".
+// Generic functions that don't use storage ops.
 //
 
 // Called within as_storage_rd usage cycle.
@@ -248,11 +264,14 @@ bool as_storage_rd_load_key(as_storage_rd* rd);
 // AS_STORAGE_ENGINE_MEM functions.
 //
 
+// The per-engine declarations in the three sections below are bound by name in
+// each engine's ops table (defined in that engine's .c), so CE and EE builds
+// link different bodies behind the same declarations.
+// TODO - prune the subset with no remaining cross-TU consumer.
+
 void as_storage_init_mem(struct as_namespace_s* ns);
-void as_storage_load_mem(struct as_namespace_s* ns,
-		cf_queue* complete_q); // table used directly in as_storage_init()
-void as_storage_load_ticker_mem(const struct as_namespace_s*
-				ns); // table used directly in as_storage_init()
+void as_storage_load_mem(struct as_namespace_s* ns, cf_queue* complete_q);
+void as_storage_load_ticker_mem(const struct as_namespace_s* ns);
 void as_storage_activate_mem(struct as_namespace_s* ns);
 bool as_storage_wait_for_defrag_mem(struct as_namespace_s* ns);
 void as_storage_start_tomb_raider_mem(struct as_namespace_s* ns);
@@ -298,12 +317,10 @@ void as_storage_histogram_clear_mem(struct as_namespace_s* ns);
 //
 
 void as_storage_init_ssd(struct as_namespace_s* ns);
-void as_storage_load_ssd(struct as_namespace_s* ns,
-		cf_queue* complete_q); // table used directly in as_storage_init()
-void as_storage_load_ticker_ssd(const struct as_namespace_s*
-				ns); // table used directly in as_storage_init()
+void as_storage_load_ssd(struct as_namespace_s* ns, cf_queue* complete_q);
+void as_storage_load_ticker_ssd(const struct as_namespace_s* ns);
 void as_storage_sindex_build_all_ssd(struct as_namespace_s*
-				ns); // called directly without any table - TODO - add table?
+				ns); // called directly - TODO - add ops slot?
 void as_storage_activate_ssd(struct as_namespace_s* ns);
 bool as_storage_wait_for_defrag_ssd(struct as_namespace_s* ns);
 void as_storage_start_tomb_raider_ssd(struct as_namespace_s* ns);
@@ -349,10 +366,8 @@ void as_storage_histogram_clear_ssd(struct as_namespace_s* ns);
 //
 
 void as_storage_init_pmem(struct as_namespace_s* ns);
-void as_storage_load_pmem(struct as_namespace_s* ns,
-		cf_queue* complete_q); // table used directly in as_storage_init()
-void as_storage_load_ticker_pmem(const struct as_namespace_s*
-				ns); // table used directly in as_storage_init()
+void as_storage_load_pmem(struct as_namespace_s* ns, cf_queue* complete_q);
+void as_storage_load_ticker_pmem(const struct as_namespace_s* ns);
 void as_storage_activate_pmem(struct as_namespace_s* ns);
 bool as_storage_wait_for_defrag_pmem(struct as_namespace_s* ns);
 void as_storage_start_tomb_raider_pmem(struct as_namespace_s* ns);

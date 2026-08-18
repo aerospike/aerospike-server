@@ -35,6 +35,7 @@
 
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
+#include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_queue.h"
 
 #include "dynbuf.h"
@@ -43,7 +44,11 @@
 #include "log.h"
 
 #include "base/datamodel.h"
+#include "base/index.h"
+#include "base/nsup.h"
+#include "base/truncate.h"
 #include "storage/flat.h"
+#include "transaction/mrt_utils.h"
 
 //==========================================================
 // Public API - shared code between storage engines.
@@ -575,4 +580,476 @@ drv_flush_pmeta(cf_log_context log_ctx, drv_devices_common* dc,
 			(const uint8_t*)pmeta, sizeof(drv_pmeta) * n_partitions);
 
 	cf_mutex_unlock(&dc->flush_lock);
+}
+
+//==========================================================
+// Local helpers - cold-start record ingest.
+//
+
+static bool
+drv_cold_start_prefer_existing(const as_namespace* ns,
+		const as_flat_record* flat, uint32_t block_void_time, const as_index* r)
+{
+	int result = as_record_resolve_conflict(drv_cold_start_policy(ns),
+			r->generation, r->last_update_time, flat->generation,
+			flat->last_update_time);
+
+	if (result != 0) {
+		return result == -1; // -1 means block record < existing record
+	}
+
+	// Finally, compare void-times. Note that defragged records will generate
+	// identical copies on drive, so they'll get here and return true.
+	return r->void_time == 0 ||
+			(block_void_time != 0 && block_void_time <= r->void_time);
+}
+
+//==========================================================
+// Public API - cold-start record ingest.
+//
+
+void
+drv_cold_start_add_record(const drv_cold_start_add_ops* ops,
+		const as_flat_record* flat, uint64_t rblock_id, uint32_t record_size)
+{
+	uint32_t pid = as_partition_getid(&flat->keyd);
+
+	// If this isn't a partition we're interested in, skip this record.
+	if (! ops->common->get_state_from_storage[pid]) {
+		ops->counters->unowned++;
+		return;
+	}
+
+	as_namespace* ns = ops->common->ns;
+	as_partition* p_partition = &ns->partitions[pid];
+
+	// Includes round rblock padding, so may not literally exclude the mark.
+	// PMEM writes no end mark (end_mark_sz == 0), so its bins run to record_size.
+	const uint8_t* end = (const uint8_t*)flat + record_size - ops->end_mark_sz;
+
+	as_flat_opt_meta opt_meta = { { 0 } };
+
+	const uint8_t* p_read = as_flat_unpack_record_meta(flat, end, &opt_meta);
+
+	if (! p_read) {
+		cf_warning(ops->log_ctx, "bad metadata for %pD", &flat->keyd);
+		ops->counters->unparsable++;
+		return;
+	}
+
+	if (opt_meta.void_time > ns->startup_max_void_time) {
+		cf_warning(ops->log_ctx, "bad void-time for %pD", &flat->keyd);
+		ops->counters->unparsable++;
+		return;
+	}
+
+	const uint8_t* cb_end = NULL;
+
+	if (! as_flat_decompress_buffer(&opt_meta.cm, WBLOCK_SZ, &p_read, &end,
+				&cb_end)) {
+		cf_warning(ops->log_ctx, "bad compressed data for %pD", &flat->keyd);
+		ops->counters->unparsable++;
+		return;
+	}
+
+	const uint8_t* exact_end =
+			as_flat_check_packed_bins(p_read, end, opt_meta.n_bins);
+
+	if (exact_end == NULL) {
+		if (ops->bad_packed_bins_fn != NULL) {
+			ops->bad_packed_bins_fn(&ops->dev, flat, record_size, rblock_id);
+		}
+		else {
+			cf_warning(ops->log_ctx, "bad flat record %pD", &flat->keyd);
+		}
+		ops->counters->unparsable++;
+		return;
+	}
+
+	if (ops->end_mark_sz != 0 &&
+			! drv_check_end_mark(cb_end == NULL ? exact_end : cb_end, flat)) {
+		if (ops->bad_end_mark_fn != NULL) {
+			ops->bad_end_mark_fn(&ops->dev, flat, record_size, rblock_id);
+		}
+		else {
+			cf_warning(ops->log_ctx, "bad end marker for %pD", &flat->keyd);
+		}
+		ops->counters->unparsable++;
+		return;
+	}
+
+	// Ignore record if it was in a dropped tree.
+	if (flat->tree_id != p_partition->tree_id) {
+		ops->counters->dropped++;
+		return;
+	}
+
+	// Ignore records that were truncated.
+	if (as_truncate_lut_is_truncated(flat->last_update_time, ns,
+				opt_meta.set_name, opt_meta.set_name_len)) {
+		return;
+	}
+
+	// If eviction is necessary, evict previously added records closest to
+	// expiration. (If evicting, this call will block for a long time.) This
+	// call may also update the cold start threshold void-time.
+	if (! as_cold_start_evict_if_needed(ns)) {
+		cf_crash(ops->log_ctx,
+				"hit stop-writes limit before drive scan completed");
+	}
+
+	// Get/create the record from/in the appropriate index tree.
+	as_index_ref r_ref;
+	int rv = as_record_get_create(p_partition->tree, &flat->keyd, &r_ref, ns);
+
+	if (rv < 0) {
+		cf_crash(ops->log_ctx, "{%s} can't add record to index", ns->name);
+	}
+
+	bool is_create = rv == 1;
+
+	as_index* r = r_ref.r;
+
+	if (! is_create) {
+		// Record already existed. Ignore this one if existing record is newer.
+		if (drv_cold_start_prefer_existing(ns, flat, opt_meta.void_time, r)) {
+			ops->fill_orig_fn(&ops->dev, flat, rblock_id, &opt_meta,
+					p_partition->tree, &r_ref);
+			drv_cold_start_adjust_cenotaph(ns, flat, opt_meta.void_time, r);
+			as_record_done(&r_ref, ns);
+			ops->counters->older++;
+			return;
+		}
+	}
+	// The record we're now reading is the latest version (so far) ...
+
+	// Skip records that have expired.
+	if (opt_meta.void_time != 0 && ns->cold_start_now > opt_meta.void_time) {
+		if (! is_create) {
+			drv_cold_start_remove_from_set_index(ns, p_partition->tree, &r_ref);
+		}
+
+		as_index_delete(p_partition->tree, &flat->keyd);
+		as_record_done(&r_ref, ns);
+		ops->counters->expired++;
+		return;
+	}
+
+	// Skip records that were evicted.
+	if (opt_meta.void_time != 0 && ns->evict_void_time > opt_meta.void_time &&
+			drv_is_set_evictable(ns, &opt_meta)) {
+		if (! is_create) {
+			drv_cold_start_remove_from_set_index(ns, p_partition->tree, &r_ref);
+		}
+
+		as_index_delete(p_partition->tree, &flat->keyd);
+		as_record_done(&r_ref, ns);
+		ops->counters->evicted++;
+		return;
+	}
+
+	// We'll keep the record we're now reading ...
+
+	if (is_create) {
+		// Set record's set-id.
+		if (opt_meta.set_name != NULL) {
+			as_index_set_set_w_len(r, ns, opt_meta.set_name,
+					opt_meta.set_name_len, false);
+		}
+
+		drv_cold_start_record_create(ns, flat, &opt_meta, p_partition->tree,
+				&r_ref);
+
+		ops->counters->unique++;
+	}
+	else {
+		ops->record_update_fn(ops->devs, flat, &opt_meta, p_partition->tree,
+				&r_ref);
+
+		ops->counters->replace++;
+	}
+
+	// Store or drop the key according to the props we read.
+	as_record_finalize_key(r, opt_meta.key, opt_meta.key_size);
+
+	// Set/reset the record's last-update-time, generation, and void-time.
+	r->last_update_time = flat->last_update_time;
+	r->generation = flat->generation;
+	r->void_time = opt_meta.void_time;
+
+	// Update maximum void-time.
+	as_setmax_uint32(&p_partition->max_void_time, r->void_time);
+
+	// Set/reset the record's replication state and XDR-write status.
+	drv_cold_start_init_repl_state(ns, r);
+	drv_cold_start_init_xdr_state(flat, r);
+
+	uint32_t wblock_id = RBLOCK_ID_TO_WBLOCK_ID(rblock_id);
+
+	if (is_mrt_provisional(r) || is_mrt_monitor_write(ns, r)) {
+		ops->dev.wblock_state[wblock_id].short_lived = true;
+	}
+
+	*ops->dev.inuse_size += record_size;
+	ops->dev.wblock_state[wblock_id].inuse_sz += record_size;
+
+	// Set/reset the record's storage information.
+	r->file_id = ops->dev.file_id;
+	r->rblock_id = rblock_id;
+
+	as_namespace_adjust_set_data_used_bytes(ns, as_index_get_set_id(r),
+			DELTA_N_RBLOCKS_TO_SIZE(flat->n_rblocks, r->n_rblocks));
+
+	r->n_rblocks = flat->n_rblocks;
+
+	as_record_done(&r_ref, ns);
+}
+
+//==========================================================
+// Public API - defrag (shared index-tree check).
+//
+
+int
+drv_record_defrag(cf_log_context log_ctx, const char* dev_name, as_namespace* ns,
+		int file_id, uint32_t wblock_id, const as_flat_record* flat,
+		uint64_t rblock_id, drv_defrag_move_fn move_fn, drv_dev dev)
+{
+	as_partition_reservation rsv;
+	uint32_t pid = as_partition_getid(&flat->keyd);
+
+	as_partition_reserve(ns, pid, &rsv);
+
+	int rv;
+	as_index_ref r_ref;
+	bool found = 0 == as_record_get(rsv.tree, &flat->keyd, &r_ref);
+
+	if (found) {
+		as_index* r = r_ref.r;
+
+		if ((r = drv_current_record(ns, r, file_id, rblock_id)) != NULL) {
+			if (r->generation != flat->generation) {
+				cf_warning(log_ctx,
+						"device %s defrag: rblock_id %lu generation mismatch (%u:%u) %pD",
+						dev_name, rblock_id, r->generation, flat->generation,
+						&r->keyd);
+			}
+
+			if (r->n_rblocks != flat->n_rblocks) {
+				cf_warning(log_ctx,
+						"device %s defrag: rblock_id %lu n_blocks mismatch (%u:%u) %pD",
+						dev_name, rblock_id, r->n_rblocks, flat->n_rblocks,
+						&r->keyd);
+			}
+
+			move_fn(dev, wblock_id, flat, r);
+
+			rv = 0; // record was in index tree and current - moved it
+		}
+		else {
+			rv = -1; // record was in index tree - presumably was overwritten
+		}
+
+		as_record_done(&r_ref, ns);
+	}
+	else {
+		rv = -2; // record was not in index tree - presumably was deleted
+	}
+
+	as_partition_release(&rsv);
+
+	return rv;
+}
+
+//==========================================================
+// Public API - defrag wblock record scan.
+//
+
+int
+drv_defrag_scan_wblock_records(cf_log_context log_ctx, const char* dev_name,
+		const uint8_t* buf, uint64_t wblock_base_offset, uint32_t wblock_id,
+		const drv_wblock_state* p_wblock_state, drv_dev dev,
+		uint32_t benign_magic, bool stop_at_gap,
+		drv_defrag_prepare_record_fn prepare_fn,
+		drv_defrag_on_record_fn on_record_fn)
+{
+	int record_count = 0;
+	uint32_t indent = 0;
+
+	while (indent < WBLOCK_SZ && as_load_uint32(&p_wblock_state->inuse_sz) != 0) {
+		const as_flat_record* flat = prepare_fn != NULL
+				? prepare_fn(dev, wblock_base_offset + (uint64_t)indent,
+						  &buf[indent])
+				: (const as_flat_record*)&buf[indent];
+
+		if (flat->magic != AS_FLAT_MAGIC) {
+			// The first record must have magic - except an engine's benign
+			// magic, e.g. PMEM's crash-recovery dirty records.
+			if ((benign_magic == 0 || flat->magic != benign_magic) &&
+					indent == 0) {
+				cf_warning(log_ctx, "%s: no magic at beginning of used wblock %d",
+						dev_name, wblock_id);
+				break;
+			}
+
+			// Later records may have no magic - stop at the first gap or keep
+			// looking for magic, per engine (see header comment).
+			if (stop_at_gap) {
+				break;
+			}
+
+			indent += RBLOCK_SIZE;
+			continue;
+		}
+
+		uint32_t record_size = N_RBLOCKS_TO_SIZE(flat->n_rblocks);
+		uint32_t next_indent = indent + record_size;
+
+		if (record_size < DRV_RECORD_MIN_SIZE || next_indent > WBLOCK_SZ) {
+			cf_warning(log_ctx, "%s: bad record size %u", dev_name, record_size);
+			indent += RBLOCK_SIZE;
+			continue; // try next rblock
+		}
+
+		// Found a good record, move it if it's current.
+		if (on_record_fn(dev, wblock_id, flat,
+					OFFSET_TO_RBLOCK_ID(wblock_base_offset + (uint64_t)indent)) ==
+				0) {
+			record_count++;
+		}
+
+		indent = next_indent;
+	}
+
+	return record_count;
+}
+
+//==========================================================
+// Public API - defrag thread loop.
+//
+
+void
+drv_run_defrag_loop(const as_namespace* ns, cf_queue* defrag_wblock_q,
+		drv_dev dev, drv_defrag_process_wblock_fn process_wblock,
+		uint8_t* read_buf, uint32_t max_write_q_extra, bool sleep_after_wblock)
+{
+	uint32_t wblock_id;
+
+	while (true) {
+		uint32_t q_min = as_load_uint32(&ns->storage_defrag_queue_min);
+
+		if (q_min == 0) {
+			cf_queue_pop(defrag_wblock_q, &wblock_id, CF_QUEUE_FOREVER);
+		}
+		else {
+			if (cf_queue_sz(defrag_wblock_q) <= q_min) {
+				usleep(1000 * 50);
+				continue;
+			}
+
+			cf_queue_pop(defrag_wblock_q, &wblock_id, CF_QUEUE_NOWAIT);
+		}
+
+		process_wblock(dev, wblock_id, read_buf);
+
+		if (sleep_after_wblock) {
+			uint32_t sleep_us = as_load_uint32(&ns->storage_defrag_sleep);
+
+			if (sleep_us != 0) {
+				usleep(sleep_us);
+			}
+		}
+
+		while (ns->n_wblocks_to_flush >
+				ns->storage_max_write_q + max_write_q_extra) {
+			usleep(1000);
+		}
+	}
+}
+
+//==========================================================
+// Public API - device maintenance thread.
+//
+
+void
+drv_run_maintenance_loop(drv_dev dev, const as_namespace* ns,
+		uint32_t* defrag_sweep_req, const drv_maintenance_ops* ops)
+{
+	uint64_t prev_n_total_writes = 0;
+	uint64_t prev_n_defrag_reads = 0;
+	uint64_t prev_n_defrag_writes = 0;
+	uint64_t prev_n_defrag_io_skips = 0;
+	uint64_t prev_n_direct_frees = 0;
+	uint64_t prev_n_tomb_raider_reads = 0;
+
+	uint64_t prev_n_writes_flush[N_CURRENT_SWBS] = { 0 };
+
+	uint64_t prev_n_defrag_writes_flush = 0;
+
+	uint64_t now = cf_getus();
+	uint64_t next = now + DRV_MAINT_MAX_INTERVAL_US;
+
+	uint64_t prev_log_stats = now;
+	uint64_t prev_free_pool = now;
+	uint64_t prev_flush[N_CURRENT_SWBS];
+	uint64_t prev_defrag_flush = now;
+
+	for (uint8_t c = 0; c < N_CURRENT_SWBS; c++) {
+		prev_flush[c] = now;
+	}
+
+	// If any job's (initial) interval is less than DRV_MAINT_MAX_INTERVAL_US
+	// and we want it done on its interval the first time through, add a
+	// drv_next_time() call for that job here to adjust 'next'. (No such jobs
+	// for now.)
+
+	uint64_t sleep_us = next - now;
+
+	while (true) {
+		usleep((uint32_t)sleep_us);
+
+		now = cf_getus();
+		next = now + DRV_MAINT_MAX_INTERVAL_US;
+
+		if (now >= prev_log_stats + DRV_MAINT_LOG_STATS_INTERVAL_US) {
+			ops->log_stats_fn(dev, &prev_n_total_writes, &prev_n_defrag_reads,
+					&prev_n_defrag_writes, &prev_n_defrag_io_skips,
+					&prev_n_direct_frees, &prev_n_tomb_raider_reads);
+			prev_log_stats = now;
+			next = drv_next_time(now, DRV_MAINT_LOG_STATS_INTERVAL_US, next);
+		}
+
+		if (now >= prev_free_pool + DRV_MAINT_FREE_POOL_INTERVAL_US) {
+			ops->free_pool_fn(dev);
+			prev_free_pool = now;
+			next = drv_next_time(now, DRV_MAINT_FREE_POOL_INTERVAL_US, next);
+		}
+
+		uint64_t flush_max_us = ops->flush_max_us_fn(dev, ns);
+
+		for (uint8_t c = 0; c < N_CURRENT_SWBS; c++) {
+			if (flush_max_us != 0 && now >= prev_flush[c] + flush_max_us) {
+				ops->flush_current_fn(dev, c, &prev_n_writes_flush[c]);
+				prev_flush[c] = now;
+				next = drv_next_time(now, flush_max_us, next);
+			}
+		}
+
+		if (ops->flush_defrag_fn != NULL &&
+				now >= prev_defrag_flush + DRV_MAINT_DEFRAG_FLUSH_INTERVAL_US) {
+			ops->flush_defrag_fn(dev, &prev_n_defrag_writes_flush);
+			prev_defrag_flush = now;
+			next = drv_next_time(now, DRV_MAINT_DEFRAG_FLUSH_INTERVAL_US, next);
+		}
+
+		// Sweep may take long enough to mess up other jobs' schedules, but
+		// it's a very rare manually-triggered intervention.
+		if (*defrag_sweep_req != 0) {
+			ops->defrag_sweep_fn(dev);
+			as_decr_uint32(defrag_sweep_req);
+		}
+
+		// Refresh in case jobs took significant time.
+		now = cf_getus();
+		sleep_us = next > now ? next - now : 1;
+	}
 }

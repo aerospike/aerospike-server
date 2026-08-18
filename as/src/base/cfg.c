@@ -3594,6 +3594,7 @@ as_config_init(const char* config_file)
 					ns->storage_type = AS_STORAGE_ENGINE_MEMORY;
 					ns->storage_post_write_cache =
 							0; // override non-0 default for info purposes
+					as_storage_bind_ops(ns);
 					cfg_begin_context(&state, NAMESPACE_STORAGE_MEMORY);
 					break;
 				case CASE_NAMESPACE_STORAGE_PMEM:
@@ -3601,11 +3602,13 @@ as_config_init(const char* config_file)
 					ns->storage_type = AS_STORAGE_ENGINE_PMEM;
 					ns->storage_post_write_cache =
 							0; // override non-0 default for info purposes
+					as_storage_bind_ops(ns);
 					cfg_begin_context(&state, NAMESPACE_STORAGE_PMEM);
 					break;
 				case CASE_NAMESPACE_STORAGE_DEVICE:
 					ns->storage_type = AS_STORAGE_ENGINE_SSD;
 					ns->storage_flush_size = DEFAULT_FLUSH_SIZE;
+					as_storage_bind_ops(ns);
 					cfg_begin_context(&state, NAMESPACE_STORAGE_DEVICE);
 					break;
 				case CASE_NOT_FOUND:

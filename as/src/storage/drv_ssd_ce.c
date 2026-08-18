@@ -73,9 +73,10 @@ ssd_cold_start_sweep_device(drv_ssds* ssds, drv_ssd* ssd)
 }
 
 void
-ssd_cold_start_fill_orig(drv_ssd* ssd, const as_flat_record* flat,
-		uint64_t rblock_id, const as_flat_opt_meta* opt_meta,
-		as_index_tree* tree, as_index_ref* r_ref)
+ssd_cold_start_fill_orig(const drv_cold_start_dev* dev,
+		const as_flat_record* flat, uint64_t rblock_id,
+		const as_flat_opt_meta* opt_meta, as_index_tree* tree,
+		as_index_ref* r_ref)
 {
 }
 
@@ -93,38 +94,7 @@ ssd_cold_start_record_update(drv_ssds* ssds, const as_flat_record* flat,
 }
 
 void
-ssd_cold_start_adjust_cenotaph(as_namespace* ns, const as_flat_record* flat,
-		uint32_t block_void_time, as_record* r)
-{
-	// Nothing to do - relevant for enterprise version only.
-}
-
-void
 ssd_cold_start_drop_cenotaphs(as_namespace* ns)
-{
-	// Nothing to do - relevant for enterprise version only.
-}
-
-conflict_resolution_pol
-ssd_cold_start_policy(const as_namespace* ns)
-{
-	return AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_LAST_UPDATE_TIME;
-}
-
-void
-ssd_cold_start_init_repl_state(as_namespace* ns, as_record* r)
-{
-	// Nothing to do - relevant for enterprise version only.
-}
-
-void
-ssd_cold_start_set_unrepl_stat(as_namespace* ns)
-{
-	// Nothing to do - relevant for enterprise version only.
-}
-
-void
-ssd_cold_start_init_xdr_state(const as_flat_record* flat, as_record* r)
 {
 	// Nothing to do - relevant for enterprise version only.
 }

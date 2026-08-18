@@ -175,14 +175,7 @@ typedef struct drv_mem_s {
 	bool cold_start_local; // i.e. instead of from shadow
 
 	uint32_t sweep_wblock_id; // wblocks read at startup
-	uint64_t record_add_older_counter; // records not inserted due to better existing one
-	uint64_t record_add_expired_counter; // records not inserted due to expiration
-	uint64_t record_add_evicted_counter; // records not inserted due to eviction
-	uint64_t record_add_replace_counter; // records reinserted
-	uint64_t record_add_unique_counter; // records inserted
-	uint64_t record_add_unowned_counter; // records not inserted due to unowned partition
-	uint64_t record_add_dropped_counter; // records not inserted due to dropped tree
-	uint64_t record_add_unparsable_counter; // unparsable records not inserted
+	drv_cold_start_counters cold_start_counters;
 
 	cf_tid shadow_tid;
 
@@ -216,9 +209,10 @@ void flush_final_cfg(struct as_namespace_s* ns);
 
 void cold_start_sweep_device(drv_mems* mems, drv_mem* mem);
 void cold_start_sweep(drv_mems* mems, drv_mem* mem);
-void cold_start_fill_orig(drv_mem* mem, const struct as_flat_record_s* flat,
-		uint64_t rblock_id, const struct as_flat_opt_meta_s* opt_meta,
-		struct as_index_tree_s* tree, struct as_index_ref_s* r_ref);
+void cold_start_fill_orig(const drv_cold_start_dev* dev,
+		const struct as_flat_record_s* flat, uint64_t rblock_id,
+		const struct as_flat_opt_meta_s* opt_meta, struct as_index_tree_s* tree,
+		struct as_index_ref_s* r_ref);
 void cold_start_record_create(struct as_namespace_s* ns,
 		const struct as_flat_record_s* flat,
 		const struct as_flat_opt_meta_s* opt_meta, struct as_index_tree_s* tree,
@@ -226,15 +220,6 @@ void cold_start_record_create(struct as_namespace_s* ns,
 void cold_start_record_update(drv_mems* mems, const struct as_flat_record_s* flat,
 		const struct as_flat_opt_meta_s* opt_meta, struct as_index_tree_s* tree,
 		struct as_index_ref_s* r_ref);
-conflict_resolution_pol cold_start_policy(const struct as_namespace_s* ns);
-void cold_start_adjust_cenotaph(const struct as_namespace_s* ns,
-		const struct as_flat_record_s* flat, uint32_t block_void_time,
-		struct as_index_s* r);
-void cold_start_init_repl_state(const struct as_namespace_s* ns,
-		struct as_index_s* r);
-void cold_start_set_unrepl_stat(struct as_namespace_s* ns);
-void cold_start_init_xdr_state(const struct as_flat_record_s* flat,
-		struct as_index_s* r);
 void cold_start_drop_cenotaphs(struct as_namespace_s* ns);
 
 void resume_devices(drv_mems* mems);
@@ -260,20 +245,6 @@ int shadow_fd_get(drv_mem* mem);
 
 void decrypt_record(drv_mem* mem, uint64_t off, struct as_flat_record_s* flat);
 uint8_t* encrypt_wblock(mem_write_block* mwb, uint64_t off);
-
-// Round bytes down to a multiple of shadow's minimum IO operation size.
-static inline uint64_t
-BYTES_DOWN_TO_IO_MIN(const drv_mem* mem, uint64_t bytes)
-{
-	return bytes & -mem->io_min_size;
-}
-
-// Round bytes up to a multiple of shadow's minimum IO operation size.
-static inline uint64_t
-BYTES_UP_TO_IO_MIN(const drv_mem* mem, uint64_t bytes)
-{
-	return (bytes + (mem->io_min_size - 1)) & -mem->io_min_size;
-}
 
 static inline void
 mem_wait_writers_done(mem_write_block* mwb)

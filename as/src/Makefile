@@ -185,6 +185,7 @@ STORAGE_HEADERS += drv_mem.h
 STORAGE_HEADERS += drv_ssd.h
 STORAGE_HEADERS += flat.h
 STORAGE_HEADERS += storage.h
+STORAGE_HEADERS += storage_ops_slots.h
 
 STORAGE_SOURCES += drv_mem.c
 STORAGE_SOURCES += drv_ssd.c
@@ -195,6 +196,7 @@ ifneq ($(USE_EE),1)
   STORAGE_SOURCES += drv_common_ce.c
   STORAGE_SOURCES += drv_mem_ce.c
   STORAGE_SOURCES += drv_pmem_ce.c
+  STORAGE_SOURCES += drv_shared_ce.c
   STORAGE_SOURCES += drv_ssd_ce.c
   STORAGE_SOURCES += flat_ce.c
 endif

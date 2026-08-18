@@ -1053,6 +1053,7 @@ typedef struct as_namespace_s {
 	uint64_t si_mounts_budget;
 
 	as_storage_type storage_type;
+	const as_storage_ops* storage_ops;
 
 	const char* storage_devices[AS_STORAGE_MAX_DEVICES];
 	uint32_t n_storage_stripes; // indirect config - if devices array contains memory stripes

@@ -2097,11 +2097,13 @@ handle_namespace_storage_engine_type(void* ns, const FieldDescriptor& desc,
 		namespace_struct->storage_type = AS_STORAGE_ENGINE_MEMORY;
 		// Override non-0 default for info purposes.
 		namespace_struct->storage_post_write_cache = 0;
+		as_storage_bind_ops(namespace_struct);
 	}
 	else if (storage_engine_type == "pmem") {
 		namespace_struct->storage_type = AS_STORAGE_ENGINE_PMEM;
 		// Override non-0 default for info purposes.
 		namespace_struct->storage_post_write_cache = 0;
+		as_storage_bind_ops(namespace_struct);
 	}
 	else if (storage_engine_type == "device") {
 		namespace_struct->storage_type = AS_STORAGE_ENGINE_SSD;
@@ -2109,6 +2111,7 @@ handle_namespace_storage_engine_type(void* ns, const FieldDescriptor& desc,
 		// user supplies an explicit 'flush-size' (descriptors are iterated in
 		// order, and 'flush-size' is processed after 'type').
 		namespace_struct->storage_flush_size = DEFAULT_FLUSH_SIZE;
+		as_storage_bind_ops(namespace_struct);
 	}
 	else {
 		throw config_error("/namespaces/storage-engine/type",
