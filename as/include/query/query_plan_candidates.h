@@ -44,8 +44,14 @@ struct as_exp_s;
 // Typedefs & constants.
 //
 
-// Matches MAX_STRING_KSIZE / MAX_BLOB_KSIZE in sindex.h.
+// Matches MAX_STRING_KSIZE / MAX_BLOB_KSIZE
 #define AS_EXP_SINDEX_BOUND_VAL_MAX 2048
+
+// Matches MAX_GEOJSON_KSIZE
+#define AS_EXP_SINDEX_GEO_BOUND_VAL_MAX (1024 * 1024)
+
+// Matches CTX_B64_MAX_SZ of base64, 4:3
+#define AS_EXP_SINDEX_CTX_MAX 1536
 
 typedef struct as_exp_sindex_candidate_s {
 	char bin_name[AS_BIN_NAME_MAX_SZ];
@@ -53,10 +59,25 @@ typedef struct as_exp_sindex_candidate_s {
 	as_particle_type ktype;
 	as_sindex_type itype;
 	bool is_range;
-	int64_t bval_low; // inclusive lower bound (hash for string/blob)
-	int64_t bval_high; // inclusive upper bound (hash for string/blob)
-	uint32_t bound_val_sz; // 0 for integer candidates
-	uint8_t bound_val[AS_EXP_SINDEX_BOUND_VAL_MAX]; // original bytes for wire replay
+	int64_t bval_low;
+	int64_t bval_high;
+	uint32_t bound_val_sz;
+	uint8_t bound_val[AS_EXP_SINDEX_BOUND_VAL_MAX]; // STRING/BLOB bytes
+
+	// GEO bytes (borrowed into filter's as_exp->mem), NULL for non-GEO.
+	const uint8_t* geo_bound_val;
+
+	uint32_t ctx_buf_sz; // 0 for top-level (no-ctx) candidates
+	uint8_t ctx_buf[AS_EXP_SINDEX_CTX_MAX]; // packed ctx, byte-comparable with si->ctx_buf
+
+	// Set for exp=... candidates, matched via subtree_equals_exp (sindex.c).
+	// Pointers below are borrowed into the filter's as_exp->mem - never
+	// persist past this call.
+	bool is_exp;
+	const uint8_t* exp_subtree_ptr;
+	uint32_t exp_subtree_start_ix;
+	uint32_t exp_subtree_end_ix;
+	const struct as_exp_s* owner_exp; // back-reference - resolves bin-name table during matching
 } as_exp_sindex_candidate;
 
 typedef enum as_exp_sindex_extract_e {

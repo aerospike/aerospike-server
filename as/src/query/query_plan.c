@@ -32,6 +32,7 @@
 #include <string.h>
 #include <sys/socket.h> // MSG_NOSIGNAL
 
+#include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_byte_order.h"
 
 #include "log.h"
@@ -53,13 +54,21 @@
 // Typedefs & constants.
 //
 
-#define PLAN_INDEX_RANGE_PAYLOAD_MAX                                           \
-	(1 + 1 + AS_BIN_NAME_MAX_SZ + 1 + (sizeof(uint32_t) + MAX_STRING_KSIZE))
+// INDEX_RANGE header, excluding STRING/BLOB/GEOJSON bound bytes: n_ranges +
+// bin_name + ktype + INTEGER's two length-prefixed int64 bounds (the worst
+// case among all ktypes, so this is a true bound for every ktype on its own).
+#define PLAN_INDEX_RANGE_HEADER_MAX                                            \
+	(1 + 1 + AS_BIN_NAME_MAX_SZ + 1 + 2 * (sizeof(uint32_t) + sizeof(int64_t)))
 
-#define PLAN_RESPONSE_BUF_SZ                                                   \
+#define PLAN_RESPONSE_HEADER_MAX                                               \
 	(sizeof(cl_msg) + (sizeof(as_msg_field) + INAME_MAX_SZ) +                  \
 			(sizeof(as_msg_field) + 1) +                                       \
-			(sizeof(as_msg_field) + PLAN_INDEX_RANGE_PAYLOAD_MAX))
+			(sizeof(as_msg_field) + PLAN_INDEX_RANGE_HEADER_MAX))
+
+// Stack-buffer size, header plus the STRING/BLOB inline bound. GEO instead
+// heap-allocates PLAN_RESPONSE_HEADER_MAX + geo_extra (plan_send_response).
+#define PLAN_RESPONSE_FIXED_MAX                                                \
+	(PLAN_RESPONSE_HEADER_MAX + AS_EXP_SINDEX_BOUND_VAL_MAX)
 
 // Planner-only state - decoupled from as_query_job, no scan is executed.
 typedef struct plan_ctx_s {
@@ -200,8 +209,9 @@ plan_parse_request(as_transaction* tr, plan_ctx* ctx, as_query_where* where)
 		uint32_t len = as_msg_field_get_value_sz(f);
 
 		if (len >= AS_SET_NAME_MAX_SIZE) {
-			cf_ticker_warning(AS_QUERY, "{%s} query-plan: set name too long %u",
-					ns->name, len);
+			cf_ticker_warning(AS_QUERY,
+					"{%s} query-plan: set name too long, max %u", ns->name,
+					AS_SET_NAME_MAX_SIZE - 1);
 			return false;
 		}
 
@@ -216,9 +226,16 @@ plan_parse_request(as_transaction* tr, plan_ctx* ctx, as_query_where* where)
 		const as_msg_field* f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_INDEX_NAME);
 		uint32_t len = as_msg_field_get_value_sz(f);
 
-		if (len == 0 || len >= INAME_MAX_SZ) {
+		if (len == 0) {
+			cf_ticker_warning(AS_QUERY, "{%s} query-plan: empty index name",
+					ns->name);
+			return false;
+		}
+
+		if (len >= INAME_MAX_SZ) {
 			cf_ticker_warning(AS_QUERY,
-					"{%s} query-plan: bad index name size %u", ns->name, len);
+					"{%s} query-plan: index name too long, max %u", ns->name,
+					INAME_MAX_SZ - 1);
 			return false;
 		}
 
@@ -243,12 +260,6 @@ plan_parse_request(as_transaction* tr, plan_ctx* ctx, as_query_where* where)
 static as_query_plan_result
 plan_pick_sindex(plan_ctx* ctx)
 {
-	if (ctx->exp == NULL) {
-		cf_ticker_warning(AS_QUERY,
-				"{%s} query plan request missing expression", ctx->ns->name);
-		return AS_QUERY_PLAN_ERROR;
-	}
-
 	const char* hint = ctx->iname_hint[0] != '\0' ? ctx->iname_hint : NULL;
 
 	ctx->selection =
@@ -262,7 +273,21 @@ plan_send_response(const as_transaction* tr, const plan_ctx* ctx)
 {
 	as_file_handle* fd_h = tr->from.proto_fd_h;
 
-	uint8_t buf[PLAN_RESPONSE_BUF_SZ];
+	// geo_bound_val is a borrowed pointer that can carry up to 1 MiB (GEO's
+	// real wire ceiling) - too big for a fixed stack buffer, so only heap
+	// allocate the (rare) larger response; everything else keeps the cheap
+	// stack path.
+	uint32_t geo_extra =
+			(ctx->selection.result == AS_QUERY_PLAN_SINDEX &&
+					ctx->selection.match.ktype == AS_PARTICLE_TYPE_GEOJSON)
+			? ctx->selection.match.bound_val_sz
+			: 0;
+
+	uint8_t stack_buf[PLAN_RESPONSE_FIXED_MAX];
+	uint8_t* buf = geo_extra != 0
+			? cf_malloc(PLAN_RESPONSE_HEADER_MAX + geo_extra)
+			: stack_buf;
+
 	uint8_t* p = buf + sizeof(cl_msg);
 	uint16_t n_fields = 0;
 
@@ -328,8 +353,14 @@ plan_send_response(const as_transaction* tr, const plan_ctx* ctx)
 
 	as_msg_swap_header(m);
 
-	if (cf_socket_send_all(&fd_h->sock, buf, msg_sz, MSG_NOSIGNAL,
-				CF_SOCKET_TIMEOUT) < 0) {
+	int send_rv = cf_socket_send_all(&fd_h->sock, buf, msg_sz, MSG_NOSIGNAL,
+			CF_SOCKET_TIMEOUT);
+
+	if (geo_extra != 0) {
+		cf_free(buf);
+	}
+
+	if (send_rv < 0) {
 		cf_warning(AS_QUERY, "{%s} query-plan: send fail fd=%d sz=%zu",
 				ctx->ns->name, CSFD(&fd_h->sock), msg_sz);
 		as_end_of_transaction_force_close(fd_h);
@@ -361,11 +392,20 @@ plan_build_range_payload(uint8_t* buf, const as_exp_sindex_candidate* match)
 		break;
 	case AS_PARTICLE_TYPE_STRING:
 	case AS_PARTICLE_TYPE_BLOB:
+	case AS_PARTICLE_TYPE_GEOJSON: {
 		cf_assert(match->bval_low == match->bval_high, AS_QUERY,
 				"query-plan: hash-type range bound must be EQ");
+		cf_assert(match->ktype != AS_PARTICLE_TYPE_GEOJSON ||
+						match->geo_bound_val != NULL,
+				AS_QUERY, "query-plan: GEOJSON candidate missing geo_bound_val");
 
-		p = plan_append_bytes_bound(p, match->bound_val, match->bound_val_sz);
+		const uint8_t* bound_val = match->geo_bound_val != NULL
+				? match->geo_bound_val
+				: match->bound_val;
+
+		p = plan_append_bytes_bound(p, bound_val, match->bound_val_sz);
 		break;
+	}
 	default:
 		cf_crash(AS_QUERY,
 				"query-plan: unsupported ktype %d in INDEX_RANGE payload",

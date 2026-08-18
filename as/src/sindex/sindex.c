@@ -55,6 +55,7 @@
 #include "base/smd.h"
 #include "base/thr_info.h"
 #include "exp/exp.h"
+#include "exp/exp_rt.h"
 #include "geospatial/geospatial.h"
 #include "sindex/gc.h"
 #include "sindex/populate.h"
@@ -118,6 +119,13 @@ static char const* ktype_str(as_particle_type ktype, bool use_integer);
 static as_sindex* as_sindex_find_best(const as_namespace* ns, uint16_t set_id,
 		const cf_vector* candidates, const char* hint_iname,
 		as_exp_sindex_candidate* matched_r);
+static as_sindex* find_matching_exp_sindex(const as_namespace* ns,
+		uint16_t set_id, const as_exp_sindex_candidate* c,
+		const char* hint_iname);
+static bool subtree_equals_exp(const as_exp* cand_exp, const uint8_t* subtree_ptr,
+		uint32_t start_ix, uint32_t end_ix, const as_exp* si_exp);
+static bool compare_bufs(const uint8_t* buf1, uint32_t buf1_sz,
+		const uint8_t* buf2, uint32_t buf2_sz);
 const char* sindex_particle_type_str(as_particle_type type);
 static as_particle_type itype_to_exp_particle_type(as_sindex_type itype);
 
@@ -388,8 +396,562 @@ as_sindex_lookup_by_iname(const as_namespace* ns, const char* iname)
 }
 
 //==========================================================
+// Local helpers - structural op-array equality (exp-based sindex matching).
+//
+
+// Short aliases for the op-node layouts, matching exp.c's local convention.
+typedef struct exp_op_base_mem_s op_base_mem;
+typedef struct exp_op_var_s op_var;
+typedef struct exp_op_value_blob_s op_value_blob;
+typedef struct exp_op_value_int_s op_value_int;
+typedef struct exp_op_value_bool_s op_value_bool;
+typedef struct exp_op_value_float_s op_value_float;
+typedef struct exp_op_call_s op_call;
+
+static bool
+compare_bufs(const uint8_t* buf1, uint32_t buf1_sz, const uint8_t* buf2,
+		uint32_t buf2_sz)
+{
+	if (buf1 == NULL && buf2 == NULL) {
+		return true;
+	}
+
+	return buf1 != NULL && buf2 != NULL && buf1_sz == buf2_sz &&
+			(buf1_sz == 0 || memcmp(buf1, buf2, buf1_sz) == 0);
+}
+
+static bool
+call_vec_equal(const uint8_t* a_buf, uint32_t a_sz, const uint8_t* b_buf,
+		uint32_t b_sz, bool is_leader, bool allow_trailing_default)
+{
+	msgpack_in ma = { .buf = a_buf, .buf_sz = a_sz };
+	msgpack_in mb = { .buf = b_buf, .buf_sz = b_sz };
+
+	if (is_leader) {
+		uint32_t a_n = 0;
+		uint32_t b_n = 0;
+
+		// An absent segment is an empty list, not a decode failure - just
+		// consumed here so the shared compare below can walk both sides as
+		// plain element streams. This does NOT itself grant zero-default
+		// forgiveness: that's gated by the caller's allow_trailing_default,
+		// which is always false at the leader (i == 0) - a single-vec call's
+		// own optional trailing arg (e.g. BIT_COUNT's size) can be
+		// semantically different when omitted vs. explicit 0, unlike the
+		// trailing write-flags scalar the n_vecs-level tolerance exists for.
+		// See SingleVecLeaderTrailingZeroNeverForgiven in
+		// test_query_plan_cdt.cc for the regression this guards against.
+		// The list header's declared count is read but NOT trusted as a
+		// bound: a mixed scalar/sub-expression call carves the
+		// sub-expression out into a sibling op, leaving the header's
+		// original full count stale against this buffer's truncated bytes -
+		// so the true count is just "however many elements physically fit"
+		// in buf_sz.
+		if (a_sz != 0 && ! msgpack_get_list_ele_count(&ma, &a_n)) {
+			// Not a list (shouldn't happen for a well-formed leader
+			// segment) - fall back to the original exact byte compare.
+			// Unverified by test: every leader this function has been
+			// exercised against (parse_op_call's own output, on both the
+			// query-plan and unit-test sides) is already a valid list, and
+			// no construction via the public API has been found that
+			// produces a malformed one here - likely genuinely
+			// unreachable/defensive, same class as EXP_VOP_VALUE_MAP below.
+			return a_sz == b_sz && (a_sz == 0 || memcmp(a_buf, b_buf, a_sz) == 0);
+		}
+
+		if (b_sz != 0 && ! msgpack_get_list_ele_count(&mb, &b_n)) {
+			return a_sz == b_sz && (a_sz == 0 || memcmp(a_buf, b_buf, a_sz) == 0);
+		}
+
+		(void)a_n;
+		(void)b_n;
+	}
+
+	// Compare by decoded value (msgpack_cmp), not raw bytes - two packers
+	// can legally choose different integer widths for the same value
+	// (fixint vs padded uint8), which a byte-exact compare would wrongly
+	// reject, same false-negative class as the flags-omission case above.
+	while (ma.offset < ma.buf_sz && mb.offset < mb.buf_sz) {
+		if (msgpack_cmp(&ma, &mb) != MSGPACK_CMP_EQUAL) {
+			return false;
+		}
+	}
+
+	// Extra trailing elements are only forgivable at the call's true final
+	// slot - elsewhere, leftover content means the sides disagree on this
+	// argument, not that one omitted a default.
+	if (ma.offset == ma.buf_sz && mb.offset == mb.buf_sz) {
+		return true;
+	}
+
+	if (! allow_trailing_default) {
+		return false;
+	}
+
+	msgpack_in* longer = ma.offset < ma.buf_sz ? &ma : &mb;
+
+	while (longer->offset < longer->buf_sz) {
+		uint64_t v;
+
+		if (! msgpack_get_uint64(longer, &v) || v != 0) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+// Debug-only: hex-dumps the mismatching vecs[] slot for node_self_equal's
+// EXP_CALL case. Split out so the comparator itself stays focused on the
+// comparison logic - this is purely diagnostic formatting on the failure path.
+static void
+log_call_vec_mismatch(uint32_t i, const uint8_t* a_buf, uint32_t a_sz,
+		const uint8_t* b_buf, uint32_t b_sz, const op_call* ca, const op_call* cb)
+{
+	if (! cf_log_check_level(AS_SINDEX, CF_DEBUG)) {
+		return;
+	}
+
+	char ahex[128] = { 0 };
+	char bhex[128] = { 0 };
+
+	for (uint32_t k = 0; k < a_sz && k < 20; k++) {
+		snprintf(ahex + strlen(ahex), sizeof(ahex) - strlen(ahex), "%02x ",
+				a_buf[k]);
+	}
+
+	for (uint32_t k = 0; k < b_sz && k < 20; k++) {
+		snprintf(bhex + strlen(bhex), sizeof(bhex) - strlen(bhex), "%02x ",
+				b_buf[k]);
+	}
+
+	cf_debug(AS_SINDEX,
+			"node_self_equal: EXP_CALL vecs[%u] hex a=[%s] b=[%s] "
+			"n_vecs a=%u b=%u eval_count a=%u b=%u",
+			i, ahex, bhex, ca->n_vecs, cb->n_vecs, ca->eval_count,
+			cb->eval_count);
+	cf_debug(AS_SINDEX,
+			"node_self_equal: EXP_CALL vecs[%u] mismatch (a_sz=%u b_sz=%u)", i,
+			a_sz, b_sz);
+}
+
+// Compares one op node's own payload (not children) - opcode is assumed
+// already equal by the caller. Bin references resolve by NAME via each
+// exp's own bin-name table, never by index - the two op arrays being
+// compared were independently built (filter vs. sindex-create), so table
+// slot order can differ even for the identical bin.
+static bool
+node_self_equal(const as_exp* a_exp, const op_base_mem* na, const as_exp* b_exp,
+		const op_base_mem* nb)
+{
+	if (na->type != nb->type || na->rtype != nb->rtype) {
+		cf_debug(AS_SINDEX,
+				"node_self_equal: base tag mismatch code=%u type a=%d b=%d rtype a=%d b=%d",
+				na->code, na->type, nb->type, na->rtype, nb->rtype);
+		return false;
+	}
+
+	switch (na->code) {
+	case EXP_BIN: {
+		const op_var* va = (const op_var*)na;
+		const op_var* vb = (const op_var*)nb;
+		const exp_rt_bin_table* ta = (const exp_rt_bin_table*)a_exp->bin_table;
+		const exp_rt_bin_table* tb = (const exp_rt_bin_table*)b_exp->bin_table;
+
+		if (va->idx >= ta->n_bins || vb->idx >= tb->n_bins) {
+			cf_debug(AS_SINDEX,
+					"node_self_equal: EXP_BIN idx out of range a=%u/%u b=%u/%u",
+					va->idx, ta->n_bins, vb->idx, tb->n_bins);
+			return false;
+		}
+
+		const exp_bin_name_entry* ea = &ta->table[va->idx];
+		const exp_bin_name_entry* eb = &tb->table[vb->idx];
+
+		bool eq = ea->sz == eb->sz &&
+				memcmp(ta->base + ea->off, tb->base + eb->off, ea->sz) == 0;
+
+		if (! eq) {
+			cf_debug(AS_SINDEX,
+					"node_self_equal: EXP_BIN name mismatch a='%.*s' b='%.*s'",
+					(int)ea->sz, ta->base + ea->off, (int)eb->sz,
+					tb->base + eb->off);
+		}
+
+		return eq;
+	}
+	case EXP_VAR:
+		// Only reachable inside a let-binding - not a construct parse_exp's
+		// validation allows into a sindex expression, but compare by idx
+		// for completeness/safety rather than silently matching.
+		if (((const op_var*)na)->idx != ((const op_var*)nb)->idx) {
+			cf_debug(AS_SINDEX, "node_self_equal: EXP_VAR idx mismatch a=%u b=%u",
+					((const op_var*)na)->idx, ((const op_var*)nb)->idx);
+			return false;
+		}
+		return true;
+	case EXP_VOP_VALUE_INT:
+		if (((const op_value_int*)na)->value != ((const op_value_int*)nb)->value) {
+			cf_debug(AS_SINDEX,
+					"node_self_equal: EXP_VOP_VALUE_INT mismatch a=%ld b=%ld",
+					(long)((const op_value_int*)na)->value,
+					(long)((const op_value_int*)nb)->value);
+			return false;
+		}
+		return true;
+	case EXP_QUOTE:
+	case EXP_VOP_VALUE_STR:
+	case EXP_VOP_VALUE_BLOB:
+	case EXP_VOP_VALUE_LIST:
+	case EXP_VOP_VALUE_MSGPACK: {
+		// Quoted list/map literals fold at build time into EXP_VOP_VALUE_LIST/
+		// _MSGPACK, not EXP_QUOTE - same op_value_blob pointer+size layout as
+		// STR/BLOB. Without this case they hit the default memcmp, comparing
+		// heap pointers that never match across independently-built trees.
+		//
+		// This case IS reachable, but only for LIST-shaped (or STR/BLOB)
+		// nodes structurally embedded inside a matched is_exp subtree - never
+		// for a comparison whose own literal is MAP-typed:
+		// extract_literal_bound (query_plan_candidates.c) only ever produces
+		// INTEGER/STRING/BLOB
+		// literals, so append_exp_candidate (the sole is_exp producer) can't
+		// emit a candidate for a MAP-valued comparison in the first place.
+		//
+		// EXP_VOP_VALUE_MAP is deliberately NOT cased here even though it's
+		// the map-typed sibling of the two above: build_value_msgpack
+		// (exp.c) keeps op->code == EXP_VOP_VALUE_MSGPACK even when the
+		// peeked wire type is MSGPACK_TYPE_MAP ("no VALUE_MAP runtime arm"),
+		// so EXP_VOP_VALUE_MAP is never actually produced as a runtime
+		// op->code (no construction was found that reaches it either way).
+		// And even if that ever changed: unlike LIST/MSGPACK,
+		// EXP_VOP_VALUE_MAP's own op_table entry (exp.c) types it as plain
+		// op_base_mem, not op_value_blob - it carries no pointer/heap
+		// member, so falling to the default memcmp below would compare only
+		// the shared op_base_mem header and produce a harmless, always-true
+		// (empty) comparison rather than resurrecting the LIST/MSGPACK
+		// pointer-comparison bug this case exists to fix.
+		const op_value_blob* ba = (const op_value_blob*)na;
+		const op_value_blob* bb = (const op_value_blob*)nb;
+
+		bool eq = ba->value_sz == bb->value_sz &&
+				(ba->value_sz == 0 ||
+						memcmp(ba->value, bb->value, ba->value_sz) == 0);
+
+		if (! eq) {
+			cf_debug(AS_SINDEX,
+					"node_self_equal: EXP_VOP_VALUE_STR/BLOB mismatch code=%u a_sz=%u b_sz=%u",
+					na->code, ba->value_sz, bb->value_sz);
+		}
+
+		return eq;
+	}
+	case EXP_VOP_VALUE_BOOL:
+		if (((const op_value_bool*)na)->value !=
+				((const op_value_bool*)nb)->value) {
+			cf_debug(AS_SINDEX, "node_self_equal: EXP_VOP_VALUE_BOOL mismatch");
+			return false;
+		}
+		return true;
+	case EXP_VOP_VALUE_FLOAT:
+		if (((const op_value_float*)na)->value !=
+				((const op_value_float*)nb)->value) {
+			cf_debug(AS_SINDEX, "node_self_equal: EXP_VOP_VALUE_FLOAT mismatch");
+			return false;
+		}
+		return true;
+	case EXP_VOP_VALUE_GEO: {
+		// Compare the original GeoJSON source bytes (contents/content_sz),
+		// not exp_geo_compiled - that union's cellid/region is derived at
+		// compile time and, for region, holds a heap pointer, so a raw
+		// memcmp of the node (the default: case below) would compare
+		// pointer/derived bytes rather than the literal's actual value.
+		//
+		// Defensive, not currently reachable from the sindex-candidate path:
+		// geo literals are built exclusively through append_geo_candidate /
+		// extract_geo_candidate (query_plan_candidates.c), a dedicated path
+		// that never produces an is_exp candidate - only is_exp candidates
+		// (built by append_exp_candidate, whose literal always came through
+		// extract_literal_bound, itself restricted to INTEGER/STRING/BLOB)
+		// ever reach subtree_equals_exp -> node_self_equal. If geo-in-
+		// expression indexing is ever added, that producer is the missing
+		// piece, not this comparison.
+		const exp_op_value_geo* ga = (const exp_op_value_geo*)na;
+		const exp_op_value_geo* gb = (const exp_op_value_geo*)nb;
+
+		bool eq = ga->content_sz == gb->content_sz &&
+				(ga->content_sz == 0 ||
+						memcmp(ga->contents, gb->contents, ga->content_sz) == 0);
+
+		if (! eq) {
+			cf_debug(AS_SINDEX,
+					"node_self_equal: EXP_VOP_VALUE_GEO mismatch a_sz=%u b_sz=%u",
+					ga->content_sz, gb->content_sz);
+		}
+
+		return eq;
+	}
+	case EXP_CALL: {
+		const op_call* ca = (const op_call*)na;
+		const op_call* cb = (const op_call*)nb;
+
+		if (ca->system_type != cb->system_type || ca->type != cb->type) {
+			cf_debug(AS_SINDEX,
+					"node_self_equal: EXP_CALL header mismatch "
+					"system_type a=%d b=%d, type a=%d b=%d",
+					ca->system_type, cb->system_type, ca->type, cb->type);
+			return false;
+		}
+
+		// n_vecs need not match exactly - wire-built calls pack a trailing
+		// write-flags scalar even at default, AEL's compiled form omits it;
+		// a byte-exact compare wrongly rejected this, silently breaking
+		// STRING/BITS/HLL sindex matching. eval_count must still match
+		// exactly - a differing sub-expression argument count is a
+		// genuinely different call shape.
+		if (ca->eval_count != cb->eval_count) {
+			cf_debug(AS_SINDEX,
+					"node_self_equal: EXP_CALL eval_count mismatch a=%u b=%u",
+					ca->eval_count, cb->eval_count);
+			return false;
+		}
+
+		uint32_t n_vecs_max = ca->n_vecs > cb->n_vecs ? ca->n_vecs : cb->n_vecs;
+
+		for (uint32_t i = 0; i < n_vecs_max; i++) {
+			bool a_is_eval = i < ca->n_vecs &&
+					ca->vecs[i].buf == exp_call_eval_token;
+			bool b_is_eval = i < cb->n_vecs &&
+					cb->vecs[i].buf == exp_call_eval_token;
+
+			// Which vecs[] slot holds the eval-token distinguishes same-call
+			// encodings from calls with scalar/sub-expression args swapped
+			// (bitCount(0, $.n) vs bitCount($.n, 0)) - a mismatch here means
+			// a genuinely different argument shape, so no tolerance applies.
+			if (a_is_eval != b_is_eval) {
+				cf_debug(AS_SINDEX,
+						"node_self_equal: EXP_CALL eval-token position mismatch "
+						"at vecs[%u] a=%d b=%d",
+						i, a_is_eval, b_is_eval);
+				return false;
+			}
+
+			const uint8_t* a_buf = i < ca->n_vecs ? ca->vecs[i].buf : NULL;
+			uint32_t a_sz = i < ca->n_vecs ? ca->vecs[i].buf_sz : 0;
+			const uint8_t* b_buf = i < cb->n_vecs ? cb->vecs[i].buf : NULL;
+			uint32_t b_sz = i < cb->n_vecs ? cb->vecs[i].buf_sz : 0;
+
+			// Trailing-default (0) tolerance applies ONLY at the call's true
+			// final slot, and never at the leader (i == 0): a single-vec
+			// call has no separate trailing slot to forgive, so its
+			// trailing elements are the call's own operands, not omittable
+			// defaults - a real argument can legitimately be 0 too, so
+			// forgiving it elsewhere would let a genuinely different value
+			// slip through unchecked, same failure class as above.
+			if (! call_vec_equal(a_buf, a_sz, b_buf, b_sz, i == 0,
+						i > 0 && i == n_vecs_max - 1)) {
+				log_call_vec_mismatch(i, a_buf, a_sz, b_buf, b_sz, ca, cb);
+				return false;
+			}
+		}
+
+		return true;
+	}
+	case EXP_CMP_REGEX: {
+		// op_cmp_regex carries a compiled regex_t (opaque, heap-backed) -
+		// byte-comparing it would compare internal pointers/bytecode, not
+		// the pattern, so only flags/pattern length are checked here (the
+		// pattern text itself is a child literal, matched by the caller).
+		const exp_op_cmp_regex* ra = (const exp_op_cmp_regex*)na;
+		const exp_op_cmp_regex* rb = (const exp_op_cmp_regex*)nb;
+
+		if (ra->flags != rb->flags || ra->regex_str_sz != rb->regex_str_sz) {
+			cf_debug(AS_SINDEX,
+					"node_self_equal: EXP_CMP_REGEX mismatch flags a=%d b=%d sz a=%u b=%u",
+					ra->flags, rb->flags, ra->regex_str_sz, rb->regex_str_sz);
+			return false;
+		}
+
+		return true;
+	}
+	default: {
+		// Ops not cased above carry inline immediate data (e.g. digestModulo's
+		// `mod`) that used to go unchecked here, letting digestModulo(4) and
+		// digestModulo(8) compare as equal - memcmp everything past the common
+		// header. INVARIANT: only correct because no op reaching this default
+		// holds a pointer/heap member; any new one that does needs its own
+		// case above, or it'll spuriously mismatch by pointer value and
+		// silently disable exp-sindex matching for that op.
+		uint32_t sz = exp_op_table[na->code].size;
+
+		if (sz > sizeof(op_base_mem) &&
+				memcmp((const uint8_t*)na + sizeof(op_base_mem),
+						(const uint8_t*)nb + sizeof(op_base_mem),
+						sz - sizeof(op_base_mem)) != 0) {
+			cf_debug(AS_SINDEX,
+					"node_self_equal: immediate payload mismatch code=%u sz=%u",
+					na->code, sz);
+			return false;
+		}
+
+		return true;
+	}
+	}
+}
+
+static bool
+subtree_equals_exp_range(const as_exp* a_exp, const uint8_t* a_ptr,
+		uint32_t a_ix, uint32_t a_end_ix, const as_exp* b_exp,
+		const uint8_t* b_ptr, uint32_t b_ix, uint32_t b_end_ix)
+{
+	while (a_ix < a_end_ix && b_ix < b_end_ix) {
+		const op_base_mem* na = (const op_base_mem*)a_ptr;
+		const op_base_mem* nb = (const op_base_mem*)b_ptr;
+
+		if (na->code != nb->code) {
+			cf_debug(AS_SINDEX,
+					"subtree_equals_exp_range: opcode mismatch at a_ix=%u (code=%u) b_ix=%u (code=%u)",
+					a_ix, na->code, b_ix, nb->code);
+			return false;
+		}
+
+		if (! node_self_equal(a_exp, na, b_exp, nb)) {
+			cf_debug(AS_SINDEX,
+					"subtree_equals_exp_range: node_self_equal false at a_ix=%u b_ix=%u code=%u",
+					a_ix, b_ix, na->code);
+			return false;
+		}
+
+		a_ptr += exp_op_table[na->code].size;
+		a_ix++;
+		b_ptr += exp_op_table[nb->code].size;
+		b_ix++;
+	}
+
+	if (a_ix != a_end_ix || b_ix != b_end_ix) {
+		cf_debug(AS_SINDEX,
+				"subtree_equals_exp_range: length mismatch a_ix=%u a_end_ix=%u b_ix=%u b_end_ix=%u",
+				a_ix, a_end_ix, b_ix, b_end_ix);
+		return false;
+	}
+
+	return true;
+}
+
+// Structural equality between a candidate's LHS subtree (in the filter's own
+// op array, [start_ix, end_ix) ) and an exp-based sindex's root expression
+// (si_exp, its own independently-built op array). The subtree's byte pointer
+// was already resolved once, at candidate-creation time (op sizes are
+// opcode-dependent, so there is no O(1) index -> pointer mapping) - callers
+// pass it in rather than re-walking cand_exp from its root on every sindex
+// tried, since this runs once per (candidate, exp-sindex) pair under
+// SINDEX_GRLOCK.
+static bool
+subtree_equals_exp(const as_exp* cand_exp, const uint8_t* subtree_ptr,
+		uint32_t start_ix, uint32_t end_ix, const as_exp* si_exp)
+{
+	if (cand_exp == NULL || si_exp == NULL || subtree_ptr == NULL) {
+		cf_debug(AS_SINDEX,
+				"subtree_equals_exp: null exp (cand_exp=%p si_exp=%p subtree_ptr=%p)",
+				(void*)cand_exp, (void*)si_exp, (const void*)subtree_ptr);
+		return false;
+	}
+
+	const op_base_mem* si_root = (const op_base_mem*)si_exp->mem;
+
+	return subtree_equals_exp_range(cand_exp, subtree_ptr, start_ix, end_ix,
+			si_exp, si_exp->mem, 0, si_root->instr_end_ix);
+}
+
+//==========================================================
 // Local helpers - sindex selection from expression candidates.
 //
+
+// Scans only the given scope (an exact set_id, never a set_id-or-namespace-
+// wide mix) so callers can run the set-scoped pass before the namespace-wide
+// fallback pass, mirroring as_si_by_defn's two-pass preference below. Reports
+// via hint_matched_r whether the returned match is the requested hint, so the
+// caller knows whether it's still worth searching the other scope.
+static as_sindex*
+find_matching_exp_sindex_in_scope(const as_namespace* ns, uint16_t scope_set_id,
+		const as_exp_sindex_candidate* c, const char* hint_iname,
+		bool* hint_matched_r)
+{
+	as_sindex* match = NULL;
+
+	for (uint32_t i = 0; i < MAX_N_SINDEXES; i++) {
+		as_sindex* si = ns->sindexes[i];
+
+		if (si == NULL || si->exp == NULL || si->dropped || ! si->readable) {
+			continue;
+		}
+
+		if (si->set_id != scope_set_id) {
+			continue;
+		}
+
+		if (si->ktype != c->ktype || si->itype != c->itype) {
+			continue;
+		}
+
+		const uint8_t* ctx_buf = c->ctx_buf_sz != 0 ? c->ctx_buf : NULL;
+
+		if (! compare_bufs(si->ctx_buf, si->ctx_buf_sz, ctx_buf, c->ctx_buf_sz)) {
+			continue;
+		}
+
+		if (! subtree_equals_exp(c->owner_exp, c->exp_subtree_ptr,
+					c->exp_subtree_start_ix, c->exp_subtree_end_ix, si->exp)) {
+			continue;
+		}
+
+		bool is_hint = hint_iname != NULL && strcmp(si->iname, hint_iname) == 0;
+
+		if (match == NULL || is_hint) {
+			match = si;
+		}
+
+		if (is_hint) {
+			*hint_matched_r = true;
+			break;
+		}
+
+		if (hint_iname == NULL) {
+			break;
+		}
+	}
+
+	return match;
+}
+
+// Prefers a set-scoped structural match over a namespace-wide one, same as
+// the non-exp as_si_by_defn(set_id, ...) / as_si_by_defn(INVALID_SET_ID, ...)
+// fallback below - previously this resolved by ns->sindexes[] slot order
+// alone, so a namespace-wide index could win over an equally-valid
+// set-scoped one purely by chance of creation order.
+static as_sindex*
+find_matching_exp_sindex(const as_namespace* ns, uint16_t set_id,
+		const as_exp_sindex_candidate* c, const char* hint_iname)
+{
+	bool hint_matched = false;
+	as_sindex* si = find_matching_exp_sindex_in_scope(ns, set_id, c, hint_iname,
+			&hint_matched);
+
+	// Skip the namespace-wide pass when set_id already was INVALID_SET_ID
+	// (repeating the same scope), or when pass 1 found a match and there's
+	// no hint left that could still resolve differently in the other scope.
+	if (set_id != INVALID_SET_ID &&
+			(si == NULL || (hint_iname != NULL && ! hint_matched))) {
+		bool fallback_hint_matched = false;
+		as_sindex* fallback_si = find_matching_exp_sindex_in_scope(ns,
+				INVALID_SET_ID, c, hint_iname, &fallback_hint_matched);
+
+		if (fallback_hint_matched || si == NULL) {
+			si = fallback_si;
+		}
+	}
+
+	return si;
+}
 
 static as_sindex*
 as_sindex_find_best(const as_namespace* ns, uint16_t set_id,
@@ -410,23 +972,45 @@ as_sindex_find_best(const as_namespace* ns, uint16_t set_id,
 
 		cf_vector_get(candidates, i, &c);
 
-		// itype comes from the candidate so collection sindexes (LIST /
-		// MAPKEYS / MAPVALUES / SET) can be matched once CDT extractors
-		// in exp.c populate the field. Scalar candidates today emit
-		// AS_SINDEX_ITYPE_DEFAULT, which keeps prior behaviour identical.
-		as_sindex* si = as_si_by_defn(ns, set_id, c.bin_name, c.ktype, c.itype,
-				NULL, 0, NULL, 0);
+		as_sindex* si;
 
-		if (si == NULL && set_id != INVALID_SET_ID) {
-			si = as_si_by_defn(ns, INVALID_SET_ID, c.bin_name, c.ktype, c.itype,
-					NULL, 0, NULL, 0);
+		if (c.is_exp) {
+			// Expression-based candidates can't hash into the bin/exp defn
+			// hash (that needs a real exp_buf, which planning never has -
+			// only the built op-array subtree) - enumerate the set's
+			// expression-based sindexes directly and match structurally.
+			si = find_matching_exp_sindex(ns, set_id, &c, hint_iname);
+
+			if (si == NULL) {
+				cf_debug(AS_SINDEX,
+						"{%s} query-plan: skip exp-based candidate ktype=%d (no structural match)",
+						ns->name, c.ktype);
+				continue; // hint naming a real but non-matching exp-based si
+						// falls through here too - never silently accepted
+			}
 		}
+		else {
+			// itype and ctx come from the candidate so collection sindexes
+			// (LIST / MAPKEYS / MAPVALUES) and CDT-context sindexes can be
+			// matched. Top-level scalar candidates emit
+			// AS_SINDEX_ITYPE_DEFAULT with no ctx, which keeps prior
+			// behaviour identical.
+			const uint8_t* ctx_buf = c.ctx_buf_sz != 0 ? c.ctx_buf : NULL;
 
-		if (si == NULL || si->dropped || ! si->readable) {
-			cf_debug(AS_SINDEX,
-					"{%s} query-plan: skip candidate bin=%s ktype=%d (no/dropped/unreadable si)",
-					ns->name, c.bin_name, c.ktype);
-			continue;
+			si = as_si_by_defn(ns, set_id, c.bin_name, c.ktype, c.itype, NULL,
+					0, ctx_buf, c.ctx_buf_sz);
+
+			if (si == NULL && set_id != INVALID_SET_ID) {
+				si = as_si_by_defn(ns, INVALID_SET_ID, c.bin_name, c.ktype,
+						c.itype, NULL, 0, ctx_buf, c.ctx_buf_sz);
+			}
+
+			if (si == NULL || si->dropped || ! si->readable) {
+				cf_debug(AS_SINDEX,
+						"{%s} query-plan: skip candidate bin=%s ktype=%d (no/dropped/unreadable si)",
+						ns->name, c.bin_name, c.ktype);
+				continue;
+			}
 		}
 
 		// If the hint names this sindex exactly, prefer it over a higher-scoring one.
@@ -534,6 +1118,12 @@ as_sindex_select_from_exp(const as_namespace* ns, uint16_t set_id,
 			cf_debug(AS_SINDEX,
 					"{%s} query-plan: selected sindex=%s bin=%s value=<blob>",
 					ns->name, sel.si->iname, sel.match.bin_name);
+		}
+		else if (sel.match.ktype == AS_PARTICLE_TYPE_GEOJSON) {
+			cf_debug(AS_SINDEX,
+					"{%s} query-plan: selected sindex=%s bin=%s region_bytes=%u",
+					ns->name, sel.si->iname, sel.match.bin_name,
+					sel.match.bound_val_sz);
 		}
 		else {
 			cf_debug(AS_SINDEX,
