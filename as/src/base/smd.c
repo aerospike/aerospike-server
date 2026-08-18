@@ -136,10 +136,12 @@ COMPILER_ASSERT(sizeof(smd_mt) / sizeof(msg_template) == NUM_SMD_FIELDS);
 #define SMD_MSG_SCRATCH_SIZE 64 // TODO - rethink... could be smaller?
 // Minimum cluster compatibility id at which compressed SMD full-sync messages
 // may exist. Gates both the send side (smd_can_compress_full()) and the receive
-// side (smd_msg_parse_items_compressed()). Distinct from the literal 16 in
-// smd_mixed_cluster(), which means "has the SERVER-209 clean-path protocol" and
-// must not move - see the reasoning on 17 in exchange.h.
-#define SMD_FULL_ZSTD_COMPATIBILITY_ID 17
+// side (smd_msg_parse_items_compressed()). Deliberately the same id as the
+// literal 16 in smd_mixed_cluster(): wire compression and the AER-6940
+// clean-path protocol ship together in 8.1.3, so one id covers both - see the
+// reasoning on 16 in exchange.h, including why neither may be backported alone
+// onto a branch advertising 16.
+#define SMD_FULL_ZSTD_COMPATIBILITY_ID 16
 
 typedef enum {
 	// These values are used on the wire - don't change them.
@@ -976,8 +978,8 @@ smd_mixed_cluster(void)
 	// advance + cv_key-only FULL_FROM_PR) shipped - a hard literal, per the
 	// tree's convention (record.c < 11, partition_balance.c < 15), not the
 	// AS_EXCHANGE_COMPATIBILITY_ID macro. Using the macro would re-flag the
-	// cluster as "mixed" on every future unrelated bump (e.g. 16+17), needlessly
-	// disabling the cv_key-only fast path during upgrades that all understand it.
+	// cluster as "mixed" on every future unrelated bump, needlessly disabling
+	// the cv_key-only fast path during upgrades that all understand it.
 	return as_exchange_min_compatibility_id() < 16;
 }
 

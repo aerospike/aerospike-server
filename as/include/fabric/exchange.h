@@ -56,29 +56,30 @@
  * 14 - 6.1.0.37 & 6.3.0.25 & 6.4.0.20 & 7.0.0.12 & 7.1.0.3 - for AER-6750
  *      (SC quiesce + exact half cluster availability bug).
  * 15 - 7.2.0 - for AER-6749 (AP quiesce + effective-replication-factor change).
- * 16 - SERVER-209 - for the selective FULL_FROM_PR broadcast optimization:
- *      an NPR below this id doesn't understand the lightweight cv_key-only
- *      stand-in message and would treat its empty payload as an authoritative
- *      full replace, wiping already-converged local SMD. smd_mixed_cluster()
- *      must see a real id bump to gate the optimization away from such nodes.
- * 17 - SERVER-487 - for wire compression: zstd-compressed SMD full sync
- *      messages (SMD_FULL_ZSTD_COMPATIBILITY_ID) and the
- *      RW_OP_REPL_WRITE_DELTA / RW_OP_REPL_WRITE_COMPRESSED replica ops
+ * 16 - 8.1.3 - covers two capabilities that ship together in this release:
+ *
+ *      AER-6940 - the selective FULL_FROM_PR broadcast optimization. An NPR
+ *      below this id doesn't understand the lightweight cv_key-only stand-in
+ *      message and would treat its empty payload as an authoritative full
+ *      replace, wiping already-converged local SMD. smd_mixed_cluster() must
+ *      see a real id bump to gate the optimization away from such nodes.
+ *
+ *      AER-6945 - wire compression: zstd-compressed SMD full sync messages
+ *      (SMD_FULL_ZSTD_COMPATIBILITY_ID) and the RW_OP_REPL_WRITE_DELTA /
+ *      RW_OP_REPL_WRITE_COMPRESSED replica ops
  *      (RW_WIRE_COMPRESSION_COMPATIBILITY_ID).
  *
- *      This gets its own id rather than sharing 16 with SERVER-209. Sharing
- *      would make both gates blind: min_compatibility_id is a single scalar
- *      with no per-feature bits, and master already advertises 16 with
- *      SERVER-209 merged and wire compression not. A build cut from that
- *      state - a release where wire compression slips, an AER-6940 backport,
- *      or a mixed-version dev cluster - reports 16 with zero wire-compression
- *      code. The gate would pass, the master would emit an op the peer drops
- *      at rw_msg_cb()'s default case, and because the plain-pickle fallback is
- *      ack-driven, nothing would ever downgrade it: replication retransmits
- *      that record forever. One id per independently-mergeable capability is
- *      what keeps the gate meaningful.
+ *      Because min_compatibility_id is a single scalar with no per-feature
+ *      bits, a build may not advertise 16 unless it has BOTH capabilities. A
+ *      node with only AER-6940 would pass the wire-compression gate, and its
+ *      peer would drop RW_OP_REPL_WRITE_* at rw_msg_cb()'s default case;
+ *      because the plain-pickle fallback is ack-driven, nothing downgrades it
+ *      and replication retransmits that record forever. So do not backport
+ *      either capability alone onto a branch that advertises 16 - a lone
+ *      backport needs its own higher id, and the gate it feeds must be
+ *      re-separated from this one.
  */
-#define AS_EXCHANGE_COMPATIBILITY_ID 17
+#define AS_EXCHANGE_COMPATIBILITY_ID 16
 
 /**
  * Number of quantum intervals in orphan state after which client transactions
