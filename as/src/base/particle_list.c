@@ -2955,6 +2955,8 @@ packed_string_list_join(const packed_list* list, cdt_op_mem* com,
 	if (max_u64 > UINT32_MAX) {
 		cf_ticker_warning(AS_PARTICLE,
 				"packed_string_list_join() result size overflow");
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"list_join: result size exceeds server limit");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -2971,8 +2973,9 @@ packed_string_list_join(const packed_list* list, cdt_op_mem* com,
 		if (msgpack_peek_type(&mp) != MSGPACK_TYPE_STRING) {
 			cf_free(result);
 			cf_ticker_warning(AS_PARTICLE,
-					"packed_string_list_join() encountered non-string list element at index %u",
-					i);
+					"packed_string_list_join() encountered non-string list element");
+			as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+					"list_join: list element %u is not a string", i);
 			return -AS_ERR_PARAMETER;
 		}
 
@@ -4431,6 +4434,8 @@ string_list_join(cdt_op_mem* com, const cdt_payload* sep)
 
 	if (! packed_list_init_from_com(&list, com)) {
 		cf_ticker_warning(AS_PARTICLE, "string_list_join() invalid list");
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"list_join: bin is not a valid list");
 		return -AS_ERR_PARAMETER;
 	}
 

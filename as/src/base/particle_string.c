@@ -153,8 +153,7 @@ string_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 {
 	if (! cf_str_is_valid_utf8(wire_value, value_size)) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_from_wire - invalid UTF-8 detected in string data; "
-				"string APIs will fail on this bin");
+				"string_from_wire - invalid UTF-8 detected in string data; string APIs will fail on this bin");
 	}
 
 	cf_assert(wire_type == AS_PARTICLE_TYPE_STRING, AS_PARTICLE,
@@ -733,19 +732,15 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 
 	if (! msgpack_get_list_ele_count_vec(state->mv, &ele_count) ||
 			ele_count == 0) {
+		cf_ticker_warning(AS_PARTICLE,
+				"string_state_init - error %u insufficient args or unable to parse args",
+				AS_ERR_PARAMETER);
+
 		if (is_expr) {
-			cf_ticker_warning(AS_PARTICLE,
-					"string_state_init - error %u (expression) "
-					"insufficient args (%u) or unable to parse args",
-					AS_ERR_PARAMETER, ele_count);
 			as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 					"string op has insufficient args or malformed request");
 		}
 		else {
-			cf_ticker_warning(AS_PARTICLE,
-					"string_state_init - error %u bin %.*s "
-					"insufficient args (%u) or unable to parse args",
-					AS_ERR_PARAMETER, (int)bin_name_sz, bin_name, ele_count);
 			as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 					"string op on bin %.*s has insufficient args or malformed request",
 					(int)bin_name_sz, bin_name);
@@ -758,17 +753,15 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 	uint64_t op_code;
 
 	if (! msgpack_get_uint64_vec(state->mv, &op_code)) {
+		cf_ticker_warning(AS_PARTICLE,
+				"string_state_init - error %u unable to parse op",
+				AS_ERR_PARAMETER);
+
 		if (is_expr) {
-			cf_ticker_warning(AS_PARTICLE,
-					"string_state_init - error %u (expression) unable to parse op",
-					AS_ERR_PARAMETER);
 			as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_INVALID,
 					"string op has unreadable op code");
 		}
 		else {
-			cf_ticker_warning(AS_PARTICLE,
-					"string_state_init - error %u bin %.*s unable to parse op",
-					AS_ERR_PARAMETER, (int)bin_name_sz, bin_name);
 			as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_INVALID,
 					"string op on bin %.*s has unreadable op code",
 					(int)bin_name_sz, bin_name);
@@ -786,17 +779,15 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 
 		// Skip over ctx list without parsing (cdt_leaf_apply_* will parse it).
 		if (msgpack_sz_vec(state->mv) == 0) {
+			cf_ticker_warning(AS_PARTICLE,
+					"string_state_init - error %u unable to parse ctx",
+					AS_ERR_PARAMETER);
+
 			if (is_expr) {
-				cf_ticker_warning(AS_PARTICLE,
-						"string_state_init - error %u (expression) unable to parse ctx",
-						AS_ERR_PARAMETER);
 				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_NOT_APPLICABLE,
 						"string op has malformed context path");
 			}
 			else {
-				cf_ticker_warning(AS_PARTICLE,
-						"string_state_init - error %u bin %.*s unable to parse ctx",
-						AS_ERR_PARAMETER, (int)bin_name_sz, bin_name);
 				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_NOT_APPLICABLE,
 						"string op on bin %.*s has malformed context path",
 						(int)bin_name_sz, bin_name);
@@ -806,19 +797,15 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 
 		// Read the inner sub-op.
 		if (! msgpack_get_uint64_vec(state->mv, &op_code)) {
+			cf_ticker_warning(AS_PARTICLE,
+					"string_state_init - error %u unable to parse inner op",
+					AS_ERR_PARAMETER);
+
 			if (is_expr) {
-				cf_ticker_warning(AS_PARTICLE,
-						"string_state_init - error %u (expression) "
-						"unable to parse inner op",
-						AS_ERR_PARAMETER);
 				as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_INVALID,
 						"string op has unreadable inner op code");
 			}
 			else {
-				cf_ticker_warning(AS_PARTICLE,
-						"string_state_init - error %u bin %.*s "
-						"unable to parse inner op",
-						AS_ERR_PARAMETER, (int)bin_name_sz, bin_name);
 				as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_INVALID,
 						"string op on bin %.*s has unreadable inner op code",
 						(int)bin_name_sz, bin_name);
@@ -834,19 +821,16 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 
 	if (is_read) {
 		if (state->op_type >= AS_STRING_READ_OP_END) {
+			cf_ticker_warning(AS_PARTICLE,
+					"string_state_init - error %u expected read op",
+					AS_ERR_PARAMETER);
+
 			if (is_expr) {
-				cf_ticker_warning(AS_PARTICLE,
-						"string_state_init - error %u (expression) op %u expected read op",
-						AS_ERR_PARAMETER, state->op_type);
 				as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_INVALID,
 						"string op %u is not a valid read op (max is %u)",
 						state->op_type, AS_STRING_READ_OP_END - 1);
 			}
 			else {
-				cf_ticker_warning(AS_PARTICLE,
-						"string_state_init - error %u bin %.*s op %u expected read op",
-						AS_ERR_PARAMETER, (int)bin_name_sz, bin_name,
-						state->op_type);
 				as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_INVALID,
 						"string op %u on bin %.*s is not a valid read op (max is %u)",
 						state->op_type, (int)bin_name_sz, bin_name,
@@ -860,22 +844,17 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 	else {
 		if (state->op_type < AS_STRING_MODIFY_OP_START ||
 				state->op_type >= AS_STRING_MODIFY_OP_END) {
+			cf_ticker_warning(AS_PARTICLE,
+					"string_state_init - error %u expected modify op",
+					AS_ERR_PARAMETER);
+
 			if (is_expr) {
-				cf_ticker_warning(AS_PARTICLE,
-						"string_state_init - error %u (expression) op %u "
-						"expected modify op",
-						AS_ERR_PARAMETER, state->op_type);
 				as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_INVALID,
 						"string op %u is not a valid modify op (range %u-%u)",
 						state->op_type, AS_STRING_MODIFY_OP_START,
 						AS_STRING_MODIFY_OP_END - 1);
 			}
 			else {
-				cf_ticker_warning(AS_PARTICLE,
-						"string_state_init - error %u bin %.*s op %u "
-						"expected modify op",
-						AS_ERR_PARAMETER, (int)bin_name_sz, bin_name,
-						state->op_type);
 				as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_INVALID,
 						"string op %u on bin %.*s is not a valid modify op (range %u-%u)",
 						state->op_type, (int)bin_name_sz, bin_name,
@@ -923,8 +902,7 @@ string_modify(string_state* state, as_bin* b, cf_ll_buf* particles_llb)
 
 			if (state->is_expr) {
 				cf_detail(AS_PARTICLE,
-						"string_modify - error %u operation (%s) - "
-						"value exists but CREATE_ONLY flag is set",
+						"string_modify - error %u operation (%s) - value exists but CREATE_ONLY flag is set",
 						AS_ERR_BIN_EXISTS, state->def->name);
 				as_error_details_set_fmt(AS_SUB_NONE,
 						"%s: value exists but CREATE_ONLY flag is set",
@@ -932,8 +910,7 @@ string_modify(string_state* state, as_bin* b, cf_ll_buf* particles_llb)
 			}
 			else {
 				cf_detail(AS_PARTICLE,
-						"string_modify - error %u operation (%s) on bin %.*s - "
-						"bin exists but CREATE_ONLY flag is set",
+						"string_modify - error %u operation (%s) on bin %.*s - bin exists but CREATE_ONLY flag is set",
 						AS_ERR_BIN_EXISTS, state->def->name,
 						(int)state->bin_name_sz, state->bin_name);
 				as_error_details_set_fmt(AS_SUB_NONE,
@@ -945,23 +922,17 @@ string_modify(string_state* state, as_bin* b, cf_ll_buf* particles_llb)
 		}
 
 		if (as_bin_get_particle_type(b) != AS_PARTICLE_TYPE_STRING) {
+			cf_ticker_warning(AS_PARTICLE,
+					"string_modify - error %u operation (%s) must be on a string - found %u",
+					AS_ERR_INCOMPATIBLE_TYPE, state->def->name,
+					as_bin_get_particle_type(b));
+
 			if (state->is_expr) {
-				cf_ticker_warning(AS_PARTICLE,
-						"string_modify - error %u operation (%s) "
-						"must be on a string - found %u",
-						AS_ERR_INCOMPATIBLE_TYPE, state->def->name,
-						as_bin_get_particle_type(b));
 				as_error_details_set_fmt(AS_SUB_NONE,
 						"%s requires string value, got %s", state->def->name,
 						as_particle_type_str(as_bin_get_particle_type(b)));
 			}
 			else {
-				cf_ticker_warning(AS_PARTICLE,
-						"string_modify - error %u operation (%s) on bin %.*s "
-						"must be on a string - found %u",
-						AS_ERR_INCOMPATIBLE_TYPE, state->def->name,
-						(int)state->bin_name_sz, state->bin_name,
-						as_bin_get_particle_type(b));
 				as_error_details_set_fmt(AS_SUB_NONE,
 						"%s requires string bin, got %s", state->def->name,
 						as_particle_type_str(as_bin_get_particle_type(b)));
@@ -1001,14 +972,12 @@ string_modify(string_state* state, as_bin* b, cf_ll_buf* particles_llb)
 		else {
 			if (state->is_expr) {
 				cf_detail(AS_PARTICLE,
-						"string_modify - operation (%s) on absent value, "
-						"returning ok",
+						"string_modify - operation (%s) on absent value, returning ok",
 						state->def->name);
 			}
 			else {
 				cf_detail(AS_PARTICLE,
-						"string_modify - operation (%s) on absent bin %.*s, "
-						"returning ok",
+						"string_modify - operation (%s) on absent bin %.*s, returning ok",
 						state->def->name, (int)state->bin_name_sz,
 						state->bin_name);
 			}
@@ -1119,23 +1088,17 @@ string_read(string_state* state, const as_bin* b, as_bin* rb)
 	}
 
 	if (as_bin_get_particle_type(b) != AS_PARTICLE_TYPE_STRING) {
+		cf_ticker_warning(AS_PARTICLE,
+				"string_read - error %u operation (%s) must be on a string - found %u",
+				AS_ERR_INCOMPATIBLE_TYPE, state->def->name,
+				as_bin_get_particle_type(b));
+
 		if (state->is_expr) {
-			cf_ticker_warning(AS_PARTICLE,
-					"string_read - error %u operation (%s) "
-					"must be on a string - found %u",
-					AS_ERR_INCOMPATIBLE_TYPE, state->def->name,
-					as_bin_get_particle_type(b));
 			as_error_details_set_fmt(AS_SUB_NONE,
 					"%s requires string value, got %s", state->def->name,
 					as_particle_type_str(as_bin_get_particle_type(b)));
 		}
 		else {
-			cf_ticker_warning(AS_PARTICLE,
-					"string_read - error %u operation (%s) on bin %.*s "
-					"must be on a string - found %u",
-					AS_ERR_INCOMPATIBLE_TYPE, state->def->name,
-					(int)state->bin_name_sz, state->bin_name,
-					as_bin_get_particle_type(b));
 			as_error_details_set_fmt(AS_SUB_NONE,
 					"%s requires string bin, got %s", state->def->name,
 					as_particle_type_str(as_bin_get_particle_type(b)));
@@ -1235,6 +1198,8 @@ string_read_ctx(string_state* state, const as_bin* b, as_bin* rb)
 
 	if (cp_len < 0) {
 		cf_ticker_warning(AS_PARTICLE, "invalid UTF-8 detected in string data");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"%s: value contains non-UTF-8 bytes", state->def->name);
 		return -AS_ERR_INVALID_ENCODING;
 	}
 
@@ -1304,6 +1269,8 @@ string_modify_ctx(string_state* state, as_bin* b, cf_ll_buf* particles_llb)
 
 	if (cp_len < 0) {
 		cf_ticker_warning(AS_PARTICLE, "invalid UTF-8 detected in string data");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"%s: value contains non-UTF-8 bytes", state->def->name);
 		cf_free(ctx.pstack);
 		return -AS_ERR_INVALID_ENCODING;
 	}
@@ -1361,6 +1328,8 @@ string_modify_ctx(string_state* state, as_bin* b, cf_ll_buf* particles_llb)
 		cf_ticker_warning(AS_PARTICLE,
 				"string_modify_ctx - invalid UTF-8 detected in operation result (%s)",
 				state->def->name);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"%s: result contains non-UTF-8 bytes", state->def->name);
 		if (heap_alloc) {
 			cf_free(to);
 		}
@@ -1432,9 +1401,8 @@ string_parse_op(string_state* state, string_op* op)
 	// Check for the correct number of args
 	if (state->n_args < def->min_args || state->n_args > def->max_args) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_parse_op - error %u op %s(%u) unexpected number of args %u",
-				AS_ERR_PARAMETER, state->def->name, state->op_type,
-				state->n_args);
+				"string_parse_op - error %u op %s(%u) unexpected number of args",
+				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s has %u args, expected %u to %u", state->def->name,
 				state->n_args, def->min_args, def->max_args);
@@ -1477,9 +1445,8 @@ string_parse_int1(string_state* state, string_op* op)
 
 	if (val < -(int64_t)PROTO_SIZE_MAX || val > (int64_t)PROTO_SIZE_MAX) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_parse_int1"
-				" - error %u op %s (%u) int1 (%ld) larger than max (%d)",
-				AS_ERR_PARAMETER, state->def->name, state->op_type, val,
+				"string_parse_int1 - error %u op %s (%u) int1 larger than max (%d)",
+				AS_ERR_PARAMETER, state->def->name, state->op_type,
 				PROTO_SIZE_MAX);
 		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s: first integer arg %ld exceeds max %d", state->def->name,
@@ -1511,8 +1478,8 @@ string_parse_regex_flags(string_state* state, string_op* op, uint64_t accepted)
 	}
 
 	cf_ticker_warning(AS_PARTICLE,
-			"string_parse_regex_flags - error %u op %s (%u) unsupported regex flag bits 0x%lx",
-			AS_ERR_PARAMETER, state->def->name, state->op_type, bad);
+			"string_parse_regex_flags - error %u op %s (%u) unsupported regex flag bits",
+			AS_ERR_PARAMETER, state->def->name, state->op_type);
 
 	// GLOBAL can only land here on compare - replace accepts it - so name it
 	// rather than leave the caller to decode a bit mask.
@@ -1560,9 +1527,8 @@ string_parse_int2(string_state* state, string_op* op)
 
 	if (val < -(int64_t)PROTO_SIZE_MAX || val > (int64_t)PROTO_SIZE_MAX) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_parse_int2 - "
-				"error %u op %s (%u) int2 (%ld) larger than max (%d)",
-				AS_ERR_PARAMETER, state->def->name, state->op_type, val,
+				"string_parse_int2 - error %u op %s (%u) int2 larger than max (%d)",
+				AS_ERR_PARAMETER, state->def->name, state->op_type,
 				PROTO_SIZE_MAX);
 		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s: second integer arg %ld exceeds max %d", state->def->name,
@@ -1606,9 +1572,10 @@ string_parse_buf(string_state* state, string_op* op)
 	// AS msgpack has a one byte blob type field which we ignore here.
 	if (op->buf == NULL || size == 0) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_parse_buf - "
-				"error %u op %s (%u) parsed invalid buffer with size %u",
-				AS_ERR_PARAMETER, state->def->name, state->op_type, size);
+				"string_parse_buf - error %u op %s (%u) parsed invalid buffer",
+				AS_ERR_PARAMETER, state->def->name, state->op_type);
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"%s: string argument is missing or empty", state->def->name);
 		return false;
 	}
 
@@ -1635,6 +1602,8 @@ string_parse_list(string_state* state, string_op* op)
 		cf_ticker_warning(AS_PARTICLE,
 				"string_parse_list - error %u op %s (%u) invalid string list",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"%s: string list arg is missing or empty", state->def->name);
 		return false;
 	}
 
@@ -1650,21 +1619,29 @@ string_parse_flags(string_state* state, string_op* op)
 		cf_ticker_warning(AS_PARTICLE,
 				"string_parse_flags - error %u op %s (%u) unable to parse flags",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"%s: flags arg is not a valid integer", state->def->name);
 		return false;
 	}
 
 	if ((op->flags & state->def->bad_flags) != 0) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_parse_flags - error %u op %s (%u) invalid flags (0x%lx)",
-				AS_ERR_PARAMETER, state->def->name, state->op_type, op->flags);
+				"string_parse_flags - error %u op %s (%u) invalid flags",
+				AS_ERR_PARAMETER, state->def->name, state->op_type);
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"%s: flags 0x%lx not valid for this op", state->def->name,
+				op->flags);
 		return false;
 	}
 
 	if ((op->flags & AS_STRING_FLAG_CREATE_ONLY) != 0 &&
 			(op->flags & AS_STRING_FLAG_UPDATE_ONLY) != 0) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_parse_flags - error %u op %s (%u) invalid flags combination (0x%lx)",
-				AS_ERR_PARAMETER, state->def->name, state->op_type, op->flags);
+				"string_parse_flags - error %u op %s (%u) invalid flags combination",
+				AS_ERR_PARAMETER, state->def->name, state->op_type);
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"%s: CREATE_ONLY and UPDATE_ONLY flags are mutually exclusive",
+				state->def->name);
 		return false;
 	}
 
@@ -1672,6 +1649,9 @@ string_parse_flags(string_state* state, string_op* op)
 		cf_ticker_warning(AS_PARTICLE,
 				"string_parse_flags - error %u op %s (%u) CREATE_ONLY not supported with context",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"%s: CREATE_ONLY flag not supported with context",
+				state->def->name);
 		return false;
 	}
 
@@ -1795,15 +1775,19 @@ string_parse_needle_replacement(const string_op* op, const string_state* state,
 	uint32_t argc;
 	if (! msgpack_get_list_ele_count(&mp, &argc)) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_parse_needle_replacement - "
-				"error parsing args for op %s (%u)",
+				"string_parse_needle_replacement - error parsing args for op %s (%u)",
 				state->def->name, state->op_type);
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"%s: needle/replacement arg is not a valid list",
+				state->def->name);
 		return -AS_ERR_PARAMETER;
 	}
 	if (argc != 2) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_parse_needle_replacement - "
-				"%s expects exactly 2 string arguments, got %u",
+				"string_parse_needle_replacement - %s expects exactly 2 string arguments",
+				state->def->name);
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"%s: expects exactly 2 string arguments, got %u",
 				state->def->name, argc);
 		return -AS_ERR_PARAMETER;
 	}
@@ -1813,9 +1797,10 @@ string_parse_needle_replacement(const string_op* op, const string_state* state,
 
 	if (needle == NULL || needle_sz <= 1) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_parse_needle_replacement - "
-				"%s needle is missing or empty",
+				"string_parse_needle_replacement - %s needle is missing or empty",
 				state->def->name);
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"%s: needle is missing or empty", state->def->name);
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -1831,9 +1816,10 @@ string_parse_needle_replacement(const string_op* op, const string_state* state,
 
 	if (replacement == NULL || replacement_sz == 0) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_parse_needle_replacement - "
-				"%s failed to parse replacement size",
+				"string_parse_needle_replacement - %s failed to parse replacement size",
 				state->def->name);
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"%s: replacement is missing or not a string", state->def->name);
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -1854,10 +1840,8 @@ string_modify_set_estimated_size(string_state* state, uint64_t v)
 {
 	if (v > STRING_REPLACE_ALL_MAX) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_prepare_modify_op - "
-				"error %u op %s - estimated output size %llu exceeds maximum %u",
-				AS_ERR_PARAMETER, state->def->name, (unsigned long long)v,
-				STRING_REPLACE_ALL_MAX);
+				"string_prepare_modify_op - error %u op %s - estimated output size exceeds maximum %u",
+				AS_ERR_PARAMETER, state->def->name, STRING_REPLACE_ALL_MAX);
 		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s: estimated result size exceeds server limit",
 				state->def->name);
@@ -1871,8 +1855,7 @@ static int
 string_modify_estimated_size_overflow(string_state* state)
 {
 	cf_ticker_warning(AS_PARTICLE,
-			"string_prepare_modify_op - "
-			"error %u op %s - estimated output size arithmetic overflow",
+			"string_prepare_modify_op - error %u op %s - estimated output size arithmetic overflow",
 			AS_ERR_PARAMETER, state->def->name);
 	as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 			"%s: estimated result size overflow", state->def->name);
@@ -1986,9 +1969,8 @@ string_prepare_modify_op(string_state* state, string_op* op)
 
 		if (op->int_arg1 < 0 || op->int_arg1 > max_idx) {
 			cf_ticker_warning(AS_PARTICLE,
-					"string_prepare_modify_op - "
-					"error %u op %s - invalid overwrite index (%ld)",
-					AS_ERR_PARAMETER, state->def->name, op->int_arg1);
+					"string_prepare_modify_op - error %u op %s - invalid overwrite index",
+					AS_ERR_PARAMETER, state->def->name);
 			as_error_details_set_fmt(AS_SUB_PARAM_STRING_INDEX_OUT_OF_BOUNDS,
 					"%s: index %ld out of bounds for string length %u",
 					state->def->name, op->int_arg1, state->old_cp_len);
@@ -2043,9 +2025,8 @@ string_prepare_modify_op(string_state* state, string_op* op)
 	case AS_STRING_OP_REPEAT:
 		if (op->int_arg1 < 0) {
 			cf_ticker_warning(AS_PARTICLE,
-					"string_prepare_modify_op - "
-					"error %u op %s - unexpected negative repeat count %ld",
-					AS_ERR_PARAMETER, state->def->name, op->int_arg1);
+					"string_prepare_modify_op - error %u op %s - unexpected negative repeat count",
+					AS_ERR_PARAMETER, state->def->name);
 			as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 					"%s: repeat count %ld must be non-negative",
 					state->def->name, op->int_arg1);
@@ -2085,8 +2066,7 @@ string_prepare_modify_op(string_state* state, string_op* op)
 	}
 	default:
 		cf_ticker_warning(AS_PARTICLE,
-				"string_prepare_modify_op - "
-				"error %u op %s - unexpected read op type %u",
+				"string_prepare_modify_op - error %u op %s - unexpected read op type %u",
 				AS_ERR_OP_NOT_APPLICABLE, state->def->name, state->op_type);
 		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_INVALID,
 				"%s: op type %u is not a modify op", state->def->name,
@@ -2392,8 +2372,7 @@ is_nfc_utf8(const uint8_t* data, uint32_t sz)
 
 	if (U_FAILURE(status)) {
 		cf_ticker_warning(AS_PARTICLE,
-				"is_nfc_utf8 - "
-				"error %u - getNFCInstance failed with ICU status code %d",
+				"is_nfc_utf8 - error %u - getNFCInstance failed with ICU status code %d",
 				AS_ERR_OP_NOT_APPLICABLE, status);
 		// Conservative: cannot determine NFC; callers skip the fast path. Same
 		// singleton-init failures as string_modify_op_normalize_nfc (not UTF-8).
@@ -2586,6 +2565,8 @@ string_modify_op_concatenate(const string_op* op, uint8_t* to,
 		cf_ticker_warning(AS_PARTICLE,
 				"string_modify_op_concatenate - error %u invalid msgpack list",
 				AS_ERR_PARAMETER);
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"string_concatenate: arg is not a valid list");
 		return -AS_ERR_PARAMETER;
 	}
 	if (list_sz == 0)
@@ -2597,9 +2578,10 @@ string_modify_op_concatenate(const string_op* op, uint8_t* to,
 		msgpack_type type = msgpack_peek_type(&mp);
 		if (type != MSGPACK_TYPE_STRING) {
 			cf_ticker_warning(AS_PARTICLE,
-					"string_modify_op_concatenate - error %u invalid msgpack "
-					"string at element %u",
-					AS_ERR_PARAMETER, i);
+					"string_modify_op_concatenate - error %u invalid msgpack string element",
+					AS_ERR_PARAMETER);
+			as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+					"string_concatenate: list element %u is not a string", i);
 			*new_sz = old_sz;
 			return -AS_ERR_PARAMETER;
 		}
@@ -2608,9 +2590,10 @@ string_modify_op_concatenate(const string_op* op, uint8_t* to,
 
 		if (string_arg == NULL || string_sz == 0) {
 			cf_ticker_warning(AS_PARTICLE,
-					"string_modify_op_concatenate - error %u empty or missing "
-					"string at element %u",
-					AS_ERR_PARAMETER, i);
+					"string_modify_op_concatenate - error %u empty or missing string element",
+					AS_ERR_PARAMETER);
+			as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+					"string_concatenate: list element %u is empty or missing", i);
 			*new_sz = old_sz;
 			return -AS_ERR_PARAMETER;
 		}
@@ -2620,9 +2603,11 @@ string_modify_op_concatenate(const string_op* op, uint8_t* to,
 
 		if (! cf_str_is_valid_utf8(string_arg, string_sz)) {
 			cf_ticker_warning(AS_PARTICLE,
-					"string_modify_op_concatenate - error %u invalid UTF-8 "
-					"in element %u",
-					AS_ERR_PARAMETER, i);
+					"string_modify_op_concatenate - error %u invalid UTF-8 in element",
+					AS_ERR_PARAMETER);
+			as_error_details_set_fmt(AS_SUB_PARAM_STRING_UTF8_INVALID,
+					"string_concatenate: list element %u contains non-UTF-8 bytes",
+					i);
 			*new_sz = old_sz;
 			return -AS_ERR_PARAMETER;
 		}
@@ -2695,8 +2680,7 @@ string_modify_op_normalize_nfc(const string_op* op, uint8_t* to,
 		// Singleton init (hardcoded NFC tables in this ICU build): OOM or rare
 		// init failures — not UTF-8/UTF-16 conversion (no INVALID_CHAR / overflow).
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_normalize_nfc - "
-				"getNFCInstance failed: %d",
+				"string_modify_op_normalize_nfc - getNFCInstance failed: %d",
 				status);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
@@ -2721,8 +2705,7 @@ string_modify_op_normalize_nfc(const string_op* op, uint8_t* to,
 
 	if (convert_rc != AS_OK) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_normalize_nfc - "
-				"UTF-8 to UTF-16 failed: %d",
+				"string_modify_op_normalize_nfc - UTF-8 to UTF-16 failed: %d",
 				convert_rc);
 		return convert_rc;
 	}
@@ -2739,8 +2722,7 @@ string_modify_op_normalize_nfc(const string_op* op, uint8_t* to,
 
 	if (U_FAILURE(status)) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_normalize_nfc - "
-				"error %u - unorm2_normalize failed with ICU status code %d",
+				"string_modify_op_normalize_nfc - error %u - unorm2_normalize failed with ICU status code %d",
 				AS_ERR_OP_NOT_APPLICABLE, status);
 		switch (status) {
 		case U_INVALID_CHAR_FOUND:
@@ -2752,8 +2734,7 @@ string_modify_op_normalize_nfc(const string_op* op, uint8_t* to,
 			// by ICU's own pre-flight call. Overflow here means ICU lied
 			// about the required size or our sizing logic is wrong.
 			cf_crash(AS_PARTICLE,
-					"normalize_nfc: unorm2_normalize overflow after "
-					"exact resize to %d UChars",
+					"normalize_nfc: unorm2_normalize overflow after exact resize to %d UChars",
 					dst_len + 1);
 		default:
 			return -AS_ERR_OP_NOT_APPLICABLE;
@@ -2763,8 +2744,7 @@ string_modify_op_normalize_nfc(const string_op* op, uint8_t* to,
 	convert_rc = u16_to_utf8(to, old_sz * 3, new_sz, dst_u16, dst_len);
 	if (convert_rc != AS_OK) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_normalize_nfc - "
-				"error %u - UTF-16 to UTF-8 failed",
+				"string_modify_op_normalize_nfc - error %u - UTF-16 to UTF-8 failed",
 				convert_rc);
 		return convert_rc;
 	}
@@ -2791,8 +2771,7 @@ string_modify_op_case_fold(const string_op* op, uint8_t* to,
 
 	if (csm == NULL) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_case_fold - "
-				"error %u - get_root_casemap failed",
+				"string_modify_op_case_fold - error %u - get_root_casemap failed",
 				AS_ERR_OP_NOT_APPLICABLE);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
@@ -2803,8 +2782,7 @@ string_modify_op_case_fold(const string_op* op, uint8_t* to,
 
 	if (U_FAILURE(status)) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_case_fold - "
-				"error %u - ucasemap_utf8FoldCase failed with ICU status code %d",
+				"string_modify_op_case_fold - error %u - ucasemap_utf8FoldCase failed with ICU status code %d",
 				AS_ERR_OP_NOT_APPLICABLE, status);
 		switch (status) {
 		case U_INVALID_CHAR_FOUND:
@@ -2816,8 +2794,7 @@ string_modify_op_case_fold(const string_op* op, uint8_t* to,
 			// Unicode case folding. Overflow here means our sizing bound
 			// is wrong.
 			cf_crash(AS_PARTICLE,
-					"case_fold: ucasemap_utf8FoldCase overflow with "
-					"capacity %u for input of %u bytes",
+					"case_fold: ucasemap_utf8FoldCase overflow with capacity %u for input of %u bytes",
 					old_sz * 3, old_sz);
 		default:
 			return -AS_ERR_OP_NOT_APPLICABLE;
@@ -2903,9 +2880,10 @@ string_modify_op_pad_start(const string_op* op, uint8_t* to,
 
 	if (pad_cp_len < 0) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_pad_start - "
-				"error %u - invalid UTF-8 in pad pattern",
+				"string_modify_op_pad_start - error %u - invalid UTF-8 in pad pattern",
 				AS_ERR_INVALID_ENCODING);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"string_pad_start: pad pattern contains non-UTF-8 bytes");
 		return -AS_ERR_INVALID_ENCODING;
 	}
 
@@ -2963,6 +2941,8 @@ string_modify_op_pad_end(const string_op* op, uint8_t* to, const uint8_t* from,
 	if (pad_cp_len < 0) {
 		cf_ticker_warning(AS_PARTICLE,
 				"string_modify_op_pad_end - invalid UTF-8 in pad pattern");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"string_pad_end: pad pattern contains non-UTF-8 bytes");
 		return -AS_ERR_INVALID_ENCODING;
 	}
 
@@ -3072,6 +3052,8 @@ string_modify_op_overwrite(const string_op* op, uint8_t* to,
 	if (replacement_cp_len < 0) {
 		cf_ticker_warning(AS_PARTICLE,
 				"string_modify_op_overwrite - invalid UTF-8 in replacement");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"string_overwrite: replacement contains non-UTF-8 bytes");
 		return -AS_ERR_INVALID_ENCODING;
 	}
 
@@ -3120,8 +3102,7 @@ string_modify_op_replace_K_icu(uint8_t* to, const uint8_t* from,
 			STRING_OP_STACK_BUF_SZ, &haystack_u16, &h_len, &haystack_heap);
 	if (convert_rc != AS_OK) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_replace_K - "
-				"error %u - haystack UTF-8 to UTF-16 failed",
+				"string_modify_op_replace_K - error %u - haystack UTF-8 to UTF-16 failed",
 				convert_rc);
 		return convert_rc;
 	}
@@ -3130,8 +3111,7 @@ string_modify_op_replace_K_icu(uint8_t* to, const uint8_t* from,
 			STRING_OP_STACK_BUF_SZ, &needle_u16, &n_len, &needle_heap);
 	if (convert_rc != AS_OK) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_replace_K - "
-				"needle UTF-8 to UTF-16 failed: %d",
+				"string_modify_op_replace_K - needle UTF-8 to UTF-16 failed: %d",
 				convert_rc);
 		return convert_rc;
 	}
@@ -3140,8 +3120,7 @@ string_modify_op_replace_K_icu(uint8_t* to, const uint8_t* from,
 			STRING_OP_STACK_BUF_SZ, &replacement_u16, &r_len, &replacement_heap);
 	if (convert_rc != AS_OK) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_replace_K - "
-				"replacement UTF-8 to UTF-16 failed: %d",
+				"string_modify_op_replace_K - replacement UTF-8 to UTF-16 failed: %d",
 				convert_rc);
 		return convert_rc;
 	}
@@ -3151,8 +3130,7 @@ string_modify_op_replace_K_icu(uint8_t* to, const uint8_t* from,
 
 	if (search == NULL) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_replace_K - "
-				"error %u - get_canon_search failed",
+				"string_modify_op_replace_K - error %u - get_canon_search failed",
 				AS_ERR_OP_NOT_APPLICABLE);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
@@ -3212,8 +3190,7 @@ string_modify_op_replace_K_icu(uint8_t* to, const uint8_t* from,
 		// u16_to_utf8: U_INVALID_CHAR_FOUND => ill-formed UTF-16 in result_u16
 		// (mapped to AS_ERR_INVALID_ENCODING); other ICU codes => PARAMETER / …
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_replace_K - "
-				"error %d UTF-16 to UTF-8 failed",
+				"string_modify_op_replace_K - error %d UTF-16 to UTF-8 failed",
 				convert_rc);
 		return convert_rc;
 	}
@@ -3237,9 +3214,10 @@ string_modify_op_replace_K(const string_op* op, uint8_t* to,
 	msgpack_type needle_type = msgpack_peek_type(&mp);
 	if (needle_type != MSGPACK_TYPE_STRING) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_replace_K - "
-				"error %u - needle is not a string",
+				"string_modify_op_replace_K - error %u - needle is not a string",
 				AS_ERR_PARAMETER);
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"string replace: needle is not a string");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -3247,9 +3225,10 @@ string_modify_op_replace_K(const string_op* op, uint8_t* to,
 	const uint8_t* needle = msgpack_get_bin(&mp, &needle_sz);
 	if (needle_sz == 0) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_replace_K - "
-				"error %u - needle cannot be empty",
+				"string_modify_op_replace_K - error %u - needle cannot be empty",
 				AS_ERR_PARAMETER);
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"string replace: needle cannot be empty");
 		return -AS_ERR_PARAMETER;
 	}
 	needle++; // Advance past Aerospike string type byte (0x03)
@@ -3258,9 +3237,10 @@ string_modify_op_replace_K(const string_op* op, uint8_t* to,
 	msgpack_type replacement_type = msgpack_peek_type(&mp);
 	if (replacement_type != MSGPACK_TYPE_STRING) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_replace_K - "
-				"error %u - replacement is not a string",
+				"string_modify_op_replace_K - error %u - replacement is not a string",
 				AS_ERR_PARAMETER);
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"string replace: replacement is not a string");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -3374,8 +3354,7 @@ string_modify_op_upper(const string_op* op, uint8_t* to, const uint8_t* from,
 			STRING_OP_STACK_BUF_SZ, &src_u16, &src_len, &src_heap);
 	if (convert_rc != AS_OK) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_upper - "
-				"error %u - UTF-8 to UTF-16 failed",
+				"string_modify_op_upper - error %u - UTF-8 to UTF-16 failed",
 				convert_rc);
 		return convert_rc;
 	}
@@ -3392,8 +3371,7 @@ string_modify_op_upper(const string_op* op, uint8_t* to, const uint8_t* from,
 
 	if (U_FAILURE(status)) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_upper - "
-				"u_strToUpper failed with ICU status code %d",
+				"string_modify_op_upper - u_strToUpper failed with ICU status code %d",
 				status);
 		return icu_uerror_to_as_err(status);
 	}
@@ -3401,8 +3379,7 @@ string_modify_op_upper(const string_op* op, uint8_t* to, const uint8_t* from,
 	convert_rc = u16_to_utf8(to, old_sz * 3, new_sz, dst_u16, dst_len);
 	if (convert_rc != AS_OK) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_upper - "
-				"error %u - UTF-16 to UTF-8 failed",
+				"string_modify_op_upper - error %u - UTF-16 to UTF-8 failed",
 				convert_rc);
 		return convert_rc;
 	}
@@ -3440,8 +3417,7 @@ string_modify_op_lower(const string_op* op, uint8_t* to, const uint8_t* from,
 			STRING_OP_STACK_BUF_SZ, &src_u16, &src_len, &src_heap);
 	if (convert_rc != AS_OK) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_lower - "
-				"error %u - UTF-8 to UTF-16 failed",
+				"string_modify_op_lower - error %u - UTF-8 to UTF-16 failed",
 				convert_rc);
 		return convert_rc;
 	}
@@ -3459,8 +3435,7 @@ string_modify_op_lower(const string_op* op, uint8_t* to, const uint8_t* from,
 	if (U_FAILURE(status)) {
 		int as_err = icu_uerror_to_as_err(status);
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_lower - "
-				"error %u - u_strToLower failed with ICU status code %d",
+				"string_modify_op_lower - error %u - u_strToLower failed with ICU status code %d",
 				as_err, status);
 		return as_err;
 	}
@@ -3468,8 +3443,7 @@ string_modify_op_lower(const string_op* op, uint8_t* to, const uint8_t* from,
 	convert_rc = u16_to_utf8(to, old_sz * 3, new_sz, dst_u16, dst_len);
 	if (convert_rc != AS_OK) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_lower - "
-				"error %u - UTF-16 to UTF-8 failed",
+				"string_modify_op_lower - error %u - UTF-16 to UTF-8 failed",
 				convert_rc);
 		return convert_rc;
 	}
@@ -3493,6 +3467,8 @@ string_read_op_strlen(const string_op* op, const uint8_t* from, uint32_t sz,
 
 	if (length < 0) {
 		cf_ticker_warning(AS_PARTICLE, "invalid UTF-8 detected in string data");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"string_strlen: value contains non-UTF-8 bytes");
 		return -AS_ERR_INVALID_ENCODING;
 	}
 
@@ -3611,8 +3587,7 @@ string_read_op_find(const string_op* op, const uint8_t* from, uint32_t sz,
 			STRING_OP_STACK_BUF_SZ, &haystack_u16, &h_len, &haystack_heap);
 	if (convert_rc != AS_OK) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_read_op_find - "
-				"error %u - haystack UTF-8 to UTF-16 failed",
+				"string_read_op_find - error %u - haystack UTF-8 to UTF-16 failed",
 				convert_rc);
 		return convert_rc;
 	}
@@ -3621,8 +3596,7 @@ string_read_op_find(const string_op* op, const uint8_t* from, uint32_t sz,
 			STRING_OP_STACK_BUF_SZ, &needle_u16, &n_len, &needle_heap);
 	if (convert_rc != AS_OK) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_read_op_find - "
-				"error %u - needle UTF-8 to UTF-16 failed",
+				"string_read_op_find - error %u - needle UTF-8 to UTF-16 failed",
 				convert_rc);
 		return convert_rc;
 	}
@@ -3632,8 +3606,7 @@ string_read_op_find(const string_op* op, const uint8_t* from, uint32_t sz,
 
 	if (search == NULL) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_read_op_find - "
-				"error %u - get_canon_search failed",
+				"string_read_op_find - error %u - get_canon_search failed",
 				AS_ERR_OP_NOT_APPLICABLE);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
@@ -3721,8 +3694,7 @@ string_read_op_starts_with(const string_op* op, const uint8_t* from,
 			STRING_OP_STACK_BUF_SZ, &haystack_u16, &h_len, &haystack_heap);
 	if (convert_rc != AS_OK) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_read_op_starts_with - "
-				"haystack UTF-8 to UTF-16 failed: %d",
+				"string_read_op_starts_with - haystack UTF-8 to UTF-16 failed: %d",
 				convert_rc);
 		return convert_rc;
 	}
@@ -3731,8 +3703,7 @@ string_read_op_starts_with(const string_op* op, const uint8_t* from,
 			STRING_OP_STACK_BUF_SZ, &needle_u16, &n_len, &needle_heap);
 	if (convert_rc != AS_OK) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_read_op_starts_with - "
-				"error %u - needle UTF-8 to UTF-16 failed",
+				"string_read_op_starts_with - error %u - needle UTF-8 to UTF-16 failed",
 				convert_rc);
 		return convert_rc;
 	}
@@ -3742,8 +3713,7 @@ string_read_op_starts_with(const string_op* op, const uint8_t* from,
 
 	if (search == NULL) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_read_op_starts_with - "
-				"error %u - get_canon_search failed",
+				"string_read_op_starts_with - error %u - get_canon_search failed",
 				AS_ERR_OP_NOT_APPLICABLE);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
@@ -3784,8 +3754,7 @@ string_read_op_ends_with(const string_op* op, const uint8_t* from, uint32_t sz,
 			STRING_OP_STACK_BUF_SZ, &haystack_u16, &h_len, &haystack_heap);
 	if (convert_rc != AS_OK) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_read_op_ends_with - "
-				"haystack UTF-8 to UTF-16 failed: %d",
+				"string_read_op_ends_with - haystack UTF-8 to UTF-16 failed: %d",
 				convert_rc);
 		return convert_rc;
 	}
@@ -3794,8 +3763,7 @@ string_read_op_ends_with(const string_op* op, const uint8_t* from, uint32_t sz,
 			STRING_OP_STACK_BUF_SZ, &needle_u16, &n_len, &needle_heap);
 	if (convert_rc != AS_OK) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_read_op_ends_with - "
-				"needle UTF-8 to UTF-16 failed: %d",
+				"string_read_op_ends_with - needle UTF-8 to UTF-16 failed: %d",
 				convert_rc);
 		return convert_rc;
 	}
@@ -3805,8 +3773,7 @@ string_read_op_ends_with(const string_op* op, const uint8_t* from, uint32_t sz,
 
 	if (search == NULL) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_read_op_ends_with - "
-				"error %u - get_canon_search failed",
+				"string_read_op_ends_with - error %u - get_canon_search failed",
 				AS_ERR_OP_NOT_APPLICABLE);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
@@ -4893,9 +4860,7 @@ string_read_op_regex_compare(const string_op* op, const uint8_t* from,
 	if (regex == NULL) {
 		// Same as string_modify_op_regex_replace: NULL from utext_openUTF8 or
 		// uregex_openUText (bad pattern / UText failure) — not storage quota.
-		cf_ticker_warning(AS_PARTICLE,
-				"string_read_op_regex_compare - "
-				"get_cached_regex failed");
+		// get_cached_regex ticker-warned the specific cause.
 		as_error_details_set_fmt(AS_SUB_PARAM_STRING_REGEX_INVALID,
 				"string_regex_compare: regex pattern is invalid or could not be compiled");
 		return -AS_ERR_PARAMETER;
@@ -4907,8 +4872,7 @@ string_read_op_regex_compare(const string_op* op, const uint8_t* from,
 
 	if (U_FAILURE(status)) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_read_op_regex_compare - "
-				"text utext_openUTF8 failed with status: %d",
+				"string_read_op_regex_compare - text utext_openUTF8 failed with status: %d",
 				status);
 		return icu_uerror_to_as_err(status);
 	}
@@ -4917,8 +4881,7 @@ string_read_op_regex_compare(const string_op* op, const uint8_t* from,
 	if (U_FAILURE(status)) {
 		utext_close(&ut_text);
 		cf_ticker_warning(AS_PARTICLE,
-				"string_read_op_regex_compare - "
-				"uregex_setUText failed with status: %d",
+				"string_read_op_regex_compare - uregex_setUText failed with status: %d",
 				status);
 		return icu_uerror_to_as_err(status);
 	}
@@ -4928,8 +4891,7 @@ string_read_op_regex_compare(const string_op* op, const uint8_t* from,
 
 	if (U_FAILURE(status)) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_read_op_regex_compare - "
-				"uregex_find failed with status: %d",
+				"string_read_op_regex_compare - uregex_find failed with status: %d",
 				status);
 		return icu_uerror_to_as_err(status);
 	}
@@ -4953,15 +4915,18 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 
 	if (argc != 2) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_regex_replace - error %u expected 2 list "
-				"elements, got %u",
-				AS_ERR_PARAMETER, argc);
+				"string_modify_op_regex_replace - error %u expected 2 list elements",
+				AS_ERR_PARAMETER);
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"string_regex_replace: expects 2 list elements, got %u", argc);
 		return -AS_ERR_PARAMETER;
 	}
 
 	if (msgpack_peek_type(&mp) != MSGPACK_TYPE_STRING) {
 		cf_ticker_warning(AS_PARTICLE,
 				"string_modify_op_regex_replace - pattern is not a string");
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"string_regex_replace: pattern is not a string");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -4970,9 +4935,10 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 
 	if (pattern_raw == NULL || pattern_raw_sz == 0) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_regex_replace - error %u empty or missing "
-				"pattern",
+				"string_modify_op_regex_replace - error %u empty or missing pattern",
 				AS_ERR_PARAMETER);
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"string_regex_replace: pattern is empty or missing");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -4983,12 +4949,16 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 		cf_ticker_warning(AS_PARTICLE,
 				"string_modify_op_regex_replace - error %u: pattern is not valid UTF-8",
 				AS_ERR_PARAMETER);
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_UTF8_INVALID,
+				"string_regex_replace: pattern contains non-UTF-8 bytes");
 		return -AS_ERR_PARAMETER;
 	}
 
 	if (msgpack_peek_type(&mp) != MSGPACK_TYPE_STRING) {
 		cf_ticker_warning(AS_PARTICLE,
 				"string_modify_op_regex_replace - replacement is not a string");
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"string_regex_replace: replacement is not a string");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -4997,9 +4967,10 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 
 	if (repl_raw == NULL || repl_raw_sz == 0) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_regex_replace - error %u empty or missing "
-				"replacement",
+				"string_modify_op_regex_replace - error %u empty or missing replacement",
 				AS_ERR_PARAMETER);
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"string_regex_replace: replacement is empty or missing");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -5010,6 +4981,8 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 		cf_ticker_warning(AS_PARTICLE,
 				"string_modify_op_regex_replace - error %u: replacement is not valid UTF-8",
 				AS_ERR_PARAMETER);
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_UTF8_INVALID,
+				"string_regex_replace: replacement contains non-UTF-8 bytes");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -5097,9 +5070,7 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 			get_cached_regex(pattern_raw, pattern_raw_sz, icu_flags);
 
 	if (regex == NULL) {
-		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_regex_replace - "
-				"get_cached_regex failed");
+		// get_cached_regex ticker-warned the specific cause.
 		as_error_details_set_fmt(AS_SUB_PARAM_STRING_REGEX_INVALID,
 				"string_regex_replace: regex pattern is invalid or could not be compiled");
 		return -AS_ERR_PARAMETER;
@@ -5118,8 +5089,7 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 			&repl_u16, &repl_len, &repl_heap);
 	if (convert_rc != AS_OK) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_regex_replace - "
-				"replacement UTF-8 to UTF-16 failed: %d",
+				"string_modify_op_regex_replace - replacement UTF-8 to UTF-16 failed: %d",
 				convert_rc);
 		return convert_rc;
 	}
@@ -5133,8 +5103,7 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 			&text_u16, &text_len, &text_heap);
 	if (convert_rc != AS_OK) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_regex_replace - "
-				"input UTF-8 to UTF-16 failed: %d",
+				"string_modify_op_regex_replace - input UTF-8 to UTF-16 failed: %d",
 				convert_rc);
 		return convert_rc;
 	}
@@ -5143,8 +5112,7 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 
 	if (U_FAILURE(status)) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_regex_replace - "
-				"uregex_setText failed with status: %d",
+				"string_modify_op_regex_replace - uregex_setText failed with status: %d",
 				status);
 		return icu_uerror_to_as_err(status);
 	}
@@ -5175,8 +5143,7 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 
 	if (U_FAILURE(status)) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_regex_replace - "
-				"uregex_replaceFirst/replaceAll failed with status: %d",
+				"string_modify_op_regex_replace - uregex_replaceFirst/replaceAll failed with status: %d",
 				status);
 		return icu_uerror_to_as_err(status);
 	}
@@ -5185,8 +5152,7 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 			result_len);
 	if (convert_rc != AS_OK) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_modify_op_regex_replace - "
-				"UTF-16 to UTF-8 failed: %d",
+				"string_modify_op_regex_replace - UTF-16 to UTF-8 failed: %d",
 				convert_rc);
 		return convert_rc;
 	}
