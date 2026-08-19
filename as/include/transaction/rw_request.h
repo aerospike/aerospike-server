@@ -167,6 +167,10 @@ typedef struct rw_request_s {
 	// successful ack, so the counter reflects bytes actually saved on the
 	// wire rather than bytes we hoped to save. Zero if compression was
 	// not beneficial.
+	//
+	// On the fire-and-forget path (write-commit-level master) there is no ack,
+	// so send_rw_messages_forget() credits it per accepted destination at send
+	// time. Exactly one of the two sites ever runs for a given rw_request.
 	uint64_t per_dest_bytes_saved;
 	// Info bits computed from the originating transaction at first build.
 	// Re-emitted verbatim on delta-fallback retransmit so the rebuilt

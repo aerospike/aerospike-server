@@ -92,7 +92,7 @@ void destroy_batch_extra_msgps(void* extra_msgps);
 int validate_delete_durability(struct as_transaction_s* tr);
 bool xdr_allows_write(struct as_transaction_s* tr);
 void send_rw_messages(struct rw_request_s* rw);
-void send_rw_messages_forget(struct rw_request_s* rw);
+void send_rw_messages_forget(struct rw_request_s* rw, struct as_namespace_s* ns);
 int repl_state_check(struct as_index_s* r, struct as_transaction_s* tr);
 void will_replicate(struct as_index_s* r, struct as_namespace_s* ns);
 bool write_is_full_drop(const struct as_transaction_s* tr);

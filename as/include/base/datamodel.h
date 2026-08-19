@@ -564,6 +564,12 @@ typedef struct wire_compression_stats_s {
 	// bytes_saved is credited at ack-time per successful destination so the
 	// counter reflects bytes actually saved on the wire — not bytes we hoped
 	// to save before sending. Fallbacks contribute 0.
+	//
+	// Exception - write-commit-level master replicates fire-and-forget, so no
+	// ack ever arrives to credit. Those savings are credited at send time
+	// instead, per destination fabric accepted (send_rw_messages_forget()).
+	// Without that the counter would read zero for a commit-level-master
+	// namespace whose replication traffic is in fact being compressed.
 	uint64_t bytes_saved;
 	// Sends that went out plain instead of compressed. The trigger differs by
 	// transport, so read it per instance:

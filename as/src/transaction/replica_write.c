@@ -642,6 +642,10 @@ repl_write_get_orig_pickle(msg* m, as_remote_record* rr)
 // savings and a later AS_OK ack from the replica that DID apply it credits
 // nothing (ack-order dependent). We accept the undercount rather than track
 // per-destination state.
+//
+// This covers only writes that wait for acks. Write-commit-level master sends
+// fire-and-forget and is never acked, so its savings are credited at send time
+// instead - see send_rw_messages_forget(), the counterpart to this rule.
 bool
 repl_write_ack_credits_bytes_saved(bool wire_compressed_op_sent,
 		uint32_t result_code, uint64_t per_dest_bytes_saved)

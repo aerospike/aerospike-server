@@ -335,7 +335,7 @@ start_delete_repl_write_forget(rw_request* rw, as_transaction* tr)
 	// Construct and send repl-write message. No need to finish rw setup.
 
 	repl_write_make_message(rw, tr);
-	send_rw_messages_forget(rw);
+	send_rw_messages_forget(rw, tr->rsv.ns);
 }
 
 static bool
@@ -404,7 +404,7 @@ delete_repl_write_forget_after_dup_res(rw_request* rw, as_transaction* tr)
 	// Note - we are under the rw_request lock here!
 
 	repl_write_make_message(rw, tr);
-	send_rw_messages_forget(rw);
+	send_rw_messages_forget(rw, tr->rsv.ns);
 }
 
 static void

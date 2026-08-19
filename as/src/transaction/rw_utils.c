@@ -124,16 +124,45 @@ send_rw_messages(rw_request* rw)
 	}
 }
 
+// The fire-and-forget send, taken only when respond_on_master_complete() is
+// true (write-commit-level master) - the replica suppresses its ack and the
+// caller drops the rw_request from the hash immediately after this returns.
+//
+// So this is also where wire-compression savings are credited for these
+// writes. The acked path credits in repl_write_handle_ack(), which is
+// unreachable here in both directions - no ack is sent, and the rw_request is
+// gone before one could be matched - so without this the counter would stay at
+// zero for every commit-level-master namespace even though compressed payloads
+// went out on the fabric. Crediting at send time is safe here precisely because
+// the ack path cannot run: there is no second crediting site to double-count
+// with, and no ack-driven fallback that could retract the saving, so the value
+// is final once fabric has taken the message.
 void
-send_rw_messages_forget(rw_request* rw)
+send_rw_messages_forget(rw_request* rw, as_namespace* ns)
 {
+	uint32_t n_sent = 0;
+
 	for (uint32_t i = 0; i < rw->n_dest_nodes; i++) {
 		msg_incr_ref(rw->dest_msg);
 
 		if (as_fabric_send(rw->dest_nodes[i], rw->dest_msg,
 					AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 			as_fabric_msg_put(rw->dest_msg);
+			continue;
 		}
+
+		n_sent++;
+	}
+
+	// Same rule as repl_write_ack_credits_bytes_saved(): gated on what
+	// fill_repl_write_message() actually put on the wire, not on what was
+	// computed, so a compat-gated plain send credits nothing. Only the
+	// destinations fabric accepted count - matching the acked path, which
+	// accumulates once per acking destination.
+	if (n_sent != 0 && rw->wire_compressed_op_sent &&
+			rw->per_dest_bytes_saved != 0) {
+		as_add_uint64(&ns->repl_wire_comp_stat.bytes_saved,
+				rw->per_dest_bytes_saved * n_sent);
 	}
 }
 
@@ -1443,7 +1472,10 @@ compute_delta_for_replication(rw_request* rw, as_storage_rd* rd,
 //
 // Gating compression on the ack would mean every commit-level=master namespace
 // quietly gets no wire compression at all - the config would read as on and
-// save nothing.
+// save nothing. Since these writes do compress, their savings are reported too:
+// with no ack to credit them, send_rw_messages_forget() credits bytes_saved at
+// send time. Only the delta counters stay at zero for these namespaces, which
+// follows from deltas being off above.
 void
 compute_compression_for_replication(rw_request* rw, as_storage_rd* rd,
 		replication_compression_mode mode, bool pickle_storage_compressed)
