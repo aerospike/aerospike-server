@@ -34,6 +34,7 @@
 
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "base/proto.h"
 #include "base/set_index.h"
 #include "storage/flat.h"
 #include "transaction/rw_utils.h"
@@ -80,6 +81,38 @@ drv_cold_start_record_create(as_namespace* ns, const as_flat_record* flat,
 		as_index_ref* r_ref)
 {
 	as_set_index_insert(ns, tree, as_index_get_set_id(r_ref->r), r_ref->r_h);
+}
+
+// Reconcile the index element's set with the set named by the version we're
+// about to apply. Cold start assigns set-id only when creating the element,
+// which need not be the version carrying the set name. CE has no durable
+// deletes and no MRT provisionals, so the element is always live here.
+void
+drv_cold_start_adopt_set(cf_log_context log_ctx, as_namespace* ns,
+		const as_flat_record* flat, const as_flat_opt_meta* opt_meta,
+		as_index_tree* tree, as_index_ref* r_ref)
+{
+	as_index* r = r_ref->r;
+
+	if (drv_cold_start_set_already_assigned(log_ctx, ns, flat, opt_meta, r)) {
+		return;
+	}
+
+	// Bounded set-name vmap - on failure leave the element setless, as it was.
+	if (as_index_set_set_w_len(r, ns, opt_meta->set_name,
+				opt_meta->set_name_len, false) != AS_OK) {
+		return;
+	}
+
+	uint16_t set_id = as_index_get_set_id(r);
+
+	// The update path leaves the set index alone - the record was already live.
+	as_set_index_insert(ns, tree, set_id, r_ref->r_h);
+
+	// Charge the currently-indexed size - the caller's tail then applies its
+	// (new - old) delta, so the set is charged the new size exactly once.
+	as_namespace_adjust_set_data_used_bytes(ns, set_id,
+			(int64_t)N_RBLOCKS_TO_SIZE(r->n_rblocks));
 }
 
 bool

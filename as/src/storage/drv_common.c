@@ -604,9 +604,54 @@ drv_cold_start_prefer_existing(const as_namespace* ns,
 			(block_void_time != 0 && block_void_time <= r->void_time);
 }
 
+// The reporting half of drv_cold_start_set_already_assigned(), split out so that
+// function reads as the predicate its name promises. Reaching the warning needs
+// a writer that reuses one digest across two set names, which the server permits
+// - the set name is checked against the index only on update, and the digest is
+// client-supplied and never recomputed.
+static void
+warn_if_set_mismatch(cf_log_context log_ctx, as_namespace* ns,
+		const as_flat_record* flat, const as_flat_opt_meta* opt_meta,
+		const as_index* r)
+{
+	const char* set_name = as_index_get_set_name(r, ns);
+
+	if (set_name == NULL ||
+			strncmp(set_name, opt_meta->set_name, opt_meta->set_name_len) != 0 ||
+			set_name[opt_meta->set_name_len] != 0) {
+		// Note - the on-device name is not null-terminated, which is why the
+		// compare is length-bounded and the terminator is checked separately.
+		cf_warning(log_ctx,
+				"{%s} %pD on-device set %.*s does not match indexed set %s",
+				ns->name, &flat->keyd, (int)opt_meta->set_name_len,
+				opt_meta->set_name, set_name == NULL ? "(null)" : set_name);
+	}
+}
+
 //==========================================================
 // Public API - cold-start record ingest.
 //
+
+// The edition-neutral half of drv_cold_start_adopt_set() - the halves live in
+// drv_common_ce.c and drv_common_ee.c.
+//
+// Returns true if the element already has a set, which the caller must then
+// leave alone - the first set swept wins, as on the create path. A version
+// naming a different set is reported rather than applied; see
+// warn_if_set_mismatch().
+bool
+drv_cold_start_set_already_assigned(cf_log_context log_ctx, as_namespace* ns,
+		const as_flat_record* flat, const as_flat_opt_meta* opt_meta,
+		const as_index* r)
+{
+	if (as_index_get_set_id(r) == INVALID_SET_ID) {
+		return false;
+	}
+
+	warn_if_set_mismatch(log_ctx, ns, flat, opt_meta, r);
+
+	return true;
+}
 
 void
 drv_cold_start_add_record(const drv_cold_start_add_ops* ops,
@@ -763,6 +808,12 @@ drv_cold_start_add_record(const drv_cold_start_add_ops* ops,
 		ops->counters->unique++;
 	}
 	else {
+		// Before the update, so its set stats and set index use the new set-id.
+		if (opt_meta.set_name != NULL) {
+			drv_cold_start_adopt_set(ops->log_ctx, ns, flat, &opt_meta,
+					p_partition->tree, &r_ref);
+		}
+
 		ops->record_update_fn(ops->devs, flat, &opt_meta, p_partition->tree,
 				&r_ref);
 
