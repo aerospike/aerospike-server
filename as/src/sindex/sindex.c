@@ -1051,6 +1051,11 @@ as_sindex_find_best(const as_namespace* ns, uint16_t set_id,
 					ns->name, best_si->iname, best_match.bin_name,
 					best_keys_per_bval, best_n_keys, n_candidates);
 		}
+		else {
+			cf_debug(AS_SINDEX,
+					"{%s} query-plan: hint pick iname=%s bin=%s from %u candidates",
+					ns->name, best_si->iname, best_match.bin_name, n_candidates);
+		}
 	}
 
 	SINDEX_GRUNLOCK();
@@ -1106,32 +1111,6 @@ as_sindex_select_from_exp(const as_namespace* ns, uint16_t set_id,
 	}
 	else {
 		sel.result = AS_QUERY_PLAN_SINDEX;
-
-		if (sel.match.ktype == AS_PARTICLE_TYPE_STRING) {
-			cf_debug(AS_SINDEX,
-					"{%s} query-plan: selected sindex=%s bin=%s value=%.*s len=%u",
-					ns->name, sel.si->iname, sel.match.bin_name,
-					(int)sel.match.bound_val_sz,
-					(const char*)sel.match.bound_val, sel.match.bound_val_sz);
-		}
-		else if (sel.match.ktype == AS_PARTICLE_TYPE_BLOB) {
-			cf_debug(AS_SINDEX,
-					"{%s} query-plan: selected sindex=%s bin=%s value=<blob>",
-					ns->name, sel.si->iname, sel.match.bin_name);
-		}
-		else if (sel.match.ktype == AS_PARTICLE_TYPE_GEOJSON) {
-			cf_debug(AS_SINDEX,
-					"{%s} query-plan: selected sindex=%s bin=%s region_bytes=%u",
-					ns->name, sel.si->iname, sel.match.bin_name,
-					sel.match.bound_val_sz);
-		}
-		else {
-			cf_debug(AS_SINDEX,
-					"{%s} query-plan: selected sindex=%s bin=%s range=[%" PRId64
-					",%" PRId64 "]",
-					ns->name, sel.si->iname, sel.match.bin_name,
-					sel.match.bval_low, sel.match.bval_high);
-		}
 	}
 
 	cf_vector_destroy(&candidates);

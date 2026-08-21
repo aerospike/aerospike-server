@@ -247,6 +247,10 @@ plan_parse_request(as_transaction* tr, plan_ctx* ctx, as_query_where* where)
 
 	if (ctx->exp == NULL) {
 		cf_ticker_warning(AS_QUERY, "{%s} query-plan: bad AEL filter", ns->name);
+		// Stage the build failure - this runs synchronously on the armed
+		// service thread, and as_query_error() sends the detail with the
+		// start-failure reply.
+		as_exp_stage_build_error_details("invalid filter expression in query");
 		return false;
 	}
 
