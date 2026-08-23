@@ -178,9 +178,16 @@ void drv_mrt_create_cold_start_hash(struct as_namespace_s* ns);
 bool drv_load_needs_2nd_pass(const struct as_namespace_s* ns);
 bool drv_mrt_2nd_pass_load_ticker(const struct as_namespace_s* ns,
 		const char* pcts);
+bool drv_cold_start_set_already_assigned(cf_log_context log_ctx,
+		struct as_namespace_s* ns, const struct as_flat_record_s* flat,
+		const struct as_flat_opt_meta_s* opt_meta, const struct as_index_s* r);
 void drv_cold_start_remove_from_set_index(struct as_namespace_s* ns,
 		struct as_index_tree_s* tree, struct as_index_ref_s* r_ref);
 void drv_cold_start_record_create(struct as_namespace_s* ns,
+		const struct as_flat_record_s* flat,
+		const struct as_flat_opt_meta_s* opt_meta, struct as_index_tree_s* tree,
+		struct as_index_ref_s* r_ref);
+void drv_cold_start_adopt_set(cf_log_context log_ctx, struct as_namespace_s* ns,
 		const struct as_flat_record_s* flat,
 		const struct as_flat_opt_meta_s* opt_meta, struct as_index_tree_s* tree,
 		struct as_index_ref_s* r_ref);
