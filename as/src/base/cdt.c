@@ -1776,16 +1776,32 @@ select_apply_undo_entry(select_apply* a)
 	a->tail->idx--;
 }
 
+// pre:  every surviving result entry has had its sz set, so sz == 0 identifies a
+//       hdr entry -- whose union holds no result to destroy.
+// post: each result entry's as_exp_result is destroyed and the overflow pages are
+//       freed. A result whose variant is AS_EXP_RESULT_BIN owns the particle the
+//       modify produced, so the pack pass reading it is not the end of its life.
 static void
-select_apply_free_mem(select_apply* a)
+select_apply_destroy(select_apply* a)
 {
-	apply_page* p = a->page0.next;
+	apply_page* p = &a->page0;
 
 	while (p != NULL) {
-		apply_page* pp = p;
+		for (uint32_t i = 0; i < p->idx; i++) {
+			apply_result_entry* e = &p->results[i];
 
-		p = p->next;
-		cf_free(pp);
+			if (e->sz != 0) {
+				as_exp_result_destroy(&e->res);
+			}
+		}
+
+		apply_page* next = p->next;
+
+		if (p != &a->page0) {
+			cf_free(p);
+		}
+
+		p = next;
 	}
 }
 
@@ -3391,7 +3407,7 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 		cdt_select_apply(&sel, exp, &com->ctx);
 
 		as_exp_destroy(exp);
-		select_apply_free_mem(&apply);
+		select_apply_destroy(&apply);
 	}
 	else {
 		// Allocate the resuilt size as the bin msgpack size.
