@@ -20,9 +20,13 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-#pragma GCC diagnostic warning "-Wall"
-#pragma GCC diagnostic warning "-Wextra"
-#pragma GCC diagnostic warning "-Wconversion"
-#pragma GCC diagnostic warning "-Wsign-conversion"
-#pragma GCC diagnostic warning "-Wshadow"
-#pragma GCC diagnostic warning "-Wmissing-declarations"
+// This block is the in-TU equivalent of -Werror for the warning groups listed
+// below. Note that "#pragma GCC diagnostic warning" would OVERRIDE the global
+// -Werror (make_in/Makefile.in) and make these groups non-fatal in every file
+// that includes this header - "error" is what makes them build-breaking.
+#pragma GCC diagnostic error "-Wall"
+#pragma GCC diagnostic error "-Wextra"
+#pragma GCC diagnostic error "-Wconversion"
+#pragma GCC diagnostic error "-Wsign-conversion"
+#pragma GCC diagnostic error "-Wshadow"
+#pragma GCC diagnostic error "-Wmissing-declarations"

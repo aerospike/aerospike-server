@@ -240,7 +240,8 @@ sys_mem_info(uint64_t* free_mem_kbytes, uint32_t* free_mem_pct,
 	}
 
 	*free_mem_kbytes = mem_available;
-	*free_mem_pct = mem_total == 0 ? 0 : (mem_available * 100) / mem_total;
+	*free_mem_pct =
+			mem_total == 0 ? 0 : (uint32_t)((mem_available * 100) / mem_total);
 	*thp_mem_kbytes = anon_huge_pages;
 }
 
@@ -971,11 +972,11 @@ cf_os_process_rss_bytes(void)
 
 	buf[limit] = '\0';
 
-	// /proc/self/statm is "size resident shared ..."; skip size (%*lu) and take
+	// /proc/self/statm is "size resident shared ..."; skip size (%*u) and take
 	// resident directly - the first field is only there to reach the second.
 	unsigned long resident_pages;
 
-	if (sscanf(buf, "%*lu %lu", &resident_pages) != 1) {
+	if (sscanf(buf, "%*u %lu", &resident_pages) != 1) {
 		return 0;
 	}
 
