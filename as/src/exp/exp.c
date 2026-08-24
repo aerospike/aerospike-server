@@ -3280,6 +3280,26 @@ build_quote(build_args* args)
 	return true;
 }
 
+// A CONTEXT_EVAL leader means the call navigates a path, so its receiver is the
+// container being walked rather than the family's own leaf type.
+//
+// The wire decode already reads this leader, and this deliberately reads it
+// again rather than having that carry the answer out: the decode is shared by
+// every call family and runs per op, while only the string family has a pathed
+// form and only build asks. Two header reads keep the build-time check stating
+// its own precondition.
+static bool
+op_call_has_ctx(const op_call* op)
+{
+	msgpack_in mp = { .buf = op->vecs[0].buf, .buf_sz = op->vecs[0].buf_sz };
+	uint32_t ele_count;
+	uint64_t op_code;
+
+	return msgpack_get_list_ele_count(&mp, &ele_count) &&
+			msgpack_get_uint64(&mp, &op_code) &&
+			op_code == AS_CDT_OP_CONTEXT_EVAL;
+}
+
 static bool
 build_call(build_args* args)
 {
@@ -3356,7 +3376,20 @@ build_call(build_args* args)
 		}
 		break;
 	case EXP_CALL_STRING:
-		if (args->entry->r_type != EXP_RTYPE_STR) {
+		// A pathed string call receives the container the ctx walks; the leaf
+		// it lands on is what must be a string, and only the walk can know
+		// that.
+		if (op_call_has_ctx(op)) {
+			if (args->entry->r_type != EXP_RTYPE_LIST &&
+					args->entry->r_type != EXP_RTYPE_MAP) {
+				cf_warning(AS_EXP,
+						"build_call - error %u arg %u (%s) is not list or map",
+						AS_ERR_PARAMETER, args->entry->r_type,
+						exp_rtype_to_str(args->entry->r_type));
+				return false;
+			}
+		}
+		else if (args->entry->r_type != EXP_RTYPE_STR) {
 			cf_warning(AS_EXP, "build_call - error %u arg %u (%s) is not string",
 					AS_ERR_PARAMETER, args->entry->r_type,
 					exp_rtype_to_str(args->entry->r_type));

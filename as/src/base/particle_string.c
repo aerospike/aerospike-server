@@ -587,6 +587,9 @@ static bool string_state_init(string_state* state, const uint8_t* bin_name,
 static int string_modify(string_state* state, as_bin* b,
 		cf_ll_buf* particles_llb);
 static int string_read(string_state* state, const as_bin* b, as_bin* rb);
+static int string_modify_ctx(string_state* state, as_bin* b,
+		cf_ll_buf* particles_llb);
+static int string_read_ctx(string_state* state, const as_bin* b, as_bin* rb);
 static bool string_parse_op(string_state* state, string_op* op);
 
 //==========================================================
@@ -672,6 +675,12 @@ as_bin_string_modify_exp(as_bin* b, msgpack_in_vec* mv)
 		return -AS_ERR_PARAMETER;
 	}
 
+	// The operate path has a separate entry point per shape; an expression has
+	// one, so the ctx split happens here.
+	if (state.has_ctx) {
+		return string_modify_ctx(&state, b, NULL);
+	}
+
 	return string_modify(&state, b, NULL);
 }
 
@@ -686,6 +695,10 @@ as_bin_string_read_exp(const as_bin* b, msgpack_in_vec* mv, as_bin* rb)
 	if (! string_state_init(&state, NULL, 0, mv, true, true)) {
 		// Error details set by string_state_init.
 		return -AS_ERR_PARAMETER;
+	}
+
+	if (state.has_ctx) {
+		return string_read_ctx(&state, b, rb);
 	}
 
 	return string_read(&state, b, rb);
@@ -774,6 +787,46 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 	if (op_code == AS_STRING_OP_CONTEXT_EVAL) {
 		state->has_ctx = true;
 
+		// [op_code, ctx, inner_op]
+		if (ele_count != 3) {
+			cf_ticker_warning(AS_PARTICLE,
+					"string_state_init - error %u context op count is not 3",
+					AS_ERR_PARAMETER);
+
+			if (is_expr) {
+				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_MALFORMED,
+						"string context op requires [0xFF, ctx, [op, args...]]; got %u outer elements",
+						ele_count);
+			}
+			else {
+				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_MALFORMED,
+						"string context op on bin %.*s requires [0xFF, ctx, [op, args...]]; got %u outer elements",
+						(int)bin_name_sz, bin_name, ele_count);
+			}
+			return false;
+		}
+
+		// The sentinel read may have ended flush with the last vec, advancing
+		// idx one past it -- a valid cursor state that must not be
+		// dereferenced. Reported apart from a malformed ctx below: there is no
+		// ctx element here at all, which is what makes the two tellable apart.
+		if (state->mv->idx >= state->mv->n_vecs) {
+			cf_ticker_warning(AS_PARTICLE,
+					"string_state_init - error %u context op has no ctx",
+					AS_ERR_PARAMETER);
+
+			if (is_expr) {
+				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_MALFORMED,
+						"string context op has no context list");
+			}
+			else {
+				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_MALFORMED,
+						"string context op on bin %.*s has no context list",
+						(int)bin_name_sz, bin_name);
+			}
+			return false;
+		}
+
 		// Remember where the ctx list starts so we can replay it later.
 		state->ctx_mv_idx = state->mv->idx;
 		state->ctx_mv_offset = state->mv->vecs[state->mv->idx].offset;
@@ -785,16 +838,38 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 					AS_ERR_PARAMETER);
 
 			if (is_expr) {
-				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_NOT_APPLICABLE,
+				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_MALFORMED,
 						"string op has malformed context path");
 			}
 			else {
-				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_NOT_APPLICABLE,
+				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_MALFORMED,
 						"string op on bin %.*s has malformed context path",
 						(int)bin_name_sz, bin_name);
 			}
 			return false;
 		}
+
+		uint32_t inner_count;
+
+		if (! msgpack_get_list_ele_count_vec(state->mv, &inner_count) ||
+				inner_count == 0) {
+			cf_ticker_warning(AS_PARTICLE,
+					"string_state_init - error %u unable to parse inner op list",
+					AS_ERR_PARAMETER);
+
+			if (is_expr) {
+				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_MALFORMED,
+						"string context op requires [0xFF, ctx, [op, args...]]; inner element is not a list");
+			}
+			else {
+				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_MALFORMED,
+						"string context op on bin %.*s requires [0xFF, ctx, [op, args...]]; inner element is not a list",
+						(int)bin_name_sz, bin_name);
+			}
+			return false;
+		}
+
+		state->n_args = inner_count - 1;
 
 		// Read the inner sub-op.
 		if (! msgpack_get_uint64_vec(state->mv, &op_code)) {
@@ -813,9 +888,6 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 			}
 			return false;
 		}
-
-		// We consumed sentinel + ctx + inner_op; adjust n_args.
-		state->n_args -= 2;
 	}
 
 	state->op_type = (as_string_op_type)op_code;

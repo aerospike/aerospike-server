@@ -540,7 +540,7 @@ typedef enum {
 	// String op code or modifier/read class mismatch on the wire path.
 	AS_SUB_PARAM_STRING_OP_INVALID = 7,
 	// String context-eval path malformed (mirrors CDT context-eval shape).
-	AS_SUB_PARAM_STRING_CTX_NOT_APPLICABLE = 8,
+	AS_SUB_PARAM_STRING_CTX_MALFORMED = 8,
 	// String modify/read index or code-point range out of bounds.
 	AS_SUB_PARAM_STRING_INDEX_OUT_OF_BOUNDS = 9,
 	// String regex pattern invalid (compile / ICU failure).
@@ -902,7 +902,9 @@ typedef enum {
 	AS_STRING_MODIFY_OP_END,
 
 	// Sub-op sentinel for context-aware operations. Mirrors AS_CDT_OP_CONTEXT_EVAL.
-	// Wire format: [0xFF, ctx_list, inner_sub_op, inner_args...]
+	// Wire format: [0xFF, ctx_list, [inner_sub_op, inner_args...]] -- exactly
+	// three outer elements, and the inner list carries its own arity so a
+	// trailing element cannot be mistaken for an optional argument.
 	AS_STRING_OP_CONTEXT_EVAL  = 0xFF
 } as_string_op_type;
 
