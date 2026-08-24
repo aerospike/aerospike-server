@@ -950,8 +950,9 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 // allocates the new particle, executes the modify fn, and commits the result.
 //
 // @param state   Initialized execution context (op type, def, bin name).
-// @param b       Target bin; must be a live STRING bin, except INSERT, CONCAT,
-//                APPEND, and PREPEND may create a missing bin from empty.
+// @param b       Target bin; must be a live STRING bin, except that the ops
+//                string_op_allows_bin_create() accepts may create it from
+//                empty.
 // @param particles_llb  Arena for particle allocation; NULL means cf_malloc is used instead.
 // @return AS_OK on success; negative AS_ERR_* on failure.
 //         If AS_STRING_FLAG_NO_FAIL is set, op failures return AS_OK with bin unchanged.
@@ -1068,10 +1069,10 @@ string_modify(string_state* state, as_bin* b, cf_ll_buf* particles_llb)
 		// string_modify_ctx and the fn.modify() failure handling below.
 		// NO_FAIL covers exactly the prepare stage. Failures resolved before
 		// prepare() are NOT suppressed: argument-parse errors (string_parse_op,
-		// above), missing-bin (op-class based, above), wrong-type, and
-		// invalid-UTF-8 in the source string. Invalid-UTF-8 in the modify
-		// result (post-modify) is likewise still surfaced. See the String
-		// Operations spec.
+		// above), wrong-type, and invalid-UTF-8 in the source string.
+		// Invalid-UTF-8 in the modify result (post-modify) is likewise still
+		// surfaced. An absent bin is not a failure - it either creates from
+		// empty or returns AS_OK. See the String Operations spec.
 		if ((op.flags & AS_STRING_FLAG_NO_FAIL) != 0) {
 			return AS_OK;
 		}
@@ -1359,10 +1360,10 @@ string_modify_ctx(string_state* state, as_bin* b, cf_ll_buf* particles_llb)
 		// unchanged), matching the non-CTX string_modify path and the
 		// fn.modify() failure handling below. NO_FAIL covers exactly the
 		// prepare stage. Failures resolved before prepare() are NOT suppressed:
-		// argument-parse errors, missing-bin (op-class based), wrong-type, and
-		// invalid-UTF-8 in the source string (above); invalid-UTF-8 in the
-		// modify result is likewise still surfaced. See the String Operations
-		// spec.
+		// argument-parse errors, wrong-type, and invalid-UTF-8 in the source
+		// string (above); invalid-UTF-8 in the modify result is likewise still
+		// surfaced. An absent bin is not a failure - it either creates from
+		// empty or returns AS_OK. See the String Operations spec.
 		if ((op.flags & AS_STRING_FLAG_NO_FAIL) != 0) {
 			return AS_OK;
 		}

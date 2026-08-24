@@ -578,8 +578,6 @@ typedef enum {
 	// App use: dispatch a one-time init op with default index_bits,
 	// then retry the count/fold.
 	AS_SUB_BIN_NOT_FOUND_HLL_CANNOT_CREATE_WITH_OP = 1,
-	// String modify on a missing bin (non-NO_FAIL path).
-	AS_SUB_BIN_NOT_FOUND_STRING_VALUE_NOT_FOUND = 2,
 } as_sub_bin_not_found_t;
 
 // Subcodes paired with AS_ERR_BIN_NAME. Form-A parallel of
