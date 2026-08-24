@@ -139,5 +139,5 @@ cf_rchash_delete(cf_rchash* h, const void* key)
 static inline int
 cf_rchash_reduce(cf_rchash* h, cf_rchash_reduce_fn reduce_fn, void* udata)
 {
-	return hash_table_reduce(h, reduce_fn, udata) ? CF_RCHASH_OK : CF_RCHASH_ERR;
+	return hash_table_reduce(h, reduce_fn, udata);
 }

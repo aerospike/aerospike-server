@@ -412,7 +412,7 @@ hash_table_delete(hash_table* h, const void* key, const void* val, void* val_r,
 	return true;
 }
 
-bool
+int
 hash_table_reduce(hash_table* h, hash_table_reduce_fn reduce_fn, void* udata)
 {
 	cf_assert(h != NULL && reduce_fn != NULL, CF_MISC, "bad param");
@@ -446,9 +446,9 @@ hash_table_reduce(hash_table* h, hash_table_reduce_fn reduce_fn, void* udata)
 			else if (rv == HASH_TABLE_REDUCE_CONTINUE) {
 				data += h->data_sz;
 			}
-			else { // error
+			else { // caller says stop - return its value
 				h_unlock(m);
-				return false;
+				return rv;
 			}
 		}
 
@@ -467,16 +467,16 @@ hash_table_reduce(hash_table* h, hash_table_reduce_fn reduce_fn, void* udata)
 			else if (rv == HASH_TABLE_REDUCE_CONTINUE) {
 				ppe = &(*ppe)->next;
 			}
-			else { // error
+			else { // caller says stop - return its value
 				h_unlock(m);
-				return false;
+				return rv;
 			}
 		}
 
 		h_unlock(m);
 	}
 
-	return true;
+	return HASH_TABLE_REDUCE_CONTINUE;
 }
 
 //==========================================================

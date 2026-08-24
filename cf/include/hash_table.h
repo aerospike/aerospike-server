@@ -45,7 +45,7 @@ typedef void (*hash_table_rel_fn)(struct hash_table_s* h, void* val);
 // behavior during reduce as follows:
 // - HASH_TABLE_REDUCE_CONTINUE - continue iterating
 // - HASH_TABLE_REDUCE_DELETE - delete the current element, continue iterating
-// - anything else (e.g. -1) - stop iterating and return false
+// - anything else (e.g. -1) - stop iterating and return that value
 typedef int (*hash_table_reduce_fn)(const void* key, void* val, void* udata);
 
 typedef struct hash_table_s {
@@ -131,5 +131,7 @@ bool hash_table_get_direct_ptr(hash_table* h, const void* key, void** ptr_r,
 bool hash_table_delete(hash_table* h, const void* key, const void* val,
 		void* val_r, bool no_lock);
 
-bool hash_table_reduce(hash_table* h, hash_table_reduce_fn reduce_fn,
-		void* udata);
+// Returns HASH_TABLE_REDUCE_CONTINUE after a complete pass, else the value
+// reduce_fn stopped with - which is therefore never CONTINUE or DELETE, see
+// hash_table_reduce_fn above.
+int hash_table_reduce(hash_table* h, hash_table_reduce_fn reduce_fn, void* udata);

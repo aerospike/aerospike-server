@@ -150,5 +150,5 @@ cf_shash_delete_all(cf_shash* h)
 static inline int
 cf_shash_reduce(cf_shash* h, cf_shash_reduce_fn reduce_fn, void* udata)
 {
-	return hash_table_reduce(h, reduce_fn, udata) ? CF_SHASH_OK : CF_SHASH_ERR;
+	return hash_table_reduce(h, reduce_fn, udata);
 }
