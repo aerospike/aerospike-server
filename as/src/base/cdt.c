@@ -3032,6 +3032,11 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 {
 	uint32_t n_pairs = *n;
 	uint32_t i = 0;
+	// How many entries are initialized, which is not where i points. An AND
+	// attaches to the preceding entry, so it steps i back onto one already built,
+	// and the array arrives as uninitialized memory -- so i bounds neither what
+	// is safe to destroy nor what needs destroying.
+	uint32_t n_init = 0;
 	int ret = AS_OK;
 
 	for (uint32_t j = 0; j < n_pairs; j++, i++) {
@@ -3083,6 +3088,7 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 		}
 		else {
 			stack[i] = (select_stack_entry){ .ctx_type = (uint32_t)ctx_type };
+			n_init = i + 1;
 		}
 
 		uint32_t buf_sz;
@@ -3167,7 +3173,7 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 	}
 
 	if (ret != AS_OK) {
-		select_stack_destroy(stack, i);
+		select_stack_destroy(stack, n_init);
 	}
 
 	*n = i;
