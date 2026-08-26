@@ -3719,6 +3719,28 @@ as_exchange_cluster_size()
 	return g_exchange.committed_cluster_size;
 }
 
+// Indicates whether the exchange state machine is settled at rest - i.e. no
+// exchange round is in flight and the node is not orphaned.
+//
+// Rest is independent of the migration-allowed flag (g_allow_migrations);
+// reaching the rest state does not imply migrations have been (re-)enabled. When
+// an aborted round recommits on the same cluster key, as_partition_balance()
+// short-circuits on its same-key guard and returns without setting
+// g_allow_migrations to true, while the commit handler still advances the state
+// to rest. A node can therefore be at rest with migrations still disallowed.
+//
+// Callers must test rest state directly and must not use the migration flag as a
+// proxy for "exchange round committed" - that proxy was exactly the SERVER-589
+// bug.
+bool
+as_exchange_is_at_rest()
+{
+	EXCHANGE_LOCK();
+	bool is_at_rest = (g_exchange.state == AS_EXCHANGE_STATE_REST);
+	EXCHANGE_UNLOCK();
+	return is_at_rest;
+}
+
 /**
  * Copy over the committed succession list.
  * Ensure the input vector has enough capacity.
