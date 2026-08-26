@@ -543,7 +543,12 @@ typedef enum {
 	AS_SUB_PARAM_STRING_CTX_MALFORMED = 8,
 	// String modify/read index or code-point range out of bounds.
 	AS_SUB_PARAM_STRING_INDEX_OUT_OF_BOUNDS = 9,
-	// String regex pattern invalid (compile / ICU failure).
+	// String regex pattern is not valid ICU syntax - whether caught at op
+	// parse, where the message also names the ICU spelling to use, or by
+	// ICU's own compile, on either the compare or the replace path. One
+	// subcode for one client mistake: parse-time detection is best-effort, so
+	// which layer catches a given spelling is not a distinction an app can
+	// rely on.
 	AS_SUB_PARAM_STRING_REGEX_INVALID = 10,
 	// String or string op argument is not valid UTF-8 (AS_ERR_PARAMETER).
 	AS_SUB_PARAM_STRING_UTF8_INVALID = 11,
@@ -653,8 +658,11 @@ typedef enum {
 	AS_SUB_OPNOT_STRING_CONVERSION_FAILED = 10,
 	// Source blob/string is not valid UTF-8 for an OP_NOT_APPLICABLE path.
 	AS_SUB_OPNOT_STRING_UTF8_INVALID = 11,
-	// 12 is reserved for AS_SUB_OPNOT_STRING_REGEX_LIMIT_EXCEEDED, in review
-	// on the SERVER-1372 branch and already carried by preview/string-APIs-3.
+	// Regex match/replace exceeded an engine resource budget - the pattern
+	// is too complex for this input, not necessarily malformed.
+	// App use: simplify the pattern (avoid nested unbounded quantifiers) or
+	// shorten the subject data.
+	AS_SUB_OPNOT_STRING_REGEX_LIMIT_EXCEEDED = 12,
 	// String is not valid base64 - a length that is not a multiple of 4, a
 	// character outside the alphabet, or misplaced '=' padding.
 	AS_SUB_OPNOT_STRING_B64_INVALID = 13,

@@ -64,7 +64,28 @@
 // more than (2**20 * 8) matches not possible with 8MB max record size
 
 // Regex resource limits (user-supplied patterns on request paths).
-#define STRING_REGEX_ICU_STEP_LIMIT 5000000
+//
+// The ICU limit feeds uregex_setTimeLimit(), whose unit is a batch of engine
+// state saves rather than wall-clock time. It is a flat ceiling on what one op
+// may spend, deliberately not an allowance derived from the subject: ICU ticks
+// the timer inside StateSave(), which a greedy quantifier reaches once per
+// iteration at every start position, so cost grows with the length of the run
+// a quantifier can consume rather than with the subject alone. Sizing it per
+// byte of subject is therefore the wrong shape - generous on word-shaped text,
+// where runs are a few characters, and refusing the same pattern on one long
+// line. Sized instead as the wall-clock a single op may hold a service thread:
+// tens of seconds, short of any client query timeout, and far below what an
+// effectively unlimited budget costs. One global replace shares one budget -
+// uregex_replaceAll() resets the timer once, then loops uregex_findNext().
+#define STRING_REGEX_ICU_QUANTA (1 << 17)
+// Upper bound on a counted repeat the PCRE2 fast path will take. A bounded
+// repeat is the one construct PCRE2's own limits do not price: auto-
+// possessification stops it backtracking, so neither match_limit nor
+// depth_limit ticks, while the engine still restarts the repeat at every
+// subject position. Cost is the product of the bound and the subject, and no
+// budget catches it. Anything larger routes to ICU, where the quanta ceiling
+// does bound it. Ordinary spellings - {2,3}, {1,20}, {1,64} - stay.
+#define STRING_REGEX_MAX_FAST_PATH_REPEAT 256
 #define STRING_REGEX_ICU_STACK_BYTES (8 * 1024 * 1024)
 #define STRING_PCRE2_MATCH_LIMIT 5000000u
 #define STRING_PCRE2_DEPTH_LIMIT 10000000u
@@ -136,6 +157,50 @@ typedef struct string_mem_s {
 	uint32_t sz;
 	uint8_t data[];
 } __attribute__((__packed__)) string_mem;
+
+// Guided rejection of non-ICU regex spellings.
+typedef struct non_icu_idiom_s {
+	const char* spelling;
+	const char* guidance;
+} non_icu_idiom;
+
+enum {
+	IDIOM_PY_GROUP,
+	IDIOM_PY_BACKREF,
+	IDIOM_QUOTED_GROUP,
+	IDIOM_G_BRACE_NAME,
+	IDIOM_OPEN_INTERVAL,
+	IDIOM_UNBRACED_PROP,
+	IDIOM_PROP_NEGATION,
+	IDIOM_BRANCH_RESET,
+	IDIOM_RECURSION,
+	IDIOM_SUBROUTINE,
+	IDIOM_CONDITIONAL,
+	IDIOM_CONTROL_VERB,
+	IDIOM_ESCAPE_N
+};
+
+// Each row is a spelling measured as an ICU compile reject - never a
+// spelling ICU accepts.
+static const non_icu_idiom NON_ICU_IDIOMS[] = {
+	[IDIOM_PY_GROUP] = { "(?P<name>...)", "use (?<name>...)" },
+	[IDIOM_PY_BACKREF] = { "(?P=name)", "use \\k<name>" },
+	[IDIOM_QUOTED_GROUP] = { "(?'name'...)", "use (?<name>...)" },
+	[IDIOM_G_BRACE_NAME] = { "\\g{name}", "use \\k<name>" },
+	[IDIOM_OPEN_INTERVAL] = { "{,n}", "use {0,n}" },
+	[IDIOM_UNBRACED_PROP] = { "an unbraced \\p or \\P",
+			"use \\p{...} - e.g. \\pL is \\p{L}" },
+	[IDIOM_PROP_NEGATION] = { "\\p{^...}",
+			"use \\P{...} (or \\p{...} for \\P{^...})" },
+	[IDIOM_BRANCH_RESET] = { "(?|...)", "branch reset has no ICU equivalent" },
+	[IDIOM_RECURSION] = { "(?R)", "pattern recursion has no ICU equivalent" },
+	[IDIOM_SUBROUTINE] = { "(?n)", "subroutine calls have no ICU equivalent" },
+	[IDIOM_CONDITIONAL] = { "(?(...)...)", "conditionals have no ICU equivalent" },
+	[IDIOM_CONTROL_VERB] = { "(*...)",
+			"backtracking control verbs have no ICU equivalent" },
+	[IDIOM_ESCAPE_N] = { "\\N",
+			"it has no ICU equivalent outside the named form \\N{name}" },
+};
 
 //==========================================================
 // STRING particle interface - function definitions.
@@ -325,6 +390,11 @@ static bool string_parse_list(string_state* state, string_op* op);
 static bool string_parse_flags(string_state* state, string_op* op);
 static bool string_parse_regex_flags_compare(string_state* state, string_op* op);
 static bool string_parse_regex_flags_replace(string_state* state, string_op* op);
+static bool string_parse_regex_pattern(string_state* state, string_op* op);
+static bool string_parse_regex_list(string_state* state, string_op* op);
+
+static const non_icu_idiom* pattern_find_non_icu_idiom(const uint8_t* pattern,
+		uint32_t pattern_sz);
 
 // Prepare functions
 static int string_prepare_read_op(string_state* state, string_op* op);
@@ -530,7 +600,7 @@ static const string_op_def string_modify_op_table[] = {
 	// behavior instead of a policy.
 	STRING_MODIFY_OP_ENTRY(AS_STRING_OP_REGEX_REPLACE, "string_regex_replace",
 			string_modify_op_regex_replace, (STRING_FLAGS_UPDATE_ONLY), 1, 3,
-			string_parse_list, string_parse_regex_flags_replace,
+			string_parse_regex_list, string_parse_regex_flags_replace,
 			string_parse_flags),
 	STRING_MODIFY_OP_ENTRY(AS_STRING_OP_APPEND, "string_append",
 			string_modify_op_append, (STRING_FLAGS_CREATE_CAPABLE), 1, 2,
@@ -574,7 +644,7 @@ static const string_op_def string_read_op_table[] = {
 	STRING_READ_OP_ENTRY(AS_STRING_OP_B64_DECODE, "string_b64_decode",
 			string_read_op_b64_decode, 0, 0),
 	STRING_READ_OP_ENTRY(AS_STRING_OP_REGEX_COMPARE, "string_regex_compare",
-			string_read_op_regex_compare, 1, 2, string_parse_buf,
+			string_read_op_regex_compare, 1, 2, string_parse_regex_pattern,
 			string_parse_regex_flags_compare),
 };
 
@@ -1582,6 +1652,85 @@ string_parse_regex_flags_replace(string_state* state, string_op* op)
 	return string_parse_regex_flags(state, op, STRING_REGEX_FLAGS_REPLACE);
 }
 
+// Rejects regex pattern spellings that are not valid ICU syntax, naming the
+// construct and its ICU spelling where one exists. Runs at op parse, ahead
+// of routing and both engines, so the answer cannot depend on the data and
+// NO_FAIL cannot mask it. Spellings ICU accepts are never touched.
+static bool
+string_check_regex_pattern(string_state* state, const uint8_t* pattern,
+		uint32_t pattern_sz)
+{
+	const non_icu_idiom* idiom = pattern_find_non_icu_idiom(pattern, pattern_sz);
+
+	if (idiom == NULL) {
+		return true;
+	}
+
+	// The construct stays out of the ticker line. cf_ticker_warning() keys its
+	// rate limit on the rendered message, so a value that varies per request
+	// splits one site into one cached entry, and one log line per interval, per
+	// distinct value. This one is bounded - the table has a fixed number of
+	// rows - so it is log volume rather than unbounded growth, and it buys an
+	// operator nothing the error detail below does not already carry.
+	cf_ticker_warning(AS_PARTICLE,
+			"string_check_regex_pattern - error %u op %s (%u) rejected a non-ICU regex construct",
+			AS_ERR_PARAMETER, state->def->name, state->op_type);
+
+	// Same subcode as ICU's own compile reject: a spelling the detector misses
+	// is the identical client mistake reported by the next layer down, and the
+	// detector is best-effort by design, so the two must not be told apart on
+	// the wire. The guidance text is what distinguishes them.
+	as_error_details_set_fmt(AS_SUB_PARAM_STRING_REGEX_INVALID,
+			"%s: %s is not valid ICU regex syntax - %s", state->def->name,
+			idiom->spelling, idiom->guidance);
+
+	return false;
+}
+
+// REGEX_COMPARE's pattern argument.
+static bool
+string_parse_regex_pattern(string_state* state, string_op* op)
+{
+	return string_parse_buf(state, op) &&
+			string_check_regex_pattern(state, op->buf, op->buf_sz);
+}
+
+// REGEX_REPLACE's (pattern, replacement) list: peek the pattern element the
+// way the op itself will and run the same check. Anything malformed here is
+// left for the op's own parsing to reject with its established errors.
+static bool
+string_parse_regex_list(string_state* state, string_op* op)
+{
+	if (! string_parse_list(state, op)) {
+		return false;
+	}
+
+	msgpack_in mp = {
+		.buf = op->buf,
+		.buf_sz = op->buf_sz,
+	};
+
+	uint32_t argc;
+
+	if (! msgpack_get_list_ele_count(&mp, &argc) || argc < 1) {
+		return true;
+	}
+
+	if (msgpack_peek_type(&mp) != MSGPACK_TYPE_STRING) {
+		return true; // the op rejects "pattern is not a string" itself
+	}
+
+	uint32_t pattern_sz;
+	const uint8_t* pattern = msgpack_get_bin(&mp, &pattern_sz);
+
+	if (pattern == NULL || pattern_sz <= 1) {
+		return true;
+	}
+
+	// Skip the one-byte msgpack blob type field, as the op does.
+	return string_check_regex_pattern(state, pattern + 1, pattern_sz - 1);
+}
+
 // Parses the second integer argument into op->int_arg2.
 // Always an exclusive end index (code-point position); normalized in prepare.
 static bool
@@ -2280,6 +2429,16 @@ icu_uerror_to_as_err(UErrorCode status)
 		return -AS_ERR_INVALID_ENCODING;
 	case U_ILLEGAL_ARGUMENT_ERROR:
 		return -AS_ERR_PARAMETER;
+	case U_REGEX_TIME_OUT:
+	case U_REGEX_STACK_OVERFLOW:
+		// Regex-exclusive statuses (uregex_setTimeLimit / setStackLimit), so
+		// setting the detail in this shared mapper cannot mislabel a non-regex
+		// caller's error. The only producer of this subcode: a PCRE2 budget
+		// failure falls through instead of refusing, so every budget refusal
+		// a client sees is authored here.
+		as_error_details_set_fmt(AS_SUB_OPNOT_STRING_REGEX_LIMIT_EXCEEDED,
+				"regex exceeded resource limit; pattern too complex for input");
+		return -AS_ERR_OP_NOT_APPLICABLE;
 	default:
 		// Includes U_BUFFER_OVERFLOW_ERROR (caller sizing bug — already
 		// cf_crash'd at inline sites where overflow is impossible) and
@@ -4461,18 +4620,20 @@ string_read_op_split(const string_op* op, const uint8_t* from, uint32_t sz,
 }
 
 // Thread-local compiled regex cache. Keyed on (pattern bytes, flags).
-// Reusing the compiled URegularExpression avoids the expensive uregex_open
-// that dominates each regex call (e.g. 27us for \d+ due to Unicode class
-// construction). Shared by regex_compare and regex_replace.
+// Reusing the compiled URegularExpression avoids a uregex_open that dominates
+// the call for any pattern naming a Unicode class, where the compile builds the
+// class rather than the match walking it. Shared by regex_compare and
+// regex_replace.
 static __thread URegularExpression* tl_regex;
 static __thread uint8_t* tl_regex_pattern;
 static __thread uint32_t tl_regex_pattern_sz;
 static __thread uint32_t tl_regex_flags;
 
-// PCRE2 thread-local compiled regex cache. For ASCII text, compiled without
-// UTF/UCP flags for maximum speed. For non-ASCII UTF-8 text, compiled with
-// PCRE2_UTF | PCRE2_UCP for native UTF-8 processing without ICU's UTF-16
-// conversion overhead.
+// PCRE2 thread-local compiled regex cache. Always 8-bit byte mode - no
+// PCRE2_UTF, no PCRE2_UCP: the routing gate admits only an ASCII pattern
+// and subject, so UTF would re-validate what is_ascii() established, and
+// UCP would trade the class bitmap for property lookups that cannot change
+// an ASCII answer.
 static __thread pcre2_code* tl_pcre2;
 static __thread uint8_t* tl_pcre2_pattern;
 static __thread uint32_t tl_pcre2_pattern_sz;
@@ -4566,7 +4727,10 @@ get_cached_regex(const uint8_t* pattern, uint32_t pattern_sz, uint32_t flags)
 
 	UErrorCode lim_status = U_ZERO_ERROR;
 
-	uregex_setTimeLimit(tl_regex, STRING_REGEX_ICU_STEP_LIMIT, &lim_status);
+	// Armed here and re-armed per request by each op: the compiled regex
+	// outlives the op that built it, so a caller that forgets still gets a
+	// bounded budget rather than an unbounded one.
+	uregex_setTimeLimit(tl_regex, STRING_REGEX_ICU_QUANTA, &lim_status);
 
 	if (U_FAILURE(lim_status)) {
 		uregex_close(tl_regex);
@@ -4603,8 +4767,7 @@ get_cached_regex(const uint8_t* pattern, uint32_t pattern_sz, uint32_t flags)
 
 // Explicit bit tests, not a table indexed by bit value - this form cannot
 // go out of bounds no matter who calls it or which flag is defined next.
-// string_parse_regex_flags() rejects unknown bits before they get here, so
-// this is defense in depth.
+// Unknown bits are rejected at parse time, so this is defense in depth.
 //
 // GLOBAL has no ICU compile-flag counterpart - regex_replace consumes it
 // directly - so it belongs nowhere in this mapping.
@@ -4652,119 +4815,13 @@ translate_pcre2_flags(uint8_t flags)
 	return result;
 }
 
-// Character-class set syntax is where ICU's UnicodeSet dialect and PCRE2's
-// Perl dialect disagree: ICU reads [[a-z]-[aeiou]] as set difference and
-// [[a-z]&&[^aeiou]] as intersection, while PCRE2 reads both as a union of
-// literals. Teaching PCRE2 the UnicodeSet dialect is not an option -
-// PCRE2_ALT_EXTENDED_CLASS gets '&&', '--' and nested union right, but then
-// takes '||' and '~~' as operators where ICU takes them as literal members,
-// trading one divergence for another. So ICU stays authoritative for class
-// syntax: a pattern whose classes use set syntax skips the PCRE2 fast path
-// and is evaluated by ICU whether or not the input is all-ASCII.
-//
-// Deliberately conservative - a false positive (a trailing literal '-', say)
-// costs that pattern its fast path, never correctness. POSIX names are
-// recognized so the common [[:alpha:]_] shape stays on the fast path.
-static bool
-pattern_has_class_set_syntax(const uint8_t* pattern, uint32_t pattern_sz)
-{
-	bool in_class = false;
-	bool at_class_start = false;
-
-	for (uint32_t i = 0; i < pattern_sz; i++) {
-		uint8_t c = pattern[i];
-
-		if (c == '\\') {
-			i++; // escaped - never a metacharacter in either dialect
-			at_class_start = false;
-			continue;
-		}
-
-		if (! in_class) {
-			if (c == '[') {
-				in_class = true;
-				at_class_start = true;
-
-				if (i + 1 < pattern_sz && pattern[i + 1] == '^') {
-					i++;
-				}
-			}
-
-			continue;
-		}
-
-		if (at_class_start) {
-			at_class_start = false;
-
-			// A ']' first in a class is a Perl-only literal - let ICU rule.
-			if (c == ']') {
-				return true;
-			}
-		}
-
-		if (c == ']') {
-			in_class = false;
-			continue;
-		}
-
-		if (c == '[') {
-			// A POSIX name such as [:alpha:] is a class item both dialects
-			// share, not a nested class.
-			if (i + 1 < pattern_sz && pattern[i + 1] == ':') {
-				uint32_t j = i + 2;
-
-				while (j + 1 < pattern_sz &&
-						! (pattern[j] == ':' && pattern[j + 1] == ']')) {
-					j++;
-				}
-
-				if (j + 1 < pattern_sz) {
-					i = j + 1; // consume through the closing ":]"
-					continue;
-				}
-			}
-
-			return true; // nested class - an ICU set operand
-		}
-
-		if (c == '&') {
-			return true; // ICU intersection
-		}
-
-		if (c == '-') {
-			// A literal-to-literal range ('a-z') means the same thing in both
-			// dialects. A '-' beside a bracket or an escaped class item (say
-			// '[\d-\w]') is ICU set difference.
-			if (i == 0 || i + 1 >= pattern_sz) {
-				return true;
-			}
-
-			uint8_t prev = pattern[i - 1];
-			uint8_t next = pattern[i + 1];
-
-			if (prev == '[' || prev == ']' || next == '[' || next == ']' ||
-					next == '\\') {
-				return true;
-			}
-		}
-	}
-
-	return false;
-}
-
-// Line semantics are the second place the dialects diverge. Aligning the
-// newline convention (see get_cached_pcre2) fixes which characters end a line,
-// but not two behaviors that have no flag: ICU consumes "\r\n" as a single
-// unit for '.' while PCRE2 sees two characters, and the engines disagree about
-// whether a pattern may match empty after a trailing terminator.
-//
-// Neither is reachable when the text holds no line terminator at all - with a
-// single line there are no line boundaries to disagree about, so '^', '$', '.'
-// and '\R' must behave identically. Multi-line text goes to ICU, single-line
-// text keeps the fast path.
-//
-// NEL, LS and PS are line terminators for ICU too, but they are non-ASCII and
-// the caller's is_ascii() check has already routed that text to ICU.
+// Line semantics diverge on a TEXT property, so no pattern allowlist can gate
+// them (pattern_is_engine_agreeing() covers pattern constructs): "\r\n" is one
+// unit to ICU's '.' and two to PCRE2's, and the engines disagree about matching
+// empty after a trailing terminator. Neither is reachable without a line
+// boundary, so multi-line text goes to ICU and single-line text keeps the fast
+// path. NEL, LS and PS end a line for ICU too, but they are non-ASCII, which is
+// already routed.
 static bool
 text_has_line_terminator(const uint8_t* text, uint32_t sz)
 {
@@ -4781,42 +4838,34 @@ text_has_line_terminator(const uint8_t* text, uint32_t sz)
 	return acc != 0;
 }
 
-// The third divergence: constructs one engine parses and the other rejects.
-// PCRE2 accepts Python-style '(?P<n>)' and '(?P=n)', Perl's "(?'n')" and
-// branch reset '(?|...)', '\N' for "any character except a newline", and the
-// open-ended '{,n}' quantifier; ICU rejects all of them. ICU in turn reads
-// '\g' as a literal 'g' where PCRE2 takes it as a subroutine/backreference.
+// A PCRE2 match-time failure never decides the op. Its budgets are our own
+// sizing choices, not properties of the request, so letting one end the op
+// would make the answer depend on the route - PCRE2 runs JIT on a default
+// 32 KB stack where the ICU route gets STRING_REGEX_ICU_STACK_BYTES. Every
+// failure falls through to ICU, and only ICU's refusal reaches a client.
 //
-// Whichever way the disagreement runs, the pattern must not mean one thing on
-// ASCII data and another on non-ASCII data, so these skip the fast path and
-// let ICU give the same answer - or the same error - either way.
-//
-// Conservative like pattern_has_class_set_syntax(): a false positive costs the
+// The split below survives only to word the ticker line. A budget code is
+// expected news on a hard input; anything else means a well-formed request
+// PCRE2 refused, i.e. a routing or setup bug here, and should be read as one.
+static bool
+pcre2_rc_is_budget(int rc)
+{
+	return rc == PCRE2_ERROR_MATCHLIMIT || rc == PCRE2_ERROR_DEPTHLIMIT ||
+			rc == PCRE2_ERROR_HEAPLIMIT || rc == PCRE2_ERROR_JIT_STACKLIMIT ||
+			rc == PCRE2_ERROR_NOMEMORY;
+}
+
+// The replacement string is a dialect of its own, and the engines agree on
+// plain text and nothing else - '\' and '$' both mean different things to
+// each, group references included. So every '\' and '$' routes, and the
+// replacement keeps the fast path only when neither engine has anything to
+// interpret. Conservative like the pattern gates: a false positive costs the
 // fast path, never correctness.
 static bool
-pattern_has_pcre2_only_syntax(const uint8_t* pattern, uint32_t pattern_sz)
+replacement_has_dialect_syntax(const uint8_t* repl, uint32_t repl_sz)
 {
-	for (uint32_t i = 0; i < pattern_sz; i++) {
-		if (pattern[i] == '\\') {
-			if (i + 1 == pattern_sz) {
-				return false;
-			}
-
-			if (pattern[i + 1] == 'N' || pattern[i + 1] == 'g') {
-				return true;
-			}
-
-			i++; // an escaped character is never itself a construct
-			continue;
-		}
-
-		if (pattern[i] == '(' && i + 2 < pattern_sz && pattern[i + 1] == '?' &&
-				(pattern[i + 2] == 'P' || pattern[i + 2] == '\'' ||
-						pattern[i + 2] == '|')) {
-			return true;
-		}
-
-		if (pattern[i] == '{' && i + 1 < pattern_sz && pattern[i + 1] == ',') {
+	for (uint32_t i = 0; i < repl_sz; i++) {
+		if (repl[i] == '\\' || repl[i] == '$') {
 			return true;
 		}
 	}
@@ -4824,30 +4873,863 @@ pattern_has_pcre2_only_syntax(const uint8_t* pattern, uint32_t pattern_sz)
 	return false;
 }
 
-// The replacement string is a dialect of its own. The engines agree on plain
-// text and '$<digit>' group references, and on nothing else: ICU reads '\' as
-// an escape ('\$' is a literal dollar) and rejects a '$' that references no
-// group, while PCRE2 reads '\' literally and '$$' as a literal dollar. Route
-// anything beyond the agreed subset to ICU so both routes give the same
-// answer - or the same error - either way.
-//
-// Conservative like the pattern gates: a false positive costs the fast path,
-// never correctness.
-static bool
-replacement_has_dialect_syntax(const uint8_t* repl, uint32_t repl_sz)
+// Name-span helper: a group name body - \g{name}, (?<name>...) - is an
+// [A-Za-z0-9_] run.
+static inline bool
+pattern_is_name_char(uint8_t c)
 {
-	for (uint32_t i = 0; i < repl_sz; i++) {
-		if (repl[i] == '\\') {
+	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+			(c >= '0' && c <= '9') || c == '_';
+}
+
+// Scan a group-name run starting at 'i', expecting 'close' right after it.
+// Returns the index of 'close', or 0 for "not this construct" - an empty
+// name, a bad name character, or no closing delimiter.
+static uint32_t
+pattern_name_end(const uint8_t* pattern, uint32_t pattern_sz, uint32_t i,
+		uint8_t close)
+{
+	uint32_t start = i;
+
+	while (i < pattern_sz && pattern_is_name_char(pattern[i])) {
+		i++;
+	}
+
+	if (i == start || i >= pattern_sz || pattern[i] != close) {
+		return 0;
+	}
+
+	return i;
+}
+
+// POSIX class name starting at 'i' (pattern[i] == '['): [:name:] or
+// [:^name:], where the name is a nonempty lowercase-letter run. It is one
+// class item in both dialects, whose ']' does not end the enclosing class -
+// so a walk that stops at the first ']' misjudges where the class ends.
+// Returns the index just past the closing ":]", or 0 for "not a well-formed
+// POSIX class name".
+static uint32_t
+pattern_posix_class_end(const uint8_t* pattern, uint32_t pattern_sz, uint32_t i)
+{
+	if (i + 1 >= pattern_sz || pattern[i + 1] != ':') {
+		return 0;
+	}
+
+	uint32_t k = i + 2;
+
+	if (k < pattern_sz && pattern[k] == '^') {
+		k++;
+	}
+
+	uint32_t start = k;
+
+	while (k < pattern_sz && pattern[k] >= 'a' && pattern[k] <= 'z') {
+		k++;
+	}
+
+	if (k == start || k + 1 >= pattern_sz || pattern[k] != ':' ||
+			pattern[k + 1] != ']') {
+		return 0;
+	}
+
+	return k + 2;
+}
+
+// True when the inline flag group whose letters start at @p at - the byte
+// after "(?" - sets free-spacing mode: "(?x)", "(?x:...)", "(?im-sx:...)".
+// Only the flag letters before ':' or ')' are examined, and an unsetting '-x'
+// counts too. The unsetting spelling is conservatism rather than correctness:
+// with free-spacing off, a trigger byte in the body is a real construct that
+// ICU rejects as well, so bailing there can only cost detection, never cause a
+// false rejection. Treating both spellings alike keeps this scan from having to
+// decide which side of the '-' won.
+//
+// The letter set is ICU's own - {i, d, m, s, u, w, x, -}, the 'paren-flag'
+// state in icu4c's regexcst.txt - not PCRE2's. The two differ, and the
+// directions are not symmetric: an extra letter only makes the scan run on
+// through a group ICU rejects anyway, while a missing letter stops the scan
+// before an 'x' it should have seen, and the body is then read under
+// normal-mode rules ICU is not using.
+static bool
+pattern_inline_flags_have_x(const uint8_t* pattern, uint32_t pattern_sz,
+		uint32_t at)
+{
+	for (uint32_t j = at; j < pattern_sz; j++) {
+		uint8_t f = pattern[j];
+
+		if (f == 'x') {
 			return true;
 		}
 
-		if (repl[i] == '$' &&
-				(i + 1 == repl_sz || repl[i + 1] < '0' || repl[i + 1] > '9')) {
-			return true;
+		if (f != 'i' && f != 'd' && f != 'm' && f != 's' && f != 'u' &&
+				f != 'w' && f != '-') {
+			return false;
 		}
 	}
 
 	return false;
+}
+
+// Finds the spellings string_check_regex_pattern() rejects. Constructs ICU
+// accepts are never flagged, even where PCRE2 would read them differently
+// ('\K' is a literal 'K' here, '\g{1}' a quantified literal 'g'); the
+// engine-agreement allowlist keeps those off the fast path so ICU's reading is
+// the only reading.
+//
+// Suppression follows ICU's grammar, not the allowlist scanner's: this walk
+// models set nesting, a leading literal ']' and POSIX names as single items so
+// that bytes ICU reads as class members are not flagged as constructs, while
+// agreeing_class_len() simply returns 0 at the first nested '[', '&' or leading
+// ']' because routing only needs to fail closed. The two therefore disagree
+// about where a class ends, deliberately: one has to keep scanning to stay
+// useful, the other only has to stop. A missed detection is safe - the pattern
+// proceeds to ICU, which rejects it with its generic error - so anything
+// malformed is left alone.
+// Every trigger byte is ASCII and UTF-8 lead/continuation bytes are all
+// >= 0x80, so the scan cannot misread inside a multi-byte sequence.
+static const non_icu_idiom*
+pattern_find_non_icu_idiom(const uint8_t* pattern, uint32_t pattern_sz)
+{
+	uint32_t i = 0;
+	// ICU reads '[' inside a class as a nested set, so the inner ']' does not
+	// end the outer class, and a ']' in first position is a literal member
+	// rather than an empty class. A single "in a class" bool desynchronizes on
+	// both, resuming construct scanning among class members and rejecting
+	// patterns ICU accepts - the one direction that never reaches ICU.
+	uint32_t class_depth = 0;
+	bool at_class_start = false;
+	bool class_negated = false;
+	bool in_qe = false;
+
+	while (i < pattern_sz) {
+		uint8_t c = pattern[i];
+
+		// \Q...\E: everything is literal until \E - no trigger may fire.
+		if (in_qe) {
+			if (c == '\\' && i + 1 < pattern_sz && pattern[i + 1] == 'E') {
+				in_qe = false;
+				i++;
+			}
+
+			i++;
+			continue;
+		}
+
+		if (c == '\\') {
+			if (i + 1 == pattern_sz) {
+				return NULL; // trailing lone backslash - ICU's to reject
+			}
+
+			uint8_t next = pattern[i + 1];
+
+			if (next == 'Q') {
+				in_qe = true;
+				i += 2;
+				continue;
+			}
+
+			at_class_start = false;
+
+			if (class_depth == 0) {
+				if (next == 'N' &&
+						(i + 2 == pattern_sz || pattern[i + 2] != '{')) {
+					return &NON_ICU_IDIOMS[IDIOM_ESCAPE_N];
+				}
+
+				if (next == 'p' || next == 'P') {
+					if (i + 2 == pattern_sz || pattern[i + 2] != '{') {
+						return &NON_ICU_IDIOMS[IDIOM_UNBRACED_PROP];
+					}
+
+					if (i + 3 < pattern_sz && pattern[i + 3] == '^') {
+						return &NON_ICU_IDIOMS[IDIOM_PROP_NEGATION];
+					}
+				}
+
+				if (next == 'g' && i + 2 < pattern_sz && pattern[i + 2] == '{') {
+					// \g{1}...\g{99...} is ICU-valid (a quantified literal
+					// 'g') and stands; \g{name} is an ICU reject.
+					uint32_t end =
+							pattern_name_end(pattern, pattern_sz, i + 3, '}');
+
+					for (uint32_t j = i + 3; j < end; j++) {
+						if (pattern[j] < '0' || pattern[j] > '9') {
+							return &NON_ICU_IDIOMS[IDIOM_G_BRACE_NAME];
+						}
+					}
+				}
+			}
+
+			i += 2;
+			continue;
+		}
+
+		if (class_depth != 0) {
+			if (c == '[') {
+				// A POSIX class name is one class item, not a nested set -
+				// consume it whole so members after it (a literal '{,n}', say)
+				// are not misread as being outside the class. Anything
+				// malformed is left alone.
+				uint32_t end = pattern_posix_class_end(pattern, pattern_sz, i);
+
+				if (end != 0) {
+					i = end;
+					at_class_start = false;
+					continue;
+				}
+
+				class_depth++;
+				at_class_start = true;
+				class_negated = false;
+				i++;
+				continue;
+			}
+
+			if (c == ']') {
+				// First position - "[]a]", "[^]a]" - is a literal member.
+				if (at_class_start) {
+					at_class_start = false;
+					i++;
+					continue;
+				}
+
+				class_depth--;
+				i++;
+				continue;
+			}
+
+			// '^' immediately after the opening bracket negates, and the
+			// position after it is still the class's first - but only that one
+			// caret. A second '^' is an ordinary member, so the ']' in "[^^]"
+			// closes the class rather than joining it.
+			if (at_class_start && c == '^' && ! class_negated) {
+				class_negated = true;
+				i++;
+				continue;
+			}
+
+			at_class_start = false;
+			i++;
+			continue;
+		}
+
+		if (c == '[') {
+			class_depth = 1;
+			at_class_start = true;
+			class_negated = false;
+			i++;
+			continue;
+		}
+
+		if (c == '(' && i + 1 < pattern_sz && pattern[i + 1] == '*') {
+			// (*VERB) backtracking control - '*' after '(' is an ICU reject
+			// in any spelling, so no verb-name validation is needed.
+			return &NON_ICU_IDIOMS[IDIOM_CONTROL_VERB];
+		}
+
+		if (c == '(' && i + 2 < pattern_sz && pattern[i + 1] == '?') {
+			uint8_t g = pattern[i + 2];
+
+			if (g == '#') {
+				// A group comment. Locating ICU's comment end means modelling
+				// three backslash rules - '\Q' opens a quoted run, '\)' ends
+				// the comment because ICU hands the state machine an escaped
+				// character unquoted, and any other escape is inert - and a
+				// scan that gets one wrong resumes inside text ICU reads
+				// differently, rejecting patterns ICU accepts. Stop scanning
+				// instead, as free-spacing does below: a comment costs the
+				// pattern its guided message, never its validity.
+				return NULL;
+			}
+
+			if (pattern_inline_flags_have_x(pattern, pattern_sz, i + 2)) {
+				// Free-spacing mode, where ICU drops unescaped whitespace and
+				// honors '#'-to-end-of-line comments. A flat byte scan cannot
+				// tell a construct from a comment under those rules, and
+				// x-mode routes to ICU whole anyway, so stop scanning instead
+				// of guessing - ICU's own message stands for what it rejects.
+				return NULL;
+			}
+
+			if (g == 'P') {
+				if (i + 3 < pattern_sz && pattern[i + 3] == '=') {
+					return &NON_ICU_IDIOMS[IDIOM_PY_BACKREF];
+				}
+
+				return &NON_ICU_IDIOMS[IDIOM_PY_GROUP];
+			}
+
+			if (g == '\'') {
+				return &NON_ICU_IDIOMS[IDIOM_QUOTED_GROUP];
+			}
+
+			if (g == '|') {
+				return &NON_ICU_IDIOMS[IDIOM_BRANCH_RESET];
+			}
+
+			if (g == 'R') {
+				return &NON_ICU_IDIOMS[IDIOM_RECURSION];
+			}
+
+			if (g >= '0' && g <= '9') {
+				return &NON_ICU_IDIOMS[IDIOM_SUBROUTINE];
+			}
+
+			if (g == '(') {
+				return &NON_ICU_IDIOMS[IDIOM_CONDITIONAL];
+			}
+
+			i++;
+			continue;
+		}
+
+		if (c == '{' && i + 1 < pattern_sz && pattern[i + 1] == ',') {
+			// {,n} - an interval PCRE2 reads as {0,n} and ICU rejects.
+			uint32_t j = i + 2;
+			uint32_t digits = 0;
+
+			while (j < pattern_sz && pattern[j] >= '0' && pattern[j] <= '9') {
+				j++;
+				digits++;
+			}
+
+			if (digits != 0 && j < pattern_sz && pattern[j] == '}') {
+				return &NON_ICU_IDIOMS[IDIOM_OPEN_INTERVAL];
+			}
+		}
+
+		i++;
+	}
+
+	return NULL;
+}
+
+//==========================================================
+// Regex engine-routing allowlist.
+//
+// pattern_is_engine_agreeing() is true when every construct in the pattern
+// is in the set measured to behave identically on PCRE2 and ICU - the fast
+// path runs only then. It is a subset of the ICU syntax we publish, and
+// narrower than what has been measured: constructs whose sub-parser costs
+// more to carry than their speedup is worth are left out on purpose.
+// Because an allowlist false negative costs only the fast path and never
+// correctness, narrowing this list needs no design decision, and widening
+// it again is a pure performance change.
+//
+// Anything unrecognized routes to ICU, the authoritative dialect. The only
+// dangerous direction is accepting a construct PCRE2 answers differently
+// than ICU would; a construct BOTH engines reject is also safe to accept
+// (PCRE2 compile failure falls back to ICU for the message). When in doubt,
+// reject. Each sub-scanner returns bytes consumed, or 0 for "not agreeing".
+//
+
+// Braced Unicode property names measured agreeing: the standard general-
+// category codes, Script=<name>, and the measured bare names. Java-only
+// spellings (\p{IsLatin}, \p{gc=L}, \p{Alnum}) are deliberately absent -
+// PCRE2 rejects them, so they belong to ICU. Bare script names beyond the
+// measured set (\p{Greek}, ...) also fall to ICU until measured.
+static bool
+agreeing_property_name(const uint8_t* name, uint32_t name_sz)
+{
+	static const char* const gc_codes[] = { "L", "Lu", "Ll", "Lt", "Lm", "Lo",
+		"M", "Mn", "Mc", "Me", "N", "Nd", "Nl", "No", "P", "Pc", "Pd", "Ps",
+		"Pe", "Pi", "Pf", "Po", "S", "Sm", "Sc", "Sk", "So", "Z", "Zs", "Zl",
+		"Zp", "C", "Cc", "Cf", "Co", "Cs", "Cn" };
+
+	static const char* const bare_names[] = { "Latin", "Alpha", "Any" };
+
+	for (uint32_t n = 0; n < sizeof(gc_codes) / sizeof(gc_codes[0]); n++) {
+		if (strlen(gc_codes[n]) == name_sz &&
+				memcmp(name, gc_codes[n], name_sz) == 0) {
+			return true;
+		}
+	}
+
+	for (uint32_t n = 0; n < sizeof(bare_names) / sizeof(bare_names[0]); n++) {
+		if (strlen(bare_names[n]) == name_sz &&
+				memcmp(name, bare_names[n], name_sz) == 0) {
+			return true;
+		}
+	}
+
+	if (name_sz > 7 && memcmp(name, "Script=", 7) == 0) {
+		for (uint32_t n = 7; n < name_sz; n++) {
+			if (! ((name[n] >= 'A' && name[n] <= 'Z') ||
+						(name[n] >= 'a' && name[n] <= 'z'))) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	return false;
+}
+
+// "\p{Name}" / "\P{Name}" starting at i (pattern[i] == '\\'). Internal
+// negation \p{^...} is not valid ICU syntax and is rejected at parse time, so
+// it cannot reach here.
+static uint32_t
+agreeing_property_len(const uint8_t* pattern, uint32_t pattern_sz, uint32_t i)
+{
+	if (i + 2 >= pattern_sz || pattern[i + 2] != '{') {
+		return 0;
+	}
+
+	uint32_t j = i + 3;
+
+	while (j < pattern_sz && pattern[j] != '}') {
+		j++;
+	}
+
+	if (j >= pattern_sz ||
+			! agreeing_property_name(pattern + i + 3, j - (i + 3))) {
+		return 0;
+	}
+
+	return j - i + 1;
+}
+
+// Escape starting at i (pattern[i] == '\\'), outside character classes.
+static uint32_t
+agreeing_escape_len(const uint8_t* pattern, uint32_t pattern_sz, uint32_t i)
+{
+	if (i + 1 >= pattern_sz) {
+		return 0; // trailing lone backslash - both reject; let ICU say so
+	}
+
+	uint8_t c = pattern[i + 1];
+
+	switch (c) {
+	// Single-token escapes measured agreeing on both engines.
+	case 'w':
+	case 'W':
+	case 'd':
+	case 'D':
+	case 's':
+	case 'S':
+	case 'b':
+	case 'B':
+	case 'h':
+	case 'H':
+	case 'v':
+	case 'V':
+	case 'R':
+	case 'X':
+	case 'A':
+	case 'z':
+	case 'Z':
+	case 'G':
+	case 'e':
+	// Fixed-character escapes: both engines document the identical single
+	// character (LF, CR, TAB, FF, BEL) - no room for divergence.
+	case 'n':
+	case 'r':
+	case 't':
+	case 'f':
+	case 'a':
+		return 2;
+	case 'p':
+	case 'P':
+		return agreeing_property_len(pattern, pattern_sz, i);
+	default:
+		// Escaped punctuation is a literal in both dialects. Every remaining
+		// alphanumeric escape routes: the ones the dialects genuinely read
+		// differently (\K, \o, \N, \g, \E, \0, \u, \L, ...), and the ones
+		// withheld from the fast path though both engines agree - \Q...\E,
+		// \x{hex}, \cX, \k<name> and the \1-\9 backreferences.
+		if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+				(c >= '0' && c <= '9')) {
+			return 0;
+		}
+		return 2;
+	}
+}
+
+// Replace is the op where "every construct agrees" is not enough.
+// After an empty match the two engines' loops part company: PCRE2 retries the
+// same position demanding a non-empty match and takes it where there is one,
+// while ICU emits the empty match and steps over one character - so "(|a)" on
+// "ab" replaces to "xxxbx" on PCRE2 and "xaxbx" on ICU. A differential sweep
+// over the admitted grammar puts the divergences it finds in that one class,
+// so a pattern that can match nothing takes ICU for either replace form.
+//
+// Deliberately crude, and checked on both replace forms - outside the routing
+// walk, so compare pays nothing and a replace pays one extra pass over the
+// pattern. It looks for the bytes that can make a match optional without
+// tokenizing, so a "(?:" intro and a non-nullable "a|b" both read as
+// suspicious. An escaped "\?" does not, and correctly so: the scan steps over
+// an escape's operand, and a literal '?' cannot match empty. An escaped
+// "\\?" is flagged, also correctly - the escape consumes the second
+// backslash and the bare '?' left over makes the first one optional. That
+// direction is the safe one - a false positive costs a replace its fast path,
+// a false negative would be a wrong answer - and no pattern can match empty
+// without one of these bytes: something has to be optional, zero-width, or an
+// empty branch.
+static bool
+pattern_may_match_empty(const uint8_t* pattern, uint32_t pattern_sz)
+{
+	for (uint32_t i = 0; i < pattern_sz; i++) {
+		uint8_t c = pattern[i];
+
+		// '*' and '?' quantify to nothing, '|' may open or close an empty
+		// branch, and the anchors match between characters.
+		if (c == '*' || c == '?' || c == '|' || c == '^' || c == '$') {
+			return true;
+		}
+
+		if (c == '{' && i + 1 < pattern_sz && pattern[i + 1] == '0') {
+			return true; // "{0}", "{0,3}"
+		}
+
+		// An empty group, "()", matches nothing and carries none of the bytes
+		// above. "(?:)" and the rest of the "(?" intros hold a '?' already.
+		if (c == '(' && i + 1 < pattern_sz && pattern[i + 1] == ')') {
+			return true;
+		}
+
+		if (c == '\\' && i + 1 < pattern_sz) {
+			uint8_t e = pattern[i + 1];
+
+			// The zero-width assertions. Every other escape consumes, and
+			// its operand cannot be a marker of its own.
+			if (e == 'b' || e == 'B' || e == 'A' || e == 'z' || e == 'Z' ||
+					e == 'G') {
+				return true;
+			}
+
+			i++;
+		}
+	}
+
+	return pattern_sz == 0;
+}
+
+// Bracket class starting at i (pattern[i] == '['), through its closing ']':
+// literal members, literal-to-literal ranges and property escapes. ICU set
+// operations ('&', '-' anywhere but a range) and Perl-only leading-']'
+// literals are not in this grammar. Neither is any nested '[', including the
+// POSIX class names both dialects share, nor any other escaped member.
+static uint32_t
+agreeing_class_len(const uint8_t* pattern, uint32_t pattern_sz, uint32_t i)
+{
+	uint32_t j = i + 1;
+
+	if (j < pattern_sz && pattern[j] == '^') {
+		j++;
+	}
+
+	// A leading ']' is a literal member to ICU as well as to Perl, so this is
+	// not a dialect split - the class grammar it opens is simply outside the
+	// agreeing set, and routing does not need to model it.
+	if (j < pattern_sz && pattern[j] == ']') {
+		return 0;
+	}
+
+	bool prev_literal = false;
+
+	while (j < pattern_sz && pattern[j] != ']') {
+		uint8_t c = pattern[j];
+
+		if (c == '\\') {
+			// A property escape is the only one a class admits. The class
+			// escapes (\d, \w, ...) and the escaped-punctuation members
+			// measure agreeing and are withheld anyway: each keeps an
+			// unescaped spelling on the fast path - "[0-9]" for "[\d]" - and
+			// only ']' has no unescaped spelling to keep.
+			if (j + 1 >= pattern_sz ||
+					(pattern[j + 1] != 'p' && pattern[j + 1] != 'P')) {
+				return 0;
+			}
+
+			uint32_t n = agreeing_property_len(pattern, pattern_sz, j);
+
+			if (n == 0) {
+				return 0;
+			}
+
+			j += n;
+			prev_literal = false;
+			continue;
+		}
+
+		if (c == '[') {
+			return 0; // ICU set operand, or a POSIX name - both route
+		}
+
+		if (c == '&') {
+			return 0; // ICU intersection
+		}
+
+		if (c == '-') {
+			// Only a literal-to-literal range ('a-z'). A '-' beside a
+			// bracket, an escape, another '-', or at either end of the class
+			// is ICU set difference or a Perl-only literal.
+			if (! prev_literal || j + 1 >= pattern_sz) {
+				return 0;
+			}
+
+			uint8_t n = pattern[j + 1];
+
+			if (n == ']' || n == '[' || n == '\\' || n == '-' || n == '&') {
+				return 0;
+			}
+
+			j += 2; // the '-' and the range end
+			prev_literal = false;
+			continue;
+		}
+
+		j++;
+		prev_literal = true;
+	}
+
+	if (j >= pattern_sz) {
+		return 0; // unterminated class
+	}
+
+	return j - i + 1;
+}
+
+// Bounded quantifier starting at i (pattern[i] == '{'), through its closing
+// '}': the forms {n}, {n,} and {n,m}. A '{' that is not one of those is a
+// literal to PCRE2 but an error to ICU, and a lazy or possessive suffix on it
+// is measured divergent - both route. Whether a quantifier is legal where it
+// stands is the walk's business, not this scanner's.
+static uint32_t
+agreeing_interval_len(const uint8_t* pattern, uint32_t pattern_sz, uint32_t i)
+{
+	uint32_t j = i + 1;
+	uint32_t digits = 0;
+	// Both bounds accumulate saturating, so a digit run long enough to wrap a
+	// uint32_t cannot land on an accepted small value - "a{1,99999999999}"
+	// must route, not pass.
+	uint32_t lo = 0;
+	uint32_t hi = 0;
+	uint32_t hi_digits = 0;
+
+	while (j < pattern_sz && pattern[j] >= '0' && pattern[j] <= '9') {
+		if (lo <= STRING_REGEX_MAX_FAST_PATH_REPEAT) {
+			lo = (lo * 10) + (uint32_t)(pattern[j] - '0');
+		}
+
+		j++;
+		digits++;
+	}
+
+	if (digits == 0) {
+		return 0;
+	}
+
+	if (j < pattern_sz && pattern[j] == ',') {
+		j++;
+
+		while (j < pattern_sz && pattern[j] >= '0' && pattern[j] <= '9') {
+			if (hi <= STRING_REGEX_MAX_FAST_PATH_REPEAT) {
+				hi = (hi * 10) + (uint32_t)(pattern[j] - '0');
+			}
+
+			j++;
+			hi_digits++;
+		}
+	}
+
+	// "{n,m}" costs m; "{n}" and the open-ended "{n,}" cost n, since n
+	// matches are mandatory at every start position either way.
+	uint32_t bound = hi_digits != 0 ? hi : lo;
+
+	if (j >= pattern_sz || pattern[j] != '}') {
+		return 0;
+	}
+
+	if (bound > STRING_REGEX_MAX_FAST_PATH_REPEAT) {
+		return 0;
+	}
+
+	if (j + 1 < pattern_sz && (pattern[j + 1] == '?' || pattern[j + 1] == '+')) {
+		return 0; // lazy or possessive - see the quantifier gate in the walk
+	}
+
+	return j + 1 - i;
+}
+
+// Group intro starting at i (pattern[i] == '('). Validates only the intro;
+// the group body is not part of this scan.
+static uint32_t
+agreeing_group_len(const uint8_t* pattern, uint32_t pattern_sz, uint32_t i)
+{
+	if (i + 1 >= pattern_sz || pattern[i + 1] != '?') {
+		// (* is PCRE2's control-verb intro, not a capturing group - excluded
+		// here too so this layer stands without the detector's rejection.
+		if (i + 1 < pattern_sz && pattern[i + 1] == '*') {
+			return 0;
+		}
+
+		return 1; // plain capturing group
+	}
+
+	if (i + 2 >= pattern_sz) {
+		return 0;
+	}
+
+	uint8_t c = pattern[i + 2];
+
+	switch (c) {
+	case ':': // non-capturing
+	case '=': // lookahead
+	case '!': // negative lookahead
+	case '>': // atomic group
+		return 3;
+	case '<':
+		// Lookbehind, and the named group that shares the intro, both route.
+		// ICU's lookbehind rules are not cheaply restatable here, and a rule
+		// that cannot be restated cannot be gated shape by shape, so the whole
+		// construct goes. Lookahead is unaffected and stays.
+		return 0;
+	default:
+		// Everything else routes: the forms with no ICU equivalent or a
+		// divergent reading ((?P, (?', (?|, (?(, (?R, (?1, (?&, and the 'x'
+		// flag, whose comments mode strips whitespace inside character
+		// classes on ICU but not on PCRE2), and the (?#comment) and inline
+		// i/m/s flag groups, which both engines agree on but which are
+		// withheld from the fast path.
+		return 0;
+	}
+}
+
+static bool
+pattern_is_engine_agreeing(const uint8_t* pattern, uint32_t pattern_sz)
+{
+	uint32_t i = 0;
+
+	// A quantified lookahead - "(?=a)+" - is legal to PCRE2 and a compile
+	// error to ICU, so the fast path would answer a pattern the dialect
+	// rejects. Catching it needs to know which ')' closed a lookahead: a depth
+	// counter, one bit per depth marking a lookaround, and the index of the
+	// last ')' that closed one. All three move on '(' and ')' bytes only.
+	uint32_t depth = 0;
+	uint64_t lookaround_depths = 0;
+	uint32_t lookaround_close = UINT32_MAX;
+
+	// UINT32_MAX + 1 wraps to 0, so the "none seen yet" sentinel needs its own
+	// test - a bare "i == lookaround_close + 1" reads index 0 as being just
+	// after a lookaround.
+#define AFTER_LOOKAROUND(idx)                                                  \
+	(lookaround_close != UINT32_MAX && (idx) == lookaround_close + 1)
+
+	// A quantifier with nothing in front of it. Both engines reject every
+	// spelling, so either route reaches the same answer, but checking it here
+	// (rather than leaning on the wrapped sentinel, which caught it by
+	// accident) keeps a pointless PCRE2 compile off the path. Outside the walk
+	// so the hot loop pays nothing for it.
+	if (pattern_sz != 0 &&
+			(pattern[0] == '*' || pattern[0] == '+' || pattern[0] == '?' ||
+					pattern[0] == '{')) {
+		return false;
+	}
+
+	while (i < pattern_sz) {
+		uint8_t c = pattern[i];
+
+		if (c == '\\') {
+			uint32_t n = agreeing_escape_len(pattern, pattern_sz, i);
+
+			if (n == 0) {
+				return false;
+			}
+
+			i += n;
+			continue;
+		}
+
+		if (c == '[') {
+			uint32_t n = agreeing_class_len(pattern, pattern_sz, i);
+
+			if (n == 0) {
+				return false;
+			}
+
+			i += n;
+			continue;
+		}
+
+		if (c == '(') {
+			uint32_t n = agreeing_group_len(pattern, pattern_sz, i);
+
+			if (n == 0) {
+				return false;
+			}
+
+			if (depth == 64) {
+				return false; // deeper than the mask tracks
+			}
+
+			// "(?=" and "(?!" - lookbehind no longer reaches here, so an
+			// intro of 3 ending in '=' or '!' is the whole of it.
+			bool lookaround = n == 3 &&
+					(pattern[i + 2] == '=' || pattern[i + 2] == '!');
+
+			lookaround_depths = lookaround
+					? lookaround_depths | ((uint64_t)1 << depth)
+					: lookaround_depths & ~((uint64_t)1 << depth);
+			depth++;
+
+			i += n;
+			continue;
+		}
+
+		if (c == '{') {
+			if (AFTER_LOOKAROUND(i)) {
+				return false; // "(?=a){2}" - ICU rejects it
+			}
+
+			uint32_t n = agreeing_interval_len(pattern, pattern_sz, i);
+
+			if (n == 0) {
+				return false;
+			}
+
+			i += n;
+			continue;
+		}
+
+		if (c == '}' || c == ']') {
+			// Bare closers: literals to PCRE2, unmeasured on ICU - route.
+			return false;
+		}
+
+		if ((c == '*' || c == '+' || c == '?') && AFTER_LOOKAROUND(i)) {
+			return false; // "(?=a)+", "(?!a)*" - ICU rejects them
+		}
+
+		if (c == ')' && depth != 0) {
+			depth--;
+
+			if (((lookaround_depths >> depth) & 1) != 0) {
+				lookaround_close = i;
+			}
+		}
+
+		if ((c == '*' || c == '+' || c == '?') && i + 1 < pattern_sz &&
+				(pattern[i + 1] == '?' || pattern[i + 1] == '+')) {
+			// Lazy and possessive quantifiers are both measured divergent -
+			// lazy after a zero-length match in a global replace, possessive
+			// inside a lookbehind. Both are interactions with an enclosing
+			// construct, and the depth state this walk keeps says how deep a
+			// quantifier sits, not what encloses it - so the families go
+			// rather than the shapes.
+			return false;
+		}
+
+		// Literals, '.', '^', '$', '*', '+', '?', '|', ')' - all single
+		// agreeing elements. (Non-ASCII bytes can't reach the fast path,
+		// which is separately gated on is_ascii().)
+		i++;
+	}
+
+	return true;
+
+#undef AFTER_LOOKAROUND
 }
 
 static pcre2_code*
@@ -4949,12 +5831,11 @@ string_read_op_regex_compare(const string_op* op, const uint8_t* from,
 	// PCRE2 byte-mode fast path requires both haystack AND pattern to be
 	// ASCII. A non-ASCII pattern needs ICU's full (1-to-many) Unicode case
 	// folding under CASE_INSENSITIVE (e.g. 'ß' -> "ss"); PCRE2_CASELESS
-	// without PCRE2_UCP only folds within ASCII. Class-set syntax, PCRE2-only
-	// syntax and multi-line text go to ICU too - the two engines read each of
-	// them differently.
+	// without PCRE2_UCP only folds within ASCII. A pattern carrying any
+	// construct outside the agreeing set, and multi-line text, go to ICU too -
+	// the two engines read each of them differently.
 	if (is_ascii(from, sz) && is_ascii(op->buf, op->buf_sz) &&
-			! pattern_has_class_set_syntax(op->buf, op->buf_sz) &&
-			! pattern_has_pcre2_only_syntax(op->buf, op->buf_sz) &&
+			pattern_is_engine_agreeing(op->buf, op->buf_sz) &&
 			! text_has_line_terminator(from, sz)) {
 		uint8_t raw_flags = op->int_arg1;
 		uint32_t pcre2_flags = translate_pcre2_flags(raw_flags);
@@ -4962,12 +5843,35 @@ string_read_op_regex_compare(const string_op* op, const uint8_t* from,
 		pcre2_code* re =
 				get_cached_pcre2(op->buf, op->buf_sz, pcre2_flags, unix_lines);
 
-		if (re != NULL) {
+		if (re == NULL) {
+			// Compile-time failure only - fall through to ICU, which either
+			// answers (Java-style spellings PCRE2 lacks) or rejects with its
+			// own message. Ticker because this should be rare: a pattern the
+			// routing gates passed but PCRE2 could not compile.
+			cf_ticker_warning(AS_PARTICLE,
+					"string_read_op_regex_compare - PCRE2 rejected a fast-path pattern, falling back to ICU");
+		}
+		else {
 			int rc = pcre2_match(re, from, sz, 0, 0, tl_pcre2_md, tl_pcre2_mctx);
 
-			rb->particle = (as_particle*)(uint64_t)(rc >= 0);
-			as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_BOOL);
-			return AS_OK;
+			if (rc > 0 || rc == PCRE2_ERROR_NOMATCH) {
+				// rc == 0 means "matched, ovector too small", which cannot
+				// happen here - tl_pcre2_md is sized from the pattern's own
+				// capture count. It falls through to ICU with every other
+				// non-NOMATCH code rather than being mapped: the one mapping
+				// that would be wrong is reporting a declared match as a
+				// non-match, and no PCRE2 outcome decides this op.
+				rb->particle = (as_particle*)(uint64_t)(rc > 0);
+				as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_BOOL);
+				return AS_OK;
+			}
+
+			// Fall through to ICU - see pcre2_rc_is_budget().
+			cf_ticker_warning(AS_PARTICLE,
+					pcre2_rc_is_budget(rc)
+							? "string_read_op_regex_compare - pcre2_match exceeded a PCRE2 budget, falling back to ICU (rc %d)"
+							: "string_read_op_regex_compare - pcre2_match failed on a fast-path request, falling back to ICU (rc %d)",
+					rc);
 		}
 	}
 
@@ -4983,28 +5887,51 @@ string_read_op_regex_compare(const string_op* op, const uint8_t* from,
 		return -AS_ERR_PARAMETER;
 	}
 
+	// The subject goes to ICU as UTF-16, the way regex_replace already does it.
+	// ICU answers some zero-width patterns differently over a UTF-8 UText
+	// subject than over UTF-16, so both ops have to use one mode or they
+	// disagree with each other. UTF-16 is the mode that agrees with PCRE2, and
+	// the one replace cannot avoid. The pattern still compiles from UTF-8.
 	UErrorCode status = U_ZERO_ERROR;
-	UText ut_text = UTEXT_INITIALIZER;
-	utext_openUTF8(&ut_text, (const char*)from, sz, &status);
+	UChar text_stack[STRING_OP_STACK_BUF_SZ];
+	DEFER_ATTR_FREE void* text_heap = NULL;
+	int32_t text_len;
+	UChar* text_u16;
+
+	// Unlike utext_openUTF8(), this refuses ill-formed UTF-8 - which no
+	// subject reaching here can be: string_read() validates the bin and
+	// returns AS_ERR_INVALID_ENCODING before dispatching to any read op.
+	int convert_rc = utf8_to_u16(from, sz, text_stack, STRING_OP_STACK_BUF_SZ,
+			&text_u16, &text_len, &text_heap);
+
+	if (convert_rc != AS_OK) {
+		cf_ticker_warning(AS_PARTICLE,
+				"string_read_op_regex_compare - input UTF-8 to UTF-16 failed: %d",
+				convert_rc);
+		return convert_rc;
+	}
+
+	// Per request, not per compile: the cached regex outlives the op that
+	// compiled it, so the budget is re-armed rather than inherited.
+	uregex_setTimeLimit(regex, STRING_REGEX_ICU_QUANTA, &status);
 
 	if (U_FAILURE(status)) {
 		cf_ticker_warning(AS_PARTICLE,
-				"string_read_op_regex_compare - text utext_openUTF8 failed with status: %d",
+				"string_read_op_regex_compare - uregex_setTimeLimit failed with status: %d",
 				status);
 		return icu_uerror_to_as_err(status);
 	}
 
-	uregex_setUText(regex, &ut_text, &status);
+	uregex_setText(regex, text_u16, text_len, &status);
+
 	if (U_FAILURE(status)) {
-		utext_close(&ut_text);
 		cf_ticker_warning(AS_PARTICLE,
-				"string_read_op_regex_compare - uregex_setUText failed with status: %d",
+				"string_read_op_regex_compare - uregex_setText failed with status: %d",
 				status);
 		return icu_uerror_to_as_err(status);
 	}
 
 	UBool found = uregex_find(regex, 0, &status);
-	utext_close(&ut_text);
 
 	if (U_FAILURE(status)) {
 		cf_ticker_warning(AS_PARTICLE,
@@ -5028,7 +5955,17 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 	};
 
 	uint32_t argc;
-	msgpack_get_list_ele_count(&mp, &argc);
+
+	// msgpack_get_list_ele_count() leaves argc unwritten when the element is
+	// not a list at all, so the count is only reportable once it succeeds.
+	if (! msgpack_get_list_ele_count(&mp, &argc)) {
+		cf_ticker_warning(AS_PARTICLE,
+				"string_modify_op_regex_replace - error %u arg is not a list",
+				AS_ERR_PARAMETER);
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"string_regex_replace: arg is not a 2-element list");
+		return -AS_ERR_PARAMETER;
+	}
 
 	if (argc != 2) {
 		cf_ticker_warning(AS_PARTICLE,
@@ -5150,10 +6087,17 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 	// ICU so replace agrees with compare on what matches - PCRE2 has only
 	// simple case folding under CASELESS (even with UTF/UCP), not ICU's full
 	// (1-to-many) folding (e.g. 'ß' -> "ss").
+	//
+	// And a second: a pattern that can match nothing takes
+	// ICU (see pattern_may_match_empty). A global replace is where that shows
+	// up most - the engines' loops disagree over what follows an empty match -
+	// but replace-first diverges too on shapes where an empty match competes
+	// with a non-empty one, so the gate covers both rather than reasoning about
+	// which is which.
 	if (is_ascii(pattern_raw, pattern_raw_sz) && is_ascii(from, old_sz) &&
 			is_ascii(repl_raw, repl_raw_sz) &&
-			! pattern_has_class_set_syntax(pattern_raw, pattern_raw_sz) &&
-			! pattern_has_pcre2_only_syntax(pattern_raw, pattern_raw_sz) &&
+			pattern_is_engine_agreeing(pattern_raw, pattern_raw_sz) &&
+			! pattern_may_match_empty(pattern_raw, pattern_raw_sz) &&
 			! replacement_has_dialect_syntax(repl_raw, repl_raw_sz) &&
 			! text_has_line_terminator(from, old_sz)) {
 		uint32_t pcre2_flags = translate_pcre2_flags(raw_flags);
@@ -5161,23 +6105,46 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 		pcre2_code* re = get_cached_pcre2(pattern_raw, pattern_raw_sz,
 				pcre2_flags, unix_lines);
 
-		if (re != NULL) {
+		if (re == NULL) {
+			// Compile-time failure only - fall through to ICU, matching
+			// string_read_op_regex_compare. Ticker because this should be
+			// rare: a pattern the routing gates passed but PCRE2 rejected.
+			cf_ticker_warning(AS_PARTICLE,
+					"string_modify_op_regex_replace - PCRE2 rejected a fast-path pattern, falling back to ICU");
+		}
+		else {
 			uint32_t sub_opts = PCRE2_SUBSTITUTE_OVERFLOW_LENGTH;
 
 			if (global) {
 				sub_opts |= PCRE2_SUBSTITUTE_GLOBAL;
 			}
 
+			// +1: pcre2_substitute() requires room for a trailing NUL beyond
+			// the result - without it an empty subject with an empty
+			// replacement computes a zero cap and NOMEMORYs. Still within the
+			// caller's allocation, which was sized from the whole msgpack arg
+			// list (>= pattern + replacement + headers).
 			PCRE2_SIZE out_cap =
-					(PCRE2_SIZE)(old_sz + (old_sz + 1) * repl_raw_sz) * 3;
+					(PCRE2_SIZE)(old_sz + (old_sz + 1) * repl_raw_sz) * 3 + 1;
 			PCRE2_SIZE outlength = out_cap;
 			int rc = pcre2_substitute(re, from, old_sz, 0, sub_opts, tl_pcre2_md,
 					tl_pcre2_mctx, repl_raw, repl_raw_sz, to, &outlength);
 
+			// rc == 0 is success with zero matches - subject copied through.
 			if (rc >= 0) {
 				*new_sz = (uint32_t)outlength;
 				return AS_OK;
 			}
+
+			// Fall through to ICU, which rewrites 'to' and *new_sz from
+			// scratch - see pcre2_rc_is_budget(). NOMEMORY is not reachable
+			// with the trailing NUL accounted for above, but takes the same
+			// route rather than trusting that invariant.
+			cf_ticker_warning(AS_PARTICLE,
+					pcre2_rc_is_budget(rc)
+							? "string_modify_op_regex_replace - pcre2_substitute exceeded a PCRE2 budget, falling back to ICU (rc %d)"
+							: "string_modify_op_regex_replace - pcre2_substitute failed on a fast-path request, falling back to ICU (rc %d)",
+					rc);
 		}
 	}
 
@@ -5223,6 +6190,19 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 				"string_modify_op_regex_replace - input UTF-8 to UTF-16 failed: %d",
 				convert_rc);
 		return convert_rc;
+	}
+
+	// Per request, not per compile: the cached regex outlives the op that
+	// compiled it, so a budget sized for one subject must not carry over. The
+	// limit stays armed across the buffer-overflow retry below - only the
+	// timer resets there, and one whole replace shares one budget.
+	uregex_setTimeLimit(regex, STRING_REGEX_ICU_QUANTA, &status);
+
+	if (U_FAILURE(status)) {
+		cf_ticker_warning(AS_PARTICLE,
+				"string_modify_op_regex_replace - uregex_setTimeLimit failed with status: %d",
+				status);
+		return icu_uerror_to_as_err(status);
 	}
 
 	uregex_setText(regex, text_u16, text_len, &status);
