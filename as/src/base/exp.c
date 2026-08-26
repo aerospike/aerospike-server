@@ -4369,9 +4369,22 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	}
 
 	if (! bin_is_type(b, op->type)) {
-		if (! is_modify_local || bin_arg.type == RT_BIN ||
-				old.particle != b->particle) {
-			if (rt_value_need_destroy(&bin_arg, &old, b)) {
+		if (is_modify_local) {
+			bool live_noop = bin_arg.type == RT_BIN_PTR &&
+					bin_arg.r_bin_p->particle == b->particle;
+			bool borrowed_unchanged = bin_arg.type == RT_BIN &&
+					bin_arg.do_not_destroy && old.particle == b->particle;
+
+			if (! live_noop && ! borrowed_unchanged) {
+				as_bin_particle_destroy(b);
+			}
+		}
+		else {
+			const as_particle* bin_arg_p = bin_arg.type == RT_BIN_PTR
+					? bin_arg.r_bin_p->particle
+					: bin_arg.r_bin.particle;
+
+			if (b->particle != bin_arg_p) { // not a no-op
 				as_bin_particle_destroy(b);
 			}
 		}
@@ -4391,7 +4404,13 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 		ret_val->type = RT_BIN;
 		ret_val->r_bin = *b;
-		ret_val->do_not_destroy = rt_value_keep_do_not_destroy(&bin_arg, b);
+		// Keep the borrowed (slot-owned) status only if the modify left the
+		// particle unchanged; a reallocated result is owned by this value.
+		// Only RT_BIN has a snapshot to compare against -- a bin reached by
+		// pointer aliases old, so the test would always hold there and a
+		// reallocated result would be kept borrowed and never freed.
+		ret_val->do_not_destroy = bin_arg.type == RT_BIN &&
+				bin_arg.do_not_destroy && old.particle == b->particle;
 		return;
 	}
 
