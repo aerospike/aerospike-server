@@ -23,11 +23,10 @@
 #pragma once
 
 //==========================================================
-// Expression runtime types shared by exp.c (build + op_table) and exp_rt.c
-// (eval). These are the in-memory layout of the compiled op nodes plus the
-// eval-time scratch types. exp.c writes op nodes during the build/AEL passes;
-// exp_rt.c reads them during eval -- so the definitions must be visible to
-// both TUs, hence this header.
+// Expression runtime types shared by the build and eval paths. These are the
+// in-memory layout of the compiled op nodes plus the eval-time scratch types.
+// The wire and AEL builds write op nodes and eval reads them, so the
+// definitions must be visible to more than one TU -- hence this header.
 //
 // Naming: types carry an `exp_` prefix here. Each .c keeps its bodies
 // churn-free with a local short alias, e.g.
@@ -274,8 +273,8 @@ typedef struct exp_runtime_s {
 } exp_runtime;
 
 //==========================================================
-// Eval / display callbacks (defined in exp_rt.c) -- op_table in exp.c wires
-// these, and each family cross-references within exp_rt.c. Uniform signatures:
+// Eval / display callbacks -- the op_table wires these, and each family
+// cross-references its siblings. Uniform signatures:
 //   eval_cb:    void (exp_runtime*, const exp_op_base_mem*, exp_rt_value*)
 //   display_cb: void (exp_runtime*, const exp_op_base_mem*, cf_dyn_buf*)
 //
@@ -365,18 +364,15 @@ EXP_DISPLAY_DECL(call);
 EXP_DISPLAY_DECL(value);
 EXP_DISPLAY_DECL(case);
 
-// Debug display driver -- built in exp_rt.c, also invoked by exp.c's
-// build_internal_ael CF_DETAIL block.
 void exp_rt_display(exp_runtime* rt, cf_dyn_buf* db);
 
 //==========================================================
-// Symbols defined in exp_rt.c that the build path (exp.c) also uses. (exp.c's
-// own shared helpers -- exp_rtype_to_str, exp_geo_mp_to_op -- are declared in
-// exp.h alongside the other exp.c exports.)
+// Eval-side symbols the build path also uses. The build's own shared helpers
+// are declared in exp.h instead.
 //
 
 // Sentinel marking a call vec slot that eval fills from a sub-expression.
-// One shared symbol so build (exp.c) sets and eval compares the SAME address.
+// One shared symbol so the build sets and eval compares the SAME address.
 extern const uint8_t exp_call_eval_token[1];
 
 as_particle_type exp_rtype_to_particle_type(exp_rtype type);
@@ -387,10 +383,10 @@ as_particle_type exp_rtype_to_particle_type(exp_rtype type);
 // pass and is an upper bound (left-folded chains size per AST node, emit one
 // op); trailing entries stay zeroed and are never indexed - runtime op_ix is
 // always < the root op's instr_end_ix, the emitted count. Laid out in the
-// compiled buffer (as_exp.ael_map) by the build (exp.c) so a runtime
-// error-details trace (exp_rt.c) can render the true source slice instead of
-// an op-stream disassembly. AST offsets are 24-bit and spans clamp to 255
-// (ast_node), so an entry packs into 4 bytes.
+// compiled buffer (as_exp.ael_map) by the AEL build so a runtime error-details
+// trace can render the true source slice instead of an op-stream disassembly.
+// AST offsets are 24-bit and spans clamp to 255 (ast_node), so an entry packs
+// into 4 bytes.
 typedef struct ael_src_entry_s {
 	uint32_t offset : 24;
 	uint8_t sz;
@@ -405,7 +401,7 @@ typedef struct ael_src_map_s {
 	ael_src_entry entries[];
 } ael_src_map;
 
-// Defined in exp.c (build side); exp_rt.c's eval-fault trace renders the
-// focus-marked AEL source slice with it.
+// Build-side; the eval-fault trace renders the focus-marked AEL source slice
+// with it.
 uint16_t exp_render_ael_src_snippet(const uint8_t* src, uint32_t src_sz,
 		uint32_t offset, uint32_t span, char* out, uint32_t cap);

@@ -52,7 +52,7 @@ typedef struct as_exp_s {
 	uint8_t expected_type;
 	uint8_t flags;
 	const void* bin_table;
-	// AEL op-ordinal -> source-span map (ael_src_map, exp.c) laid out in mem[]
+	// AEL op-ordinal -> source-span map (ael_src_map, exp_ael.c) laid out in mem[]
 	// alongside the retained source, so runtime error-detail traces can render
 	// the true AEL source slice. NULL for wire (msgpack) expressions - also the
 	// runtime's "was this compiled from AEL" discriminator.
@@ -152,6 +152,61 @@ typedef struct as_exp_result_s {
 } __attribute__((__packed__)) as_exp_result;
 
 extern const exp_op_table_entry exp_op_table[];
+
+// Build-internal, shared by exp.c (wire) and exp_ael.c (AEL direct) -- not part
+// of the as_exp_* API. Both build paths produce the same as_exp, so they share
+// the size caps, the let-variable scope chain, and the bin table.
+
+#define EXP_MAX_SIZE (1 * 1024 * 1024) // 1 MiB
+
+// Pre-parse source cap. Output is capped at EXP_MAX_SIZE, so a larger source is
+// rejected later anyway; reject early to bound parse-pool use.
+#define EXP_MAX_AEL_SRC_SIZE EXP_MAX_SIZE
+
+typedef struct exp_var_entry_s {
+	const uint8_t* name;
+	uint32_t name_sz;
+	uint32_t idx;
+	exp_rtype r_type;
+} exp_var_entry;
+
+typedef struct exp_var_scope_s {
+	struct exp_var_scope_s* parent;
+	uint32_t n_entries;
+	exp_var_entry* entries;
+} exp_var_scope;
+
+// Build-time view of the bin table (table points at scratch during the build).
+// exp_bin_name_entry is completed by exp_rt.h, which includes this header - a
+// pointer to the tag is all that can be named here, and all either build path
+// needs.
+typedef struct exp_build_bin_table_s {
+	const uint8_t* base;
+	struct exp_bin_name_entry_s* table;
+	uint32_t n_bins;
+} exp_build_bin_table;
+
+// Op-table entry for a value-producing rtype, or NULL if type is out of range.
+const exp_op_table_entry* exp_build_get_entry(exp_rtype type);
+
+// Index of name128 in the build's bin table, or t->n_bins if absent.
+uint32_t exp_build_find_bin_idx(const exp_build_bin_table* t,
+		bin_name128 name128);
+
+// Intern a bin name in the build's bin table, reusing an existing slot. Returns
+// false if the name is invalid or the table is full (RECORD_MAX_BINS).
+bool exp_build_get_or_add_bin_entry(exp_build_bin_table* t,
+		const struct exp_bin_name_entry_s* n);
+
+// Set exp->expected_type from the root op's result type. Returns false on an
+// unexpected rtype.
+bool exp_build_set_expected_type(as_exp* exp, const exp_op_table_entry* entry);
+
+// Stage a build failure for as_exp_take_build_error(). First-set-wins, so the
+// deepest failure is the one the client sees. src/src_sz is the AEL source when
+// there is one, so the error can carry a source-slice snippet.
+void ael_build_err_record(const uint8_t* src, uint32_t src_sz, bool has_pos,
+		uint32_t offset, uint32_t span, const char* msg);
 
 // Build/compile helpers defined in exp.c, also called from exp_rt.c (eval).
 const char* exp_rtype_to_str(exp_rtype type);
@@ -327,6 +382,9 @@ void as_exp_result_msgpack_write(const as_exp_result* res, uint8_t* wptr);
 void as_exp_result_msgpack_pack(const as_exp_result* res, as_packer* pk);
 bool as_exp_result_has_nonstorage(const as_exp_result* res);
 
+// post: res is always destroyable, whatever the return -- only the
+//       AS_EXP_RESULT_BIN variant owns anything. AS_EXP_TRUE carries a value
+//       except for AS_EXP_RESULT_REMOVE.
 as_exp_trilean as_exp_eval_to_result(const as_exp* exp, const as_exp_ctx* ctx,
 		as_exp_result* res);
 void as_exp_result_destroy(as_exp_result* res);

@@ -111,10 +111,15 @@ ael_string_validate(const char* src, uint32_t sz, bool* has_escape_r,
 	bool has_escape = false;
 
 	for (uint32_t i = 0; i < sz; i++) {
-		if (src[i] != '\\') {
-			continue;
+		// memchr the gap to the next backslash -- vectorized, and the
+		// no-escape common case is a single scan.
+		const char* bs = memchr(src + i, '\\', sz - i);
+
+		if (bs == NULL) {
+			break;
 		}
 
+		i = (uint32_t)(bs - src);
 		has_escape = true;
 
 		if (i + 1 >= sz) {
@@ -173,20 +178,19 @@ ael_string_decoded_sz(const char* src, uint32_t sz)
 {
 	uint32_t out = 0;
 
-	for (uint32_t i = 0; i < sz; i++) {
-		out++;
+	for (uint32_t i = 0; i < sz;) {
+		const char* bs = memchr(src + i, '\\', sz - i);
 
-		if (src[i] != '\\') {
-			continue;
+		if (bs == NULL) {
+			out += sz - i;
+			break;
 		}
 
-		// Validated upstream — src[i + 1] exists and is a known escape.
-		if (src[i + 1] == 'x') {
-			i += 3; // consume x, HH
-		}
-		else {
-			i += 1; // consume the simple escape char
-		}
+		uint32_t run = (uint32_t)(bs - src) - i;
+
+		out += run + 1; // literal run + the escape's one decoded byte
+		// Validated upstream — bs[1] exists and is a known escape.
+		i += run + (bs[1] == 'x' ? 4 : 2);
 	}
 
 	return out;
@@ -199,8 +203,17 @@ ael_string_decode(const char* src, uint32_t sz, uint8_t* dst)
 
 	for (uint32_t i = 0; i < sz; i++) {
 		if (src[i] != '\\') {
-			dst[out++] = (uint8_t)src[i];
-			continue;
+			// memcpy the whole run to the next backslash (or the end).
+			const char* bs = memchr(src + i, '\\', sz - i);
+			uint32_t run = bs == NULL ? sz - i : (uint32_t)(bs - src) - i;
+
+			memcpy(dst + out, src + i, run);
+			out += run;
+			i += run;
+
+			if (bs == NULL) {
+				break;
+			}
 		}
 
 		// Validated upstream — src[i + 1] exists and is recognized.
@@ -249,6 +262,21 @@ ael_string_decode(const char* src, uint32_t sz, uint8_t* dst)
 			cf_crash(AS_EXP, "ael_string_decode - unvalidated escape '\\%c'",
 					esc);
 		}
+	}
+
+	return out;
+}
+
+// Decode a (lexer-validated) hex literal into dst, one byte per digit pair.
+// Returns the number of bytes written.
+uint32_t
+ael_hex_decode(const char* src, uint32_t sz, uint8_t* dst)
+{
+	uint32_t out = sz / 2;
+
+	for (uint32_t i = 0; i < out; i++) {
+		dst[i] = (uint8_t)((ael_hex_nibble(src[i * 2]) << 4) |
+				ael_hex_nibble(src[i * 2 + 1]));
 	}
 
 	return out;

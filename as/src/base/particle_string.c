@@ -921,8 +921,7 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 
 		uint32_t inner_count;
 
-		if (! msgpack_get_list_ele_count_vec(state->mv, &inner_count) ||
-				inner_count == 0) {
+		if (! msgpack_get_list_ele_count_vec(state->mv, &inner_count)) {
 			cf_ticker_warning(AS_PARTICLE,
 					"string_state_init - error %u unable to parse inner op list",
 					AS_ERR_PARAMETER);
@@ -934,6 +933,23 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 			else {
 				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_MALFORMED,
 						"string context op on bin %.*s requires [0xFF, ctx, [op, args...]]; inner element is not a list",
+						(int)bin_name_sz, bin_name);
+			}
+			return false;
+		}
+
+		if (inner_count == 0) {
+			cf_ticker_warning(AS_PARTICLE,
+					"string_state_init - error %u inner op list is empty",
+					AS_ERR_PARAMETER);
+
+			if (is_expr) {
+				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_MALFORMED,
+						"string context op requires [0xFF, ctx, [op, args...]]; inner list holds no op");
+			}
+			else {
+				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_MALFORMED,
+						"string context op on bin %.*s requires [0xFF, ctx, [op, args...]]; inner list holds no op",
 						(int)bin_name_sz, bin_name);
 			}
 			return false;
@@ -1389,10 +1405,14 @@ string_modify_ctx(string_state* state, as_bin* b, cf_ll_buf* particles_llb)
 			AS_PARTICLE_TYPE_STRING, &leaf_bytes, &leaf_sz);
 
 	if (rv != AS_OK) {
-		if ((op.flags & AS_STRING_FLAG_NO_FAIL) != 0 &&
-				rv == -AS_ERR_OP_NOT_APPLICABLE) {
+		// The path was absent and either the op or the context path said to
+		// tolerate that.
+		if (rv == CDT_CTX_DIG_NO_OP ||
+				((op.flags & AS_STRING_FLAG_NO_FAIL) != 0 &&
+						rv == -AS_ERR_OP_NOT_APPLICABLE)) {
 			return AS_OK;
 		}
+
 		return rv;
 	}
 

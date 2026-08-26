@@ -56,5 +56,9 @@ int ael_codegen_emit(as_packer* pk, ast_pool* pool, const char* input,
 // post: the wrapper header + ctx_seg_count key/value pairs are packed into pk;
 //       the inner expression is left to the caller. Returns a non-zero as_pack
 //       rc on packer error.
+// path_flags is the AS_CDT_CTX_FLAG_* word, or 0 for none; see
+// ael_ctx_path_flags, which derives it from the leaf op.
 int ael_pack_ctx(as_packer* pk, ast_pool* pool, const char* input,
-		ast_ref ctx_ele_head, uint32_t ctx_seg_count);
+		ast_ref ctx_ele_head, uint32_t ctx_seg_count, uint64_t path_flags);
+
+uint64_t ael_ctx_path_flags(const ast_node* op_node);

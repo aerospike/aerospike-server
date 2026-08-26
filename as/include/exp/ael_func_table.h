@@ -28,6 +28,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "exp/ast.h"
 
@@ -58,6 +59,7 @@ typedef enum {
 	AEL_PNAME_FROM,
 	AEL_PNAME_TO,
 	AEL_PNAME_NEEDLE,
+	AEL_PNAME_INDEX,
 	AEL_PNAME_OCCURRENCE,
 	AEL_PNAME_LENGTH,
 	AEL_PNAME_PAD,
@@ -121,6 +123,15 @@ typedef struct {
 	ael_param_spec_t params[AEL_MAX_PARAMS];
 } ael_func_spec_t;
 
+// Match a not-NUL-terminated name slice against a table string without a strlen
+// per row: equal first sz bytes, and the table string ending exactly there.
+// Shared by every name -> table-row scan on the parse path.
+static inline bool
+ael_name_eq(const char* table_str, const char* name, uint32_t sz)
+{
+	return strncmp(table_str, name, sz) == 0 && table_str[sz] == '\0';
+}
+
 // Look up a function spec by name bytes (not NUL-terminated). NULL if no row
 // matches.
 const ael_func_spec_t* ael_func_lookup(const char* name, uint32_t sz);
@@ -141,6 +152,10 @@ const char* ael_pname_str(ael_pname_t name);
 
 // Transient pf_type ranges (contiguous in ast_node_t) — used by the unified
 // method-call finalizer to route a resolved node to the bit vs HLL path.
+// The BLOB bit functions. They share NK_CDT_OP with the collection ops but take
+// the AS_BITS_FLAG_* word rather than a CDT modify word, so their flags differ
+// in meaning -- notably :PARTIAL, which clips the operation there instead of
+// skipping items.
 #define AEL_IS_BIT_TYPE(t)                                                     \
 	((t) >= AST_PATH_FUNC_BIT_GET && (t) <= AST_PATH_FUNC_BIT_REMOVE)
 #define AEL_IS_HLL_TYPE(t)                                                     \

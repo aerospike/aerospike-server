@@ -92,6 +92,23 @@ lexer_init(lexer_t* lex, const char* input, uint32_t input_sz)
 	lex->token = input;
 	lex->expect_regex = false;
 	lex->prev_name_pattern = false;
+	lex->prev_ends_operand = false;
+}
+
+// True when a numeric rule matched a leading '-' that is really infix
+// subtraction (the previous token can end an operand, e.g. `$.a-1`, `1-2`).
+// Gives back everything after the '-' for re-scanning; the caller returns
+// TOK_MINUS. Keeps `-9223372036854775808` (INT64_MIN, unrepresentable as
+// MINUS + INT) lexing as one literal wherever a sign is actually possible.
+static bool
+lex_infix_minus(lexer_t* lex)
+{
+	if (*lex->token == '-' && lex->prev_ends_operand) {
+		lex->cursor = lex->token + 1;
+		return true;
+	}
+
+	return false;
 }
 
 static int
@@ -130,7 +147,6 @@ loop:
 	"and"        { return TOK_AND; }
 	"or"         { return TOK_OR; }
 	"not"        { return TOK_NOT; }
-	"exclusive"  { return TOK_EXCLUSIVE; }
 	"let"        { return TOK_LET; }
 	"then"       { return TOK_THEN; }
 	"when"       { return TOK_WHEN; }
@@ -199,8 +215,16 @@ loop:
 	// ael_resolve_meta_call (the `$.NAME(...)` form), like `$.key()`. This
 	// keeps them usable as bin names ($.ttl) while `$.ttl()` still works.
 
+	// Numeric literals take an optional '-' sign so INT64_MIN
+	// (-9223372036854775808) lexes as one token, but a '-' after an
+	// operand-ending token is infix subtraction — lex_infix_minus splits it
+	// off (see prev_ends_operand in ael_lexer.h).
+
 	// Float literal.
 	"-"? [0-9]+ "." [0-9]+ {
+		if (lex_infix_minus(lex)) {
+			return TOK_MINUS;
+		}
 		if (! lex_strtod(lex->token,
 				(uint32_t)(lex->cursor - lex->token), &val->fval)) {
 			return TOK_ERROR_FLOAT_RANGE;
@@ -211,11 +235,17 @@ loop:
 	// Exponent notation (1e5, 1.5e10) is unsupported -- catch the full form so
 	// it is a clear error rather than an INT/FLOAT split from a NAME.
 	"-"? [0-9]+ ("." [0-9]+)? [eE] [-+]? [0-9]+ {
+		if (lex_infix_minus(lex)) {
+			return TOK_MINUS;
+		}
 		return TOK_ERROR_EXP_FLOAT;
 	}
 
 	// Hex integer.
 	"-"? "0x" [0-9a-fA-F]+ {
+		if (lex_infix_minus(lex)) {
+			return TOK_MINUS;
+		}
 		if (! lex_strtoll(lex->token,
 				(uint32_t)(lex->cursor - lex->token), 16, &val->ival)) {
 			return TOK_ERROR_INT_RANGE;
@@ -225,6 +255,9 @@ loop:
 
 	// Binary integer.
 	"-"? "0b" [01]+ {
+		if (lex_infix_minus(lex)) {
+			return TOK_MINUS;
+		}
 		const char* p = lex->token;
 		bool neg = false;
 		if (*p == '-') { neg = true; p++; }
@@ -243,6 +276,9 @@ loop:
 
 	// Decimal integer.
 	"-"? [0-9]+ {
+		if (lex_infix_minus(lex)) {
+			return TOK_MINUS;
+		}
 		if (! lex_strtoll(lex->token,
 				(uint32_t)(lex->cursor - lex->token), 10, &val->ival)) {
 			return TOK_ERROR_INT_RANGE;
@@ -432,6 +468,52 @@ lex_scan_regex(lexer_t* lex, token_value* val)
 	return TOK_REGEX;
 }
 
+// Tokens that can end an operand — a '-' right after one of these is infix
+// subtraction, never a numeric literal's sign. Closing brackets, literals,
+// names, variables/placeholders, loop vars, and the bare type-name constants
+// (operand position, e.g. `$.a.type() == INT`). Everything else (operators,
+// commas, colons, opening brackets, keywords like `in`/`then`) leaves a
+// following signed literal intact.
+static bool
+tok_ends_operand(int tok)
+{
+	switch (tok) {
+	case TOK_NAME:
+	case TOK_INT:
+	case TOK_FLOAT:
+	case TOK_STRING:
+	case TOK_BLOB_LITERAL:
+	case TOK_B64_BLOB_LITERAL:
+	case TOK_VARIABLE:
+	case TOK_PLACEHOLDER:
+	case TOK_TRUE:
+	case TOK_FALSE:
+	case TOK_UNKNOWN:
+	case TOK_NIL:
+	case TOK_INF:
+	case TOK_RPAREN:
+	case TOK_RBRACKET:
+	case TOK_RBRACE:
+	case TOK_AT:
+	case TOK_AT_KEY:
+	case TOK_AT_INDEX:
+	case TOK_REGEX:
+	case TOK_TNAME_INT:
+	case TOK_TNAME_STRING:
+	case TOK_TNAME_HLL:
+	case TOK_TNAME_BLOB:
+	case TOK_TNAME_FLOAT:
+	case TOK_TNAME_BOOL:
+	case TOK_TNAME_LIST:
+	case TOK_TNAME_MAP:
+	case TOK_TNAME_GEO:
+	case TOK_TNAME_VECTOR:
+		return true;
+	default:
+		return false;
+	}
+}
+
 int
 lexer_next(lexer_t* lex, token_value* val)
 {
@@ -463,6 +545,7 @@ lexer_next(lexer_t* lex, token_value* val)
 			// offsets derive from this span; see token_value.
 			val->offset = lex->token_offset;
 			val->sz = lex->token_sz;
+			lex->prev_ends_operand = tok_ends_operand(rtok);
 			return rtok;
 		}
 	}
@@ -497,6 +580,7 @@ lexer_next(lexer_t* lex, token_value* val)
 
 	lex->prev_name_pattern = (tok == TOK_NAME && lex->token_sz == 7 &&
 			memcmp(lex->start + lex->token_offset, "pattern", 7) == 0);
+	lex->prev_ends_operand = tok_ends_operand(tok);
 
 	switch (tok) {
 	case TOK_INT:

@@ -117,8 +117,6 @@ typedef struct {
 static const uint8_t* EMPTY_STRING = (uint8_t*)"";
 static const rt_value rt_unk = { .type = RT_TRILEAN, .r_trilean = AS_EXP_UNK };
 
-// Shared sentinel (declared in exp/exp_rt.h) -- one address, so build (exp.c)
-// sets and eval compares the same pointer.
 const uint8_t exp_call_eval_token[1] = "";
 
 // "Short-circuit" = UNK or ERROR - every op that propagates UNK propagates
@@ -519,14 +517,14 @@ as_exp_result_msgpack_sz(const as_exp_result* res)
 
 			uint32_t sz = as_bin_particle_string_ptr(&b, &temp);
 
-			return as_pack_bin_size(sz + 1);
+			return as_pack_str_size(sz + 1);
 		}
 		case AS_PARTICLE_TYPE_GEOJSON: {
 			size_t sz;
 
 			as_geojson_mem_jsonstr(b.particle, &sz);
 
-			return as_pack_bin_size(sz + 1);
+			return as_pack_str_size(sz + 1);
 		}
 		case AS_PARTICLE_TYPE_MAP:
 		case AS_PARTICLE_TYPE_LIST: {
@@ -547,7 +545,7 @@ as_exp_result_msgpack_sz(const as_exp_result* res)
 	case AS_EXP_RESULT_MSGPACK:
 		return res->msgpack.sz;
 	case AS_EXP_RESULT_STR:
-		return as_pack_bin_size(res->str.sz);
+		return as_pack_str_size(res->str.sz + 1);
 	default:
 		break;
 	}
@@ -563,6 +561,13 @@ as_exp_result_msgpack_write(const as_exp_result* res, uint8_t* wptr)
 	as_exp_result_msgpack_pack(res, &pk);
 }
 
+// The legacy type byte a msgpack str carries in its payload is the particle
+// type, so the two enumerations must agree for everything reaching the writer.
+COMPILER_ASSERT((int)AS_PARTICLE_TYPE_STRING == AS_BYTES_STRING);
+COMPILER_ASSERT((int)AS_PARTICLE_TYPE_BLOB == AS_BYTES_BLOB);
+COMPILER_ASSERT((int)AS_PARTICLE_TYPE_HLL == AS_BYTES_HLL);
+COMPILER_ASSERT((int)AS_PARTICLE_TYPE_GEOJSON == AS_BYTES_GEOJSON);
+
 void
 as_exp_result_msgpack_pack(const as_exp_result* res, as_packer* pk)
 {
@@ -574,21 +579,23 @@ as_exp_result_msgpack_pack(const as_exp_result* res, as_packer* pk)
 
 		as_bin_state_set_from_type(&b, res->particle.ptr->type);
 
-		switch (as_bin_get_particle_type(&b)) {
+		as_particle_type ptype = as_bin_get_particle_type(&b);
+
+		switch (ptype) {
 		case AS_PARTICLE_TYPE_STRING:
 		case AS_PARTICLE_TYPE_BLOB:
 		case AS_PARTICLE_TYPE_HLL: {
 			char* ptr;
 			uint32_t sz = as_bin_particle_string_ptr(&b, &ptr);
 
-			as_pack_str_with_type(pk, res->type, (uint8_t*)ptr, sz);
+			as_pack_str_with_type(pk, (uint8_t)ptype, (uint8_t*)ptr, sz);
 			break;
 		}
 		case AS_PARTICLE_TYPE_GEOJSON: {
 			size_t sz;
 			const char* str = as_geojson_mem_jsonstr(b.particle, &sz);
 
-			as_pack_str_with_type(pk, res->type, (uint8_t*)str, sz);
+			as_pack_str_with_type(pk, (uint8_t)ptype, (uint8_t*)str, sz);
 			break;
 		}
 		case AS_PARTICLE_TYPE_MAP:
@@ -634,6 +641,8 @@ as_exp_eval_to_result(const as_exp* exp, const as_exp_ctx* ctx, as_exp_result* r
 {
 	define_deferred_array(vars, rt_value, exp->max_var_count);
 	rt_value ret_val;
+
+	*res = (as_exp_result){ 0 };
 
 	runtime rt = {
 		.ctx = ctx,
@@ -879,6 +888,8 @@ static const char*
 exp_err_reason_msg(exp_err_reason reason)
 {
 	switch (reason) {
+	case EXP_ERR_NONE:
+		break;
 	case EXP_ERR_DIV_ZERO:
 		return "integer division by zero";
 	case EXP_ERR_DIV_OVERFLOW:
@@ -903,9 +914,13 @@ exp_err_reason_msg(exp_err_reason reason)
 		return "invalid GeoJSON";
 	case EXP_ERR_UNORDERED_MAP:
 		return "cannot compare an unordered map";
-	default:
-		return "expression evaluation faulted";
 	}
+
+	// EXP_ERR_NONE, or a value from outside the enum. No fault site leaves the
+	// reason unstamped, so reaching here costs a vague message rather than a
+	// wrong one -- and no label covers it, so -Wswitch names a new reason that
+	// forgets its case.
+	return "expression evaluation faulted";
 }
 
 // Render an op name into 'dst' (NUL-terminated, truncated to cap), returning
@@ -4656,10 +4671,28 @@ exp_display_call(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 		cf_dyn_buf_append_format(db, "%s(",
 				as_hll_op_name((uint32_t)op_code, is_modify));
 		break;
-	case EXP_CALL_STRING:
+	case EXP_CALL_STRING: {
+		// The sentinel names no op, so the name is on the inner list. The build
+		// made these same reads and sized the vec past them, so a short read
+		// means bytes no producer writes -- not worth aborting a display over.
+		msgpack_in mp_ctx = mp;
+		uint64_t inner_code;
+
+		if (op_code == AS_STRING_OP_CONTEXT_EVAL && msgpack_sz(&mp) != 0 &&
+				msgpack_get_list_ele_count(&mp, &ele_count) &&
+				msgpack_get_uint64(&mp, &inner_code)) {
+			cf_dyn_buf_append_format(db, "%s(",
+					as_string_op_name((uint32_t)inner_code, is_modify));
+			cdt_msgpack_ctx_to_dynbuf(&mp_ctx, db, rt->display_max_sz);
+			cf_dyn_buf_append_string(db, ", ");
+			break;
+		}
+
+		mp = mp_ctx;
 		cf_dyn_buf_append_format(db, "%s(",
 				as_string_op_name((uint32_t)op_code, is_modify));
 		break;
+	}
 	default:
 		cf_crash(AS_EXP, "unexpected");
 	}
@@ -4676,6 +4709,9 @@ exp_display_call(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 		// Stop appending, but keep walking the vecs below: each
 		// exp_call_eval_token still needs its exp_rt_display() call so the op
 		// stream stays aligned with the caller's next child read.
+		//
+		// Reading each vec on its own holds because the build walked every
+		// element and refused a zero-sized read, so a vec is tiled exactly.
 		while (mp.offset != mp.buf_sz) {
 			if (rt->display_max_sz != 0 && db->used_sz >= rt->display_max_sz) {
 				if (! over) {

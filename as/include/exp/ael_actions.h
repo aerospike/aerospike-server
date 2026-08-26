@@ -45,13 +45,13 @@ const char* ael_lex_error_msg(int tok);
 ast_ref ael_ctx_list_append(ael_context* ctx, ast_ref ctx_ref, ast_ref seg);
 ast_ref ael_ctx_list_pop(ael_context* ctx, ast_ref ctx_ref);
 
-// `:PROPERTY` postfix — generic apply helper. Validates the incoming bit
-// against the per-attachment valid mask, detects duplicates and group-
-// exclusion (CR_LIST_* / CR_MAP_* mutually exclusive), and ORs
-// the bit into *dst on success. Returns false (and emits a diagnostic
-// via ael_diag_add) on any failure.
-bool ael_apply_prop(ael_context* ctx, ast_prop_bits valid, ast_prop_bits* dst,
-		ast_prop_bits bit, uint32_t prop_offset, uint32_t prop_sz);
+// A path root has to be a container, and a value loop var arrives polymorphic,
+// so the first seg's map / list nature is what pins it. An explicit type is
+// narrowed against, never overwritten -- a disagreement is a conflict.
+void ael_pin_path_root_etype(ael_context* ctx, ast_ref head, ast_ref seg);
+
+// post: true, or false having emitted the diagnostic.
+bool ael_check_path_root_is_container(ael_context* ctx, ast_ref head);
 
 // `:ORDERED` / `:UNORDERED` postfix on an AST_LIST / AST_MAP literal. Matches
 // the property name by text (not a keyword) and sets the node's
@@ -90,59 +90,9 @@ ast_ref ael_node_apply_postfix(ael_context* ctx, ast_ref ref,
 // overflows) with a diagnostic. Both endpoints are AST_INT when called.
 bool ael_rel_range_count_ok(ael_context* ctx, ast_ref start, ast_ref end);
 
-// morph — path func → cdt op
-bool ael_cdt_op_from_fn(ael_context* ctx, ast_ref ctx_ref, ast_ref seg_ref,
-		ast_ref pf);
-
 // path — path-call finalize / operands
-ast_ref ael_finalize_path_call_wrap(ael_context* ctx, ast_ref ctx_ref,
-		ast_ref pf);
 ast_ref ael_consume_leaf_then_finalize(ael_context* ctx, ast_ref ctx_ref,
 		ast_ref pf, ast_ref leaf);
-ast_ref ael_finalize_cast(ael_context* ctx, ast_ref ctx_ref, ast_ref cast);
-ast_ref ael_build_bin_func(ael_context* ctx, ast_ref bin, ast_ref pf);
-
-// BLOB-bit method-style calls. ael_new_bit_fn builds a transient
-// AST_PATH_FUNC_BIT_* node carrying the parsed args; the wrapping
-// `operand ::= bit_recv . bit_fn` rule attaches the receiver via
-// ael_finalize_bit_call. ael_bit_recv_from_ctx folds a path into a
-// self-contained value-producing sub-expression suitable as a
-// receiver (the runtime BIT_OP has no CDT-style path navigation).
-ast_ref ael_new_bit_fn(ael_context* ctx, ast_node_t pf_type, ast_ref offset,
-		ast_ref size, ast_ref opt_arg);
-// bitAdd / bitSubtract — when signed flag is present, emits 5 wire
-// args [offset, size, value, flags=0, subflags=SIGNED]; otherwise 3.
-ast_ref ael_new_bit_arith(ael_context* ctx, ast_node_t pf_type, ast_ref offset,
-		ast_ref size, ast_ref value, int signed_flag);
-// Single-arg modify (bitResize), 2-arg byte-pair modifies (bitInsert,
-// bitRemove). Distinct from offset/size shape — separate helpers keep
-// the parser actions simple.
-ast_ref ael_new_bit_resize(ael_context* ctx, ast_ref byte_size);
-ast_ref ael_new_bit_insert(ael_context* ctx, ast_ref byte_offset, ast_ref value);
-ast_ref ael_new_bit_remove(ael_context* ctx, ast_ref byte_offset,
-		ast_ref byte_size);
-ast_ref ael_bit_recv_from_ctx(ael_context* ctx, ast_ref ctx_ref);
-ast_ref ael_finalize_bit_call(ael_context* ctx, ast_ref recv, ast_ref bit_fn);
-
-// Single-select-path bit-modify simulation. Wraps the modify call in a
-// LIST_SET (for LIST_INDEX leaf) or MAP_REPLACE (for MAP_KEY leaf) at
-// the parent ctx — encodes `$.bin.p0.p1.bitModFn(args)` as the future
-// BIT_EVAL wire op would semantically. Rejects unsupported leaf shapes.
-ast_ref ael_finalize_bit_mod_path(ael_context* ctx, ast_ref ctx_ref,
-		ast_ref bit_fn);
-
-// HLL method-style calls — same shape as the bit-call helpers. The
-// receiver gets pinned to HLL; ael_finalize_hll_call morphs the
-// transient AST_PATH_FUNC_HLL_* node to AST_HLL_OP and wraps in an
-// AST_PATH_CALL with stype=EXP_CALL_HLL.
-ast_ref ael_new_hll_fn(ael_context* ctx, ast_node_t pf_type, ast_ref a1,
-		ast_ref a2, ast_ref a3);
-ast_ref ael_new_hll_set_fn(ael_context* ctx, ast_node_t pf_type, ast_ref arg);
-ast_ref ael_new_hll_init(ael_context* ctx, ast_ref index_bits,
-		ast_ref min_hash_bits);
-ast_ref ael_new_hll_add(ael_context* ctx, ast_ref list, ast_ref index_bits,
-		ast_ref min_hash_bits);
-ast_ref ael_finalize_hll_call(ael_context* ctx, ast_ref recv, ast_ref hll_fn);
 
 // Table-driven function calls. The grammar collects a generic argument list
 // (positional `expr` and named `name: expr` entries via ael_new_*_arg /
@@ -183,28 +133,6 @@ ast_ref ael_new_regex_match(ael_context* ctx, ast_ref lhs, uint32_t pat_off,
 ast_ref ael_new_regex_operand(ael_context* ctx, uint32_t pat_off,
 		uint32_t pat_sz, uint32_t flag_off, uint32_t flag_sz);
 
-// Geo builtins. `geoJson('...')` produces an AST_GEO_LITERAL whose
-// u.str holds the source JSON bytes (offset+sz into input). The runtime
-// validates the JSON at decode time; the parser stays cheap.
-// `geoCompare(a, b)` pins both args to GEOJSON and builds an
-// AST_CMP_GEO binary that emits as EXP_CMP_GEO (returns BOOLEAN).
-ast_ref ael_new_geo_literal(ael_context* ctx, uint32_t offset, uint32_t sz);
-ast_ref ael_new_geo_compare(ael_context* ctx, ast_ref a, ast_ref b);
-
-// (expr).func() — value-recv path-func dispatch. Mirrors
-// ael_build_bin_func but with an expression instead of a bin. Rejects
-// bin-specific ops (exists, type) and multi-select-requiring reads
-// (getKeys/getKeyValues/getTree) with helpful diagnostics.
-ast_ref ael_build_value_func(ael_context* ctx, ast_ref recv, ast_ref pf);
-
-// path expressions — .select() / .modify() / wildcard-.remove() construction
-// and finalize.
-ast_ref ael_new_select(ael_context* ctx, as_cdt_select_flags sel_type,
-		bool nofail);
-ast_ref ael_new_modify(ael_context* ctx, ast_ref apply_expr, bool nofail);
-ast_ref ael_new_pselect_remove(ael_context* ctx, bool nofail);
-ast_ref ael_finalize_select_call(ael_context* ctx, ast_ref ctx_ref, ast_ref pf);
-
 // path expressions — loop variable @, @key, @index. Diagnoses if used
 // outside an enclosing wildcard filter / modify body. tok_offset and
 // tok_sz are the offsets of the token in the source for diagnostics.
@@ -215,6 +143,9 @@ ast_ref ael_new_loop_var(ael_context* ctx, as_exp_builtin builtin,
 // to 1 on entry to a filter or modify body; pop() unifies the loop-var
 // chains accumulated in the scope and resets. Nested sub-programs are
 // rejected at push (push returns false on a depth > 0 entry).
+bool ael_create_park_push(ael_context* ctx);
+void ael_create_park_pop(ael_context* ctx);
+
 bool ael_filter_scope_push(ael_context* ctx);
 void ael_filter_scope_pop(ael_context* ctx);
 

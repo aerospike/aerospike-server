@@ -1,3 +1,12 @@
-# AEL: checked-in Lemon/re2c output for builders without those tools.
-# Mark as generated so GitHub collapses / de-emphasizes them in PR diffs.
-as/src/exp/*.copy linguist-generated=true
+# `.copy` is this repo's suffix for checked-in generator output, kept for build
+# machines that lack the generator -- today Lemon / re2c under as/src/exp. The
+# rules are unscoped because the suffix, not the directory, is what means
+# "generated". The reviewable artifact is the .re / .y it comes from.
+#
+# Marked generated so review tools de-emphasise them, and `-diff` so git reports
+# a one-line "differ" instead of thousands of lines nobody reads. Both generators
+# now run on a bare filename inside GEN_DIR, so their output is byte-identical
+# from any directory -- staleness is binary, and "differ" is the whole answer.
+# `git diff --text` when the hunks are actually wanted.
+*.copy linguist-generated=true
+*.copy -diff

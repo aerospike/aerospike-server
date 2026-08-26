@@ -86,14 +86,102 @@ seg_operand_span(ael_context* ctx, ast_ref a, ast_ref b, uint32_t* offset,
 	}
 }
 
+// `!`-inverted singular segment — record the diagnostic (the reduction
+// still builds its node so the parse continues).
+static void
+seg_inv_err(ael_context* ctx, ast_ref v, int inv, const char* msg)
+{
+	if (inv) {
+		uint32_t seg_off;
+		uint32_t seg_sz;
+
+		seg_operand_span(ctx, v, AST_REF_NULL, &seg_off, &seg_sz);
+		ael_err(ctx, seg_off, seg_sz, msg);
+	}
+}
+
+// INT-required range segment; both endpoints must share a sign when both
+// are given (count = end - start can't be computed at parse time when
+// signs differ). b == AST_REF_NULL is open-end (no sign check). The
+// family-specific diagnostics come in as strings so they stay verbatim.
+static ast_ref
+seg_int_range(ael_context* ctx, ast_node_t type, ast_ref a, ast_ref b,
+		int inv, const char* type_msg, const char* sign_msg)
+{
+	uint32_t seg_off;
+	uint32_t seg_sz;
+
+	seg_operand_span(ctx, a, b, &seg_off, &seg_sz);
+
+	// type_msg == NULL skips the type check (rank operands are
+	// grammar-guaranteed INT).
+	if (type_msg != NULL &&
+			(ast_pool_at(ctx->pool, a)->type != AST_INT ||
+					(b != AST_REF_NULL &&
+							ast_pool_at(ctx->pool, b)->type != AST_INT))) {
+		ael_err(ctx, seg_off, seg_sz, type_msg);
+		return AST_REF_NULL;
+	}
+
+	if (b != AST_REF_NULL &&
+			(ast_pool_at(ctx->pool, a)->u.ival < 0) !=
+					(ast_pool_at(ctx->pool, b)->u.ival < 0)) {
+		ael_err(ctx, seg_off, seg_sz, sign_msg);
+		return AST_REF_NULL;
+	}
+
+	return ast_new_range_seg(ctx->pool, type, a, b, inv != 0);
+}
+
+// Open-start range (`{:B}` / `[:B]` shapes) — synthesized start=0
+// (wire-identical to `0:B`); B must be a non-negative int (negative B
+// would be mixed-sign against the synthesized 0).
+static ast_ref
+seg_open_start_int(ael_context* ctx, ast_node_t type, ast_ref b, int inv,
+		const char* type_msg, const char* neg_msg)
+{
+	uint32_t seg_off;
+	uint32_t seg_sz;
+
+	seg_operand_span(ctx, b, AST_REF_NULL, &seg_off, &seg_sz);
+
+	// type_msg == NULL skips the type check (rank operands are
+	// grammar-guaranteed INT).
+	if (type_msg != NULL && ast_pool_at(ctx->pool, b)->type != AST_INT) {
+		ael_err(ctx, seg_off, seg_sz, type_msg);
+		return AST_REF_NULL;
+	}
+
+	if (ast_pool_at(ctx->pool, b)->u.ival < 0) {
+		ael_err(ctx, seg_off, seg_sz, neg_msg);
+		return AST_REF_NULL;
+	}
+
+	return ast_new_range_seg(ctx->pool, type, ast_new_int(ctx->pool, 0), b,
+			inv != 0);
+}
+
+// Comma-list shape in a family with no list wire op (bare index braces,
+// list index, map/list rank) — consume the full shape and reject with
+// guidance instead of a bare syntax error.
+static ast_ref
+seg_list_unsupported(ael_context* ctx, ast_ref a, const char* msg)
+{
+	uint32_t seg_off;
+	uint32_t seg_sz;
+
+	seg_operand_span(ctx, a, AST_REF_NULL, &seg_off, &seg_sz);
+	ael_err(ctx, seg_off, seg_sz, msg);
+	return AST_REF_NULL;
+}
+
 }
 
 %token_type { token_value }
 %extra_argument { ael_context* ctx }
 
 %stack_overflow {
-	ael_diag_add(&ctx->diags, AEL_SEV_ERROR, 0, 0,
-			"expression too complex (parser stack overflow)");
+	ael_err(ctx, 0, 0, "expression too complex (parser stack overflow)");
 }
 
 %default_type { ast_ref }
@@ -122,8 +210,9 @@ seg_operand_span(ael_context* ctx, ast_ref a, ast_ref b, uint32_t* offset,
 %type bracket_hash_open { int }
 %type key_val { ast_ref }
 %type key_list { ast_ref }
-%type idx_val { ast_ref }
-%type rank_val { ast_ref }
+%type int_val { ast_ref }
+%type empty_list { ast_ref }
+%type empty_map { ast_ref }
 %type let_head { ast_ref }
 %type filter_open { uint32_t }
 %type and_filter_open { uint32_t }
@@ -150,13 +239,11 @@ seg_operand_span(ael_context* ctx, ast_ref a, ast_ref b, uint32_t* offset,
 		msg = "syntax error";
 	}
 
-	ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ctx->last_token_offset,
-			ctx->last_token_sz, msg);
+	ael_err(ctx, ctx->last_token_offset, ctx->last_token_sz, msg);
 }
 
 %parse_failure {
-	ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ctx->last_token_offset,
-			ctx->last_token_sz, "parse failure");
+	ael_err(ctx, ctx->last_token_offset, ctx->last_token_sz, "parse failure");
 }
 
 // Precedence: lowest to highest.
@@ -229,8 +316,11 @@ expr(R) ::= expr(A) TOK_POWER expr(B).   { R = ast_new_bmath(ctx, AST_POW, A, B,
 
 // Unary minus / plus (prefix). `-x` lowers to SUB(0, x) with the zero
 // typed to the operand -- there is no wire negate op. A `-` glued to a
-// number (`-10`) is already a literal token, so this fires only when `-`
-// stands alone (e.g. `-$.x`, `- 10`). `+x` is a numeric-checked identity.
+// number (`-10`) is a literal token when the sign position allows it
+// (start of an operand); after an operand-ending token the lexer splits
+// it to TOK_MINUS so `$.a-1` is infix subtraction (see prev_ends_operand
+// in ael_lexer.h). This rule fires for `-$.x`, `- 10`, and similar.
+// `+x` is a numeric-checked identity.
 expr(R) ::= TOK_MINUS(M) expr(A). [TOK_UMINUS] {
 	R = ast_new_neg(ctx, A, M.offset + M.sz);
 }
@@ -260,21 +350,6 @@ expr(R) ::= TOK_NOT TOK_LPAREN expr(A) TOK_RPAREN. [TOK_NOT] {
 	R = ast_new_unary(ctx->pool, AST_NOT, A);
 	if (R != AST_REF_NULL) {
 		ast_pool_at(ctx->pool, R)->etype = AST_ETYPE_TRILEAN;
-	}
-}
-
-// exclusive(e1, e2, ...)
-expr(R) ::= TOK_EXCLUSIVE TOK_LPAREN expr_list(L) TOK_RPAREN. {
-	R = L;
-	ast_node* n = ast_pool_at(ctx->pool, R);
-	n->type = AST_EXCLUSIVE;
-	n->etype = AST_ETYPE_TRILEAN;
-
-	// Like or/and/not, every operand must be BOOL. Narrow each so a
-	// non-trilean operand is a parse-time type error, not a runtime abort.
-	for (ast_ref e = n->u.list.head; e != AST_REF_NULL;
-			e = ast_pool_at(ctx->pool, e)->next) {
-		ast_set_implicit_type(ctx, e, AST_ETYPE_TRILEAN);
 	}
 }
 
@@ -364,7 +439,7 @@ expr(R) ::= TOK_WHEN(W) TOK_LPAREN case_list(M) TOK_COMMA TOK_DEFAULT TOK_ARROW 
 				result_types != AST_ETYPE_AUTO_NUMERIC;
 
 		if (incompatible) {
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(n), n->sz,
+			ael_err(ctx, ast_disp_offset(n), n->sz,
 				"when branches have incompatible types");
 		}
 
@@ -443,14 +518,16 @@ map_key(R) ::= TOK_B64_BLOB_LITERAL(V). { R = ast_new_blob_from_b64(ctx->pool, T
 // constructor), so the bracket rules stamp the literal over '[' .. ']' —
 // otherwise the span stays frozen at the first element and any parent's
 // child-derived span truncates mid-literal. The ':ORDER' postfix stays
-// outside the span, like a bin's ':T' pin.
-literal(R) ::= TOK_LBRACKET(LB) TOK_RBRACKET(RB). {
+// outside the span, like a bin's ':T' pin -- the empty_list / empty_map
+// nonterminals carry the stamp so both the bare and ':ORDER' forms inherit it.
+empty_list(R) ::= TOK_LBRACKET(LB) TOK_RBRACKET(RB). {
 	R = ast_new(ctx->pool, AST_LIST);
 	ast_pool_at(ctx->pool, R)->etype = AST_ETYPE_LIST;
 
-	AST_LIST_CLR(ctx->pool, R);
 	ast_set_span(ctx->pool, R, LB.offset, RB.offset + RB.sz - LB.offset);
 }
+
+literal(R) ::= empty_list(L). { R = L; }
 
 literal(R) ::= TOK_LBRACKET(LB) list_body(L) TOK_RBRACKET(RB). {
 	R = L;
@@ -458,13 +535,14 @@ literal(R) ::= TOK_LBRACKET(LB) list_body(L) TOK_RBRACKET(RB). {
 }
 
 // Map literal.
-literal(R) ::= TOK_LBRACE(LB) TOK_RBRACE(RB). {
+empty_map(R) ::= TOK_LBRACE(LB) TOK_RBRACE(RB). {
 	R = ast_new(ctx->pool, AST_MAP);
 	ast_pool_at(ctx->pool, R)->etype = AST_ETYPE_MAP;
 
-	AST_LIST_CLR(ctx->pool, R);
 	ast_set_span(ctx->pool, R, LB.offset, RB.offset + RB.sz - LB.offset);
 }
+
+literal(R) ::= empty_map(M). { R = M; }
 
 literal(R) ::= TOK_LBRACE(LB) map_body(M) TOK_RBRACE(RB). {
 	R = M;
@@ -475,13 +553,9 @@ literal(R) ::= TOK_LBRACE(LB) map_body(M) TOK_RBRACE(RB). {
 // property is a plain TOK_NAME (not a keyword) — ael_apply_literal_order
 // matches it by text. Scoping the postfix to the brace/bracket forms keeps a
 // scalar postfix (e.g. 5:ORDERED) a syntax error.
-literal(R) ::= TOK_LBRACKET(LB) TOK_RBRACKET(RB) TOK_COLON TOK_NAME(N). {
-	R = ast_new(ctx->pool, AST_LIST);
-	ast_pool_at(ctx->pool, R)->etype = AST_ETYPE_LIST;
-
-	AST_LIST_CLR(ctx->pool, R);
-	ast_set_span(ctx->pool, R, LB.offset, RB.offset + RB.sz - LB.offset);
-	ael_apply_literal_order(ctx, R, N.str.offset, N.str.sz);
+literal(R) ::= empty_list(L) TOK_COLON TOK_NAME(N). {
+	ael_apply_literal_order(ctx, L, N.str.offset, N.str.sz);
+	R = L;
 }
 
 literal(R) ::= TOK_LBRACKET(LB) list_body(L) TOK_RBRACKET(RB) TOK_COLON TOK_NAME(N). {
@@ -490,13 +564,9 @@ literal(R) ::= TOK_LBRACKET(LB) list_body(L) TOK_RBRACKET(RB) TOK_COLON TOK_NAME
 	ast_set_span(ctx->pool, R, LB.offset, RB.offset + RB.sz - LB.offset);
 }
 
-literal(R) ::= TOK_LBRACE(LB) TOK_RBRACE(RB) TOK_COLON TOK_NAME(N). {
-	R = ast_new(ctx->pool, AST_MAP);
-	ast_pool_at(ctx->pool, R)->etype = AST_ETYPE_MAP;
-
-	AST_LIST_CLR(ctx->pool, R);
-	ast_set_span(ctx->pool, R, LB.offset, RB.offset + RB.sz - LB.offset);
-	ael_apply_literal_order(ctx, R, N.str.offset, N.str.sz);
+literal(R) ::= empty_map(M) TOK_COLON TOK_NAME(N). {
+	ael_apply_literal_order(ctx, M, N.str.offset, N.str.sz);
+	R = M;
 }
 
 literal(R) ::= TOK_LBRACE(LB) map_body(M) TOK_RBRACE(RB) TOK_COLON TOK_NAME(N). {
@@ -521,7 +591,7 @@ operand(R) ::= TOK_UNKNOWN. { R = ast_new(ctx->pool, AST_UNKNOWN); }
 // `name(...)` still wins by shift via func_call; this reduces only when no
 // `(` follows.
 operand(R) ::= TOK_NAME(N). {
-	ael_diag_addf(&ctx->diags, AEL_SEV_ERROR, N.str.offset, N.str.sz,
+	ael_errf(ctx, N.str.offset, N.str.sz,
 			"unexpected identifier '%.*s' -- use $.%.*s for a bin",
 			(int)N.str.sz, TOK_STR(ctx, N), (int)N.str.sz, TOK_STR(ctx, N));
 	R = ast_new(ctx->pool, AST_UNKNOWN);
@@ -535,9 +605,9 @@ operand(R) ::= TOK_NAME(N). {
 // %syntax_error path.
 %type loop_var { ast_ref }
 
-loop_var(R) ::= TOK_AT(T).       { R = ael_new_loop_var(ctx, AS_EXP_BUILTIN_VALUE, T.str.offset, T.str.sz); STAMP(R, T); }
-loop_var(R) ::= TOK_AT_KEY(T).   { R = ael_new_loop_var(ctx, AS_EXP_BUILTIN_KEY,   T.str.offset, T.str.sz); STAMP(R, T); }
-loop_var(R) ::= TOK_AT_INDEX(T). { R = ael_new_loop_var(ctx, AS_EXP_BUILTIN_INDEX, T.str.offset, T.str.sz); STAMP(R, T); }
+loop_var(R) ::= TOK_AT(T).       { R = ael_new_loop_var(ctx, AS_EXP_BUILTIN_VALUE, T.str.offset, T.str.sz); }
+loop_var(R) ::= TOK_AT_KEY(T).   { R = ael_new_loop_var(ctx, AS_EXP_BUILTIN_KEY,   T.str.offset, T.str.sz); }
+loop_var(R) ::= TOK_AT_INDEX(T). { R = ael_new_loop_var(ctx, AS_EXP_BUILTIN_INDEX, T.str.offset, T.str.sz); }
 
 // `:T` postfix on loop_var. ael_node_apply_postfix validates against
 // AST_LOOP_VAR.valid_types (AUTO) and applies the @key→AUTO_KEY
@@ -553,7 +623,7 @@ operand(R) ::= loop_var(L). { R = L; }
 operand(R) ::= TOK_VARIABLE(V). { R = ast_new_var_ref(ctx, V.str.offset, V.str.sz); }
 
 operand(R) ::= TOK_PLACEHOLDER(V). {
-	ael_diag_add(&ctx->diags, AEL_SEV_ERROR, V.offset, V.sz,
+	ael_err(ctx, V.offset, V.sz,
 			"placeholder expressions (?N) are not yet supported");
 	// Stand-in node so the rest of the parse can proceed without
 	// NULL-deref. The diag above prevents successful compile.
@@ -582,6 +652,13 @@ bin_base(R) ::= TOK_DOLLAR_DOT(D) TOK_NAME(V) TOK_COLON type_name(T). {
 		ast_bin_set_implicit_type(ctx, R, (ast_etype)T);
 	}
 }
+// Mirrors the rule above for a create-order suffix. Needed as its own 4-token
+// form because lemon prefers shift on the first `:` after a bin, so the
+// recursive `bin_base : prop_flag` rule is only reachable for a second suffix.
+bin_base(R) ::= TOK_DOLLAR_DOT(D) TOK_NAME(V) TOK_COLON prop_flag(P). {
+	R = ast_new_bin(ctx, D.offset, V.offset + V.sz, V.str.offset, V.str.sz);
+	R = ael_node_apply_postfix(ctx, R, AEL_POSTFIX_PROP, P);
+}
 bin_base(R) ::= TOK_DOLLAR_DOT(D) TOK_NAME(V) TOK_COLON TOK_LOCAL TOK_COLON type_name(T). {
 	R = ast_new_local_bin(ctx, D.offset, V.offset + V.sz, V.str.offset,
 			V.str.sz, (ast_etype)T);
@@ -595,6 +672,13 @@ bin_base(R) ::= TOK_DOLLAR_DOT(D) TOK_STRING(V) TOK_COLON type_name(T). {
 	if (R != AST_REF_NULL) {
 		ast_bin_set_implicit_type(ctx, R, (ast_etype)T);
 	}
+}
+// Mirrors the rule above for a create-order suffix. Needed as its own 4-token
+// form because lemon prefers shift on the first `:` after a bin, so the
+// recursive `bin_base : prop_flag` rule is only reachable for a second suffix.
+bin_base(R) ::= TOK_DOLLAR_DOT(D) TOK_STRING(V) TOK_COLON prop_flag(P). {
+	R = ast_new_bin(ctx, D.offset, V.offset + V.sz, V.str.offset, V.str.sz);
+	R = ael_node_apply_postfix(ctx, R, AEL_POSTFIX_PROP, P);
 }
 bin_base(R) ::= TOK_DOLLAR_DOT(D) TOK_STRING(V) TOK_COLON TOK_LOCAL TOK_COLON type_name(T). {
 	R = ast_new_local_bin(ctx, D.offset, V.offset + V.sz, V.str.offset,
@@ -611,6 +695,14 @@ bin_base(R) ::= bin_base(B) TOK_COLON type_name(T). {
 		ast_bin_set_implicit_type(ctx, B, (ast_etype)T);
 	}
 	R = B;
+}
+
+// `:PROPERTY` postfix on a bin — a create-order names the container it creates,
+// and the bin names the top-level one. The flag is parked in the parse context
+// rather than stored on the bin node (which has no props slot) and drains onto
+// the first path segment; see ael_drain_create_props.
+bin_base(R) ::= bin_base(B) TOK_COLON prop_flag(P). {
+	R = ael_node_apply_postfix(ctx, B, AEL_POSTFIX_PROP, P);
 }
 
 // Simple bin access (no CDT path).
@@ -695,6 +787,35 @@ method_call(R) ::= func_call(C) TOK_DOT method_fn(F). {
 method_call(R) ::= method_call(C) TOK_DOT method_fn(F). {
 	R = ael_finalize_method_call(ctx, C, F);
 }
+// A loop variable as receiver. `@` also roots a path (`ctx_list ::= TOK_AT
+// TOK_DOT path_seg` below), so `@.name` is ambiguous until the method_fn's
+// TOK_LPAREN is in view — the same one-token separation that lets a bin
+// receiver carry both. Spelled with the bare token rather than loop_var so
+// both rules keep the TOK_AT TOK_DOT prefix; reducing loop_var first would
+// need the decision a token earlier than the lookahead allows, and costs a
+// parser conflict.
+//
+// @key and @index get a method but no path rule of their own: AUTO_KEY is
+// int / str / blob and @index is pinned INT, so neither is worth a path root.
+// The grammar omits that spelling rather than forbidding it.
+method_call(R) ::= TOK_AT(T) TOK_DOT method_fn(F). {
+	ast_ref lv = ael_new_loop_var(ctx, AS_EXP_BUILTIN_VALUE, T.str.offset,
+			T.str.sz);
+
+	R = ael_finalize_method_call(ctx, lv, F);
+}
+method_call(R) ::= TOK_AT_KEY(T) TOK_DOT method_fn(F). {
+	ast_ref lv = ael_new_loop_var(ctx, AS_EXP_BUILTIN_KEY, T.str.offset,
+			T.str.sz);
+
+	R = ael_finalize_method_call(ctx, lv, F);
+}
+method_call(R) ::= TOK_AT_INDEX(T) TOK_DOT method_fn(F). {
+	ast_ref lv = ael_new_loop_var(ctx, AS_EXP_BUILTIN_INDEX, T.str.offset,
+			T.str.sz);
+
+	R = ael_finalize_method_call(ctx, lv, F);
+}
 // Parenthesized arbitrary expression as receiver — exp_base is the generic
 // particle-producing receiver.
 method_call(R) ::= exp_base(B) TOK_DOT method_fn(F). {
@@ -728,10 +849,14 @@ ctx_list(R) ::= bin_base(B) TOK_DOT path_seg(S). {
 // works unchanged. ast_new_path_ctx_bin is generic — it just wraps the
 // head ast_ref in an AST_PATH_CTX regardless of node type.
 ctx_list(R) ::= exp_base(E) TOK_DOT path_seg(S). {
-	if (E == AST_REF_NULL) {
+	// Check before pinning: no-kind-of-container is refused here, wrong-kind by
+	// the pin's own conflict. One diagnostic each.
+	if (E == AST_REF_NULL || ! ael_check_path_root_is_container(ctx, E)) {
 		R = AST_REF_NULL;
 	}
 	else {
+		ael_pin_path_root_etype(ctx, E, S);
+
 		ast_ref c = ast_new_path_ctx_bin(ctx->pool, E);
 		R = ael_ctx_list_append(ctx, c, S);
 	}
@@ -747,11 +872,13 @@ ctx_list(R) ::= ctx_list(L) TOK_DOT path_seg(S). {
 // guarantees a preceding seg; pairing rules (no AND on `*[?(...)]`,
 // no two AND in a row) are checked in ael_extend_with_and_seg.
 ctx_list(R) ::= ctx_list(L) and_filter_open(BS) expr(F) TOK_RPAREN(P) TOK_RBRACKET. {
+	ael_create_park_pop(ctx);
 	ael_filter_scope_pop(ctx);
 	R = ael_extend_with_and_seg(ctx, L, F, BS, P.str.offset - BS);
 }
 
 and_filter_open(BS) ::= TOK_AMP_LBRACK_QPAREN(K). {
+	(void)ael_create_park_push(ctx);
 	(void)ael_filter_scope_push(ctx);
 	BS = K.str.offset + K.str.sz;
 }
@@ -762,13 +889,7 @@ and_filter_open(BS) ::= TOK_AMP_LBRACK_QPAREN(K). {
 ctx_list(R) ::= TOK_AT(T) TOK_DOT path_seg(S). {
 	ast_ref lv = ael_new_loop_var(ctx, AS_EXP_BUILTIN_VALUE, T.str.offset, T.str.sz);
 
-	if (lv != AST_REF_NULL && S != AST_REF_NULL) {
-		ast_node* sp = ast_pool_at(ctx->pool, S);
-
-		ast_pool_at(ctx->pool, lv)->etype =
-				(ast_node_table[sp->type].flags & AST_NF_MAP_SEG) ?
-				AST_ETYPE_MAP : AST_ETYPE_LIST;
-	}
+	ael_pin_path_root_etype(ctx, lv, S);
 
 	if (lv == AST_REF_NULL) {
 		R = AST_REF_NULL;
@@ -864,18 +985,26 @@ func_call(R) ::= TOK_NAME(F) TOK_LPAREN TOK_RPAREN. {
 // the whole func table here (its sole purpose is the push decision). NOTE:
 // ael_resolve_modify_fn pops on AEL_FAM_MODIFY — if another modify-family call
 // is ever added, make this a family lookup again so push/pop stay balanced.
+//
+// The create-order park is pushed here and popped in the rules below. The pop
+// has to stay in those rules: the enclosing `... TOK_DOT method_fn` reduction
+// finalizes the call, and by then the flag must be back. Where in the action it
+// sits does not matter -- resolving the name only builds the op node.
 %type method_open { token_value }
 method_open(O) ::= TOK_NAME(F) TOK_LPAREN. {
 	O = F;
+	(void)ael_create_park_push(ctx);
 
 	if (F.str.sz == 6 && memcmp(ctx->input + F.str.offset, "modify", 6) == 0) {
 		(void)ael_filter_scope_push(ctx);
 	}
 }
 method_fn(R) ::= method_open(O) arg_list(L) TOK_RPAREN. {
+	ael_create_park_pop(ctx);
 	R = ael_resolve_method_fn(ctx, O.str.offset, O.str.sz, L);
 }
 method_fn(R) ::= method_open(O) TOK_RPAREN. {
+	ael_create_park_pop(ctx);
 	R = ael_resolve_method_fn(ctx, O.str.offset, O.str.sz,
 			ael_new_empty_arg_list(ctx));
 }
@@ -899,6 +1028,7 @@ path_seg(R) ::= TOK_STAR. {
 // with the `)`'s offset we capture the body's source byte range on the
 // wildcard seg for use by codegen's slow-path diagnostic.
 path_seg(R) ::= filter_open(BS) expr(F) TOK_RPAREN(P) TOK_RBRACKET. {
+	ael_create_park_pop(ctx);
 	ael_filter_scope_pop(ctx);
 	R = ael_new_wild_filter_seg(ctx, F, BS, P.str.offset - BS);
 }
@@ -906,6 +1036,7 @@ path_seg(R) ::= filter_open(BS) expr(F) TOK_RPAREN(P) TOK_RBRACKET. {
 // filter_open is a single-token reduction; its action runs the moment
 // `*[?(` has been consumed, before the filter expression is parsed.
 filter_open(BS) ::= TOK_STAR TOK_LBRACK_QPAREN(K). {
+	(void)ael_create_park_push(ctx);
 	(void)ael_filter_scope_push(ctx);
 	BS = K.str.offset + K.str.sz;
 }
@@ -944,11 +1075,11 @@ path_seg(R) ::= brace_open(INV) key_val(V) TOK_RBRACE. {
 	seg_operand_span(ctx, V, AST_REF_NULL, &seg_off, &seg_sz);
 
 	if (INV) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, seg_off, seg_sz,
+		ael_err(ctx, seg_off, seg_sz,
 				"singular map segment cannot be inverted");
 	}
 	if (ast_pool_at(ctx->pool, V)->type != AST_INT) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, seg_off, seg_sz,
+		ael_err(ctx, seg_off, seg_sz,
 				"bare {x} is index — for a key use {@x} or just x");
 		R = AST_REF_NULL;
 	}
@@ -958,44 +1089,13 @@ path_seg(R) ::= brace_open(INV) key_val(V) TOK_RBRACE. {
 	}
 }
 path_seg(R) ::= brace_open(INV) key_val(A) TOK_COLON key_val(B) TOK_RBRACE. {
-	uint32_t seg_off;
-	uint32_t seg_sz;
-
-	seg_operand_span(ctx, A, B, &seg_off, &seg_sz);
-
-	if (ast_pool_at(ctx->pool, A)->type != AST_INT ||
-			ast_pool_at(ctx->pool, B)->type != AST_INT) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, seg_off, seg_sz,
-				"bare {a:b} is index range — for a key range, use {@a:b}");
-		R = AST_REF_NULL;
-	}
-	else if ((ast_pool_at(ctx->pool, A)->u.ival < 0) !=
-			(ast_pool_at(ctx->pool, B)->u.ival < 0)) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, seg_off, seg_sz,
-				"index range endpoints must have the same sign — count = end - start can't be computed at parse time when signs differ");
-		R = AST_REF_NULL;
-	}
-	else {
-		R = ast_new_range_seg(ctx->pool, AST_MAP_INDEX_RANGE, A, B);
-		if (INV) { ast_pool_at(ctx->pool, R)->u.range_seg.inverted = true; }
-	}
+	R = seg_int_range(ctx, AST_MAP_INDEX_RANGE, A, B, INV,
+			"bare {a:b} is index range — for a key range, use {@a:b}",
+			"index range endpoints must have the same sign — count = end - start can't be computed at parse time when signs differ");
 }
 path_seg(R) ::= brace_open(INV) key_val(A) TOK_COLON TOK_RBRACE. {
-	uint32_t seg_off;
-	uint32_t seg_sz;
-
-	seg_operand_span(ctx, A, AST_REF_NULL, &seg_off, &seg_sz);
-
-	if (ast_pool_at(ctx->pool, A)->type != AST_INT) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, seg_off, seg_sz,
-				"bare {a:} is index range — for a key range, use {@a:}");
-		R = AST_REF_NULL;
-	}
-	else {
-		R = ast_new_range_seg(ctx->pool, AST_MAP_INDEX_RANGE, A,
-				AST_REF_NULL);
-		if (INV) { ast_pool_at(ctx->pool, R)->u.range_seg.inverted = true; }
-	}
+	R = seg_int_range(ctx, AST_MAP_INDEX_RANGE, A, AST_REF_NULL, INV,
+			"bare {a:} is index range — for a key range, use {@a:}", NULL);
 }
 // Open-start `{:B}`: B must be a non-negative int -- INDEX_RANGE
 // with synthesized start=0 (wire-identical to `{0:B}`). For a key
@@ -1003,27 +1103,9 @@ path_seg(R) ::= brace_open(INV) key_val(A) TOK_COLON TOK_RBRACE. {
 // is non-negative) -- count = end - start can't be computed at parse
 // time when signs differ.
 path_seg(R) ::= brace_open(INV) TOK_COLON key_val(B) TOK_RBRACE. {
-	uint32_t seg_off;
-	uint32_t seg_sz;
-
-	seg_operand_span(ctx, B, AST_REF_NULL, &seg_off, &seg_sz);
-
-	if (ast_pool_at(ctx->pool, B)->type != AST_INT) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, seg_off, seg_sz,
-				"bare {:b} is index range — for a key range, use {@:b}");
-		R = AST_REF_NULL;
-	}
-	else if (ast_pool_at(ctx->pool, B)->u.ival < 0) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, seg_off, seg_sz,
-				"open-start index range needs a non-negative end (synthesized start=0; mixed-sign with end<0)");
-		R = AST_REF_NULL;
-	}
-	else {
-		ast_ref start = ast_new_int(ctx->pool, 0);
-
-		R = ast_new_range_seg(ctx->pool, AST_MAP_INDEX_RANGE, start, B);
-		if (INV) { ast_pool_at(ctx->pool, R)->u.range_seg.inverted = true; }
-	}
+	R = seg_open_start_int(ctx, AST_MAP_INDEX_RANGE, B, INV,
+			"bare {:b} is index range — for a key range, use {@:b}",
+			"open-start index range needs a non-negative end (synthesized start=0; mixed-sign with end<0)");
 }
 // Key-relative index range `{S:E~K}` and open-end `{S:~K}`. S/E are
 // rank offsets relative to the position of key K in the map; emits
@@ -1036,7 +1118,7 @@ path_seg(R) ::= brace_open(INV) key_val(A) TOK_COLON key_val(B) TOK_TILDE key_va
 
 	if (ast_pool_at(ctx->pool, A)->type != AST_INT ||
 			ast_pool_at(ctx->pool, B)->type != AST_INT) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, seg_off, seg_sz,
+		ael_err(ctx, seg_off, seg_sz,
 				"relative range endpoints must be int literals");
 		R = AST_REF_NULL;
 	}
@@ -1045,10 +1127,7 @@ path_seg(R) ::= brace_open(INV) key_val(A) TOK_COLON key_val(B) TOK_TILDE key_va
 	}
 	else {
 		R = ast_new_rel_range_seg(ctx->pool, AST_MAP_INDEX_REL_RANGE, A, B,
-				V);
-		if (INV) {
-			ast_pool_at(ctx->pool, R)->u.rel_range_seg.inverted = true;
-		}
+				V, INV != 0);
 	}
 }
 path_seg(R) ::= brace_open(INV) key_val(A) TOK_COLON TOK_TILDE key_val(V) TOK_RBRACE. {
@@ -1058,63 +1137,58 @@ path_seg(R) ::= brace_open(INV) key_val(A) TOK_COLON TOK_TILDE key_val(V) TOK_RB
 	seg_operand_span(ctx, A, AST_REF_NULL, &seg_off, &seg_sz);
 
 	if (ast_pool_at(ctx->pool, A)->type != AST_INT) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, seg_off, seg_sz,
+		ael_err(ctx, seg_off, seg_sz,
 				"relative range start must be an int literal");
 		R = AST_REF_NULL;
 	}
 	else {
 		R = ast_new_rel_range_seg(ctx->pool, AST_MAP_INDEX_REL_RANGE, A,
-				AST_REF_NULL, V);
-		if (INV) {
-			ast_pool_at(ctx->pool, R)->u.rel_range_seg.inverted = true;
-		}
+				AST_REF_NULL, V, INV != 0);
 	}
 }
+// Bare-brace comma lists are a ratified spec rejection (the key dimension
+// inside {...} is explicit: {@a,b,c}), and there is no index-list wire op.
+// Consume the full shape so the user gets guidance instead of a bare
+// syntax error.
 path_seg(R) ::= brace_open(INV) key_val(A) TOK_COMMA key_list(L) TOK_RBRACE. {
-	ast_node* n = ast_pool_at(ctx->pool, L);
-	ast_pool_at(ctx->pool, A)->next = n->u.list.head;
-	uint32_t count = n->u.list.count + 1;
-	n->type = AST_MAP_KEY_LIST;
-	n->u.list_seg.head = A;
-	n->u.list_seg.count = count;
-	n->u.list_seg.inverted = INV;
-	R = L;
+	(void)INV;
+	(void)L;
+	R = seg_list_unsupported(ctx, A,
+			"bare {a,b} is not a selector — for a key list use {@a,b}");
+}
+path_seg(R) ::= brace_open(INV) key_val(A) TOK_COMMA TOK_RBRACE. {
+	(void)INV;
+	R = seg_list_unsupported(ctx, A,
+			"bare {a,b} is not a selector — for a key list use {@a,b}");
 }
 
 // Map value segments via {= } or {!= }: singular, value range, value list.
 path_seg(R) ::= brace_eq_open(INV) key_val(V) TOK_RBRACE. {
-	if (INV) {
-		uint32_t seg_off;
-		uint32_t seg_sz;
-
-		seg_operand_span(ctx, V, AST_REF_NULL, &seg_off, &seg_sz);
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, seg_off, seg_sz,
-				"singular map segment cannot be inverted");
-	}
+	seg_inv_err(ctx, V, INV, "singular map segment cannot be inverted");
 	R = ast_new(ctx->pool, AST_MAP_VALUE);
 	ast_pool_at(ctx->pool, R)->u.seg.operand = V;
 }
 path_seg(R) ::= brace_eq_open(INV) key_val(A) TOK_COLON key_val(B) TOK_RBRACE. {
-	R = ast_new_range_seg(ctx->pool, AST_MAP_VALUE_RANGE, A, B);
-	if (INV) { ast_pool_at(ctx->pool, R)->u.range_seg.inverted = true; }
+	R = ast_new_range_seg(ctx->pool, AST_MAP_VALUE_RANGE, A, B, INV != 0);
 }
 path_seg(R) ::= brace_eq_open(INV) key_val(A) TOK_COLON TOK_RBRACE. {
-	R = ast_new_range_seg(ctx->pool, AST_MAP_VALUE_RANGE, A, AST_REF_NULL);
-	if (INV) { ast_pool_at(ctx->pool, R)->u.range_seg.inverted = true; }
+	R = ast_new_range_seg(ctx->pool, AST_MAP_VALUE_RANGE, A, AST_REF_NULL, INV != 0);
 }
 // Open-start `{=:V}`: NIL value_start — runtime treats as "from
 // smallest possible value".
 path_seg(R) ::= brace_eq_open(INV) TOK_COLON key_val(B) TOK_RBRACE. {
 	ast_ref nil_start = ast_new_nil(ctx->pool);
-	R = ast_new_range_seg(ctx->pool, AST_MAP_VALUE_RANGE, nil_start, B);
-	if (INV) { ast_pool_at(ctx->pool, R)->u.range_seg.inverted = true; }
+	R = ast_new_range_seg(ctx->pool, AST_MAP_VALUE_RANGE, nil_start, B, INV != 0);
 }
 path_seg(R) ::= brace_eq_open(INV) key_val(A) TOK_COMMA key_list(L) TOK_RBRACE. {
 	ast_node* n = ast_pool_at(ctx->pool, L);
+	// The two union variants alias -- snapshot before re-laying.
+	ast_ref tail = n->u.list.tail;
 	ast_pool_at(ctx->pool, A)->next = n->u.list.head;
 	uint32_t count = n->u.list.count + 1;
 	n->type = AST_MAP_VALUE_LIST;
 	n->u.list_seg.head = A;
+	n->u.list_seg.tail = tail;
 	n->u.list_seg.count = count;
 	n->u.list_seg.inverted = INV;
 	R = L;
@@ -1125,117 +1199,86 @@ path_seg(R) ::= brace_eq_open(INV) key_val(V) TOK_COMMA TOK_RBRACE. {
 	ast_node* n = ast_pool_at(ctx->pool, R);
 	ast_pool_at(ctx->pool, V)->next = AST_REF_NULL;
 	n->u.list_seg.head = V;
+	n->u.list_seg.tail = V;
 	n->u.list_seg.count = 1;
 	n->u.list_seg.inverted = INV;
 }
 
 // Map rank segments via {# } or {!# }: singular, rank range.
-path_seg(R) ::= brace_hash_open(INV) rank_val(V) TOK_RBRACE. {
-	if (INV) {
-		uint32_t seg_off;
-		uint32_t seg_sz;
-
-		seg_operand_span(ctx, V, AST_REF_NULL, &seg_off, &seg_sz);
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, seg_off, seg_sz,
-				"singular map segment cannot be inverted");
-	}
+path_seg(R) ::= brace_hash_open(INV) int_val(V) TOK_RBRACE. {
+	seg_inv_err(ctx, V, INV, "singular map segment cannot be inverted");
 	R = ast_new(ctx->pool, AST_MAP_RANK);
 	ast_pool_at(ctx->pool, R)->u.seg.operand = V;
 }
-path_seg(R) ::= brace_hash_open(INV) rank_val(A) TOK_COLON rank_val(B) TOK_RBRACE. {
-	uint32_t seg_off;
-	uint32_t seg_sz;
-
-	seg_operand_span(ctx, A, B, &seg_off, &seg_sz);
-
-	if ((ast_pool_at(ctx->pool, A)->u.ival < 0) !=
-			(ast_pool_at(ctx->pool, B)->u.ival < 0)) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, seg_off, seg_sz,
-				"rank range endpoints must have the same sign — count = end - start can't be computed at parse time when signs differ");
-		R = AST_REF_NULL;
-	}
-	else {
-		R = ast_new_range_seg(ctx->pool, AST_MAP_RANK_RANGE, A, B);
-		if (INV) { ast_pool_at(ctx->pool, R)->u.range_seg.inverted = true; }
-	}
+path_seg(R) ::= brace_hash_open(INV) int_val(A) TOK_COLON int_val(B) TOK_RBRACE. {
+	R = seg_int_range(ctx, AST_MAP_RANK_RANGE, A, B, INV, NULL,
+			"rank range endpoints must have the same sign — count = end - start can't be computed at parse time when signs differ");
 }
-path_seg(R) ::= brace_hash_open(INV) rank_val(A) TOK_COLON TOK_RBRACE. {
-	R = ast_new_range_seg(ctx->pool, AST_MAP_RANK_RANGE, A, AST_REF_NULL);
-	if (INV) { ast_pool_at(ctx->pool, R)->u.range_seg.inverted = true; }
+path_seg(R) ::= brace_hash_open(INV) int_val(A) TOK_COLON TOK_RBRACE. {
+	R = ast_new_range_seg(ctx->pool, AST_MAP_RANK_RANGE, A, AST_REF_NULL, INV != 0);
 }
-path_seg(R) ::= brace_hash_open(INV) TOK_COLON rank_val(B) TOK_RBRACE. {
-	uint32_t seg_off;
-	uint32_t seg_sz;
-
-	seg_operand_span(ctx, B, AST_REF_NULL, &seg_off, &seg_sz);
-
-	if (ast_pool_at(ctx->pool, B)->u.ival < 0) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, seg_off, seg_sz,
-				"open-start rank range needs a non-negative end (synthesized start=0; mixed-sign with end<0)");
-		R = AST_REF_NULL;
-	}
-	else {
-		ast_ref zero = ast_new_int(ctx->pool, 0);
-		R = ast_new_range_seg(ctx->pool, AST_MAP_RANK_RANGE, zero, B);
-		if (INV) { ast_pool_at(ctx->pool, R)->u.range_seg.inverted = true; }
-	}
+path_seg(R) ::= brace_hash_open(INV) TOK_COLON int_val(B) TOK_RBRACE. {
+	R = seg_open_start_int(ctx, AST_MAP_RANK_RANGE, B, INV, NULL,
+			"open-start rank range needs a non-negative end (synthesized start=0; mixed-sign with end<0)");
 }
 // Value-relative rank range `{#S:E~V}` and open-end `{#S:~V}`. S/E
 // are rank offsets relative to the rank of value V; emits
 // MAP_*_BY_VALUE_REL_RANK_RANGE.
-path_seg(R) ::= brace_hash_open(INV) rank_val(A) TOK_COLON rank_val(B) TOK_TILDE key_val(V) TOK_RBRACE. {
+path_seg(R) ::= brace_hash_open(INV) int_val(A) TOK_COLON int_val(B) TOK_TILDE key_val(V) TOK_RBRACE. {
 	if (! ael_rel_range_count_ok(ctx, A, B)) {
 		R = AST_REF_NULL;
 	}
 	else {
-		R = ast_new_rel_range_seg(ctx->pool, AST_MAP_RANK_REL_RANGE, A, B, V);
-		if (INV) {
-			ast_pool_at(ctx->pool, R)->u.rel_range_seg.inverted = true;
-		}
+		R = ast_new_rel_range_seg(ctx->pool, AST_MAP_RANK_REL_RANGE, A, B, V, INV != 0);
 	}
 }
-path_seg(R) ::= brace_hash_open(INV) rank_val(A) TOK_COLON TOK_TILDE key_val(V) TOK_RBRACE. {
+path_seg(R) ::= brace_hash_open(INV) int_val(A) TOK_COLON TOK_TILDE key_val(V) TOK_RBRACE. {
 	R = ast_new_rel_range_seg(ctx->pool, AST_MAP_RANK_REL_RANGE, A,
-			AST_REF_NULL, V);
-	if (INV) { ast_pool_at(ctx->pool, R)->u.rel_range_seg.inverted = true; }
+			AST_REF_NULL, V, INV != 0);
+}
+
+// No rank-list wire op exists — reject the comma shapes with guidance.
+path_seg(R) ::= brace_hash_open(INV) int_val(A) TOK_COMMA key_list(L) TOK_RBRACE. {
+	(void)INV;
+	(void)L;
+	R = seg_list_unsupported(ctx, A,
+			"rank lists are not supported — use {#a:b} or a value list {=a,b}");
+}
+path_seg(R) ::= brace_hash_open(INV) int_val(A) TOK_COMMA TOK_RBRACE. {
+	(void)INV;
+	R = seg_list_unsupported(ctx, A,
+			"rank lists are not supported — use {#a:b} or a value list {=a,b}");
 }
 
 // Map explicit-key segments via {@ } or {!@ }: singular, range, key list.
 // Same AST as the bare {} forms but forces KEY semantics regardless of
 // operand type — handy for disambiguating int-keyed maps from index ops.
 path_seg(R) ::= brace_at_open(INV) key_val(V) TOK_RBRACE. {
-	if (INV) {
-		uint32_t seg_off;
-		uint32_t seg_sz;
-
-		seg_operand_span(ctx, V, AST_REF_NULL, &seg_off, &seg_sz);
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, seg_off, seg_sz,
-				"singular map segment cannot be inverted");
-	}
+	seg_inv_err(ctx, V, INV, "singular map segment cannot be inverted");
 	R = ast_new(ctx->pool, AST_MAP_KEY);
 	ast_pool_at(ctx->pool, R)->u.seg.operand = V;
 }
 path_seg(R) ::= brace_at_open(INV) key_val(A) TOK_COLON key_val(B) TOK_RBRACE. {
-	R = ast_new_range_seg(ctx->pool, AST_MAP_KEY_RANGE, A, B);
-	if (INV) { ast_pool_at(ctx->pool, R)->u.range_seg.inverted = true; }
+	R = ast_new_range_seg(ctx->pool, AST_MAP_KEY_RANGE, A, B, INV != 0);
 }
 path_seg(R) ::= brace_at_open(INV) key_val(A) TOK_COLON TOK_RBRACE. {
-	R = ast_new_range_seg(ctx->pool, AST_MAP_KEY_RANGE, A, AST_REF_NULL);
-	if (INV) { ast_pool_at(ctx->pool, R)->u.range_seg.inverted = true; }
+	R = ast_new_range_seg(ctx->pool, AST_MAP_KEY_RANGE, A, AST_REF_NULL, INV != 0);
 }
 // Open-start `{@:K}`: NIL key_start — runtime treats as "from
 // smallest possible key".
 path_seg(R) ::= brace_at_open(INV) TOK_COLON key_val(B) TOK_RBRACE. {
 	ast_ref nil_start = ast_new_nil(ctx->pool);
-	R = ast_new_range_seg(ctx->pool, AST_MAP_KEY_RANGE, nil_start, B);
-	if (INV) { ast_pool_at(ctx->pool, R)->u.range_seg.inverted = true; }
+	R = ast_new_range_seg(ctx->pool, AST_MAP_KEY_RANGE, nil_start, B, INV != 0);
 }
 path_seg(R) ::= brace_at_open(INV) key_val(A) TOK_COMMA key_list(L) TOK_RBRACE. {
 	ast_node* n = ast_pool_at(ctx->pool, L);
+	// The two union variants alias -- snapshot before re-laying.
+	ast_ref tail = n->u.list.tail;
 	ast_pool_at(ctx->pool, A)->next = n->u.list.head;
 	uint32_t count = n->u.list.count + 1;
 	n->type = AST_MAP_KEY_LIST;
 	n->u.list_seg.head = A;
+	n->u.list_seg.tail = tail;
 	n->u.list_seg.count = count;
 	n->u.list_seg.inverted = INV;
 	R = L;
@@ -1246,96 +1289,69 @@ path_seg(R) ::= brace_at_open(INV) key_val(V) TOK_COMMA TOK_RBRACE. {
 	ast_node* n = ast_pool_at(ctx->pool, R);
 	ast_pool_at(ctx->pool, V)->next = AST_REF_NULL;
 	n->u.list_seg.head = V;
+	n->u.list_seg.tail = V;
 	n->u.list_seg.count = 1;
 	n->u.list_seg.inverted = INV;
 }
 
 // List index segments via [ ] or [! ]: singular, index range.
-path_seg(R) ::= bracket_open(INV) idx_val(V) TOK_RBRACKET. {
-	if (INV) {
-		uint32_t seg_off;
-		uint32_t seg_sz;
-
-		seg_operand_span(ctx, V, AST_REF_NULL, &seg_off, &seg_sz);
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, seg_off, seg_sz,
-				"singular list segment cannot be inverted");
-	}
+path_seg(R) ::= bracket_open(INV) int_val(V) TOK_RBRACKET. {
+	seg_inv_err(ctx, V, INV, "singular list segment cannot be inverted");
 	R = ast_new(ctx->pool, AST_LIST_INDEX);
 	ast_pool_at(ctx->pool, R)->u.seg.operand = V;
 }
-path_seg(R) ::= bracket_open(INV) idx_val(A) TOK_COLON idx_val(B) TOK_RBRACKET. {
-	uint32_t seg_off;
-	uint32_t seg_sz;
-
-	seg_operand_span(ctx, A, B, &seg_off, &seg_sz);
-
-	if ((ast_pool_at(ctx->pool, A)->u.ival < 0) !=
-			(ast_pool_at(ctx->pool, B)->u.ival < 0)) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, seg_off, seg_sz,
-				"index range endpoints must have the same sign — count = end - start can't be computed at parse time when signs differ");
-		R = AST_REF_NULL;
-	}
-	else {
-		R = ast_new_range_seg(ctx->pool, AST_LIST_INDEX_RANGE, A, B);
-		if (INV) { ast_pool_at(ctx->pool, R)->u.range_seg.inverted = true; }
-	}
+path_seg(R) ::= bracket_open(INV) int_val(A) TOK_COLON int_val(B) TOK_RBRACKET. {
+	R = seg_int_range(ctx, AST_LIST_INDEX_RANGE, A, B, INV, NULL,
+			"index range endpoints must have the same sign — count = end - start can't be computed at parse time when signs differ");
 }
-path_seg(R) ::= bracket_open(INV) idx_val(A) TOK_COLON TOK_RBRACKET. {
-	R = ast_new_range_seg(ctx->pool, AST_LIST_INDEX_RANGE, A, AST_REF_NULL);
-	if (INV) { ast_pool_at(ctx->pool, R)->u.range_seg.inverted = true; }
+path_seg(R) ::= bracket_open(INV) int_val(A) TOK_COLON TOK_RBRACKET. {
+	R = ast_new_range_seg(ctx->pool, AST_LIST_INDEX_RANGE, A, AST_REF_NULL, INV != 0);
 }
-path_seg(R) ::= bracket_open(INV) TOK_COLON idx_val(B) TOK_RBRACKET. {
-	uint32_t seg_off;
-	uint32_t seg_sz;
+path_seg(R) ::= bracket_open(INV) TOK_COLON int_val(B) TOK_RBRACKET. {
+	R = seg_open_start_int(ctx, AST_LIST_INDEX_RANGE, B, INV, NULL,
+			"open-start index range needs a non-negative end (synthesized start=0; mixed-sign with end<0)");
+}
 
-	seg_operand_span(ctx, B, AST_REF_NULL, &seg_off, &seg_sz);
-
-	if (ast_pool_at(ctx->pool, B)->u.ival < 0) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, seg_off, seg_sz,
-				"open-start index range needs a non-negative end (synthesized start=0; mixed-sign with end<0)");
-		R = AST_REF_NULL;
-	}
-	else {
-		ast_ref zero = ast_new_int(ctx->pool, 0);
-		R = ast_new_range_seg(ctx->pool, AST_LIST_INDEX_RANGE, zero, B);
-		if (INV) { ast_pool_at(ctx->pool, R)->u.range_seg.inverted = true; }
-	}
+// No index-list wire op exists — reject the comma shapes with guidance.
+path_seg(R) ::= bracket_open(INV) int_val(A) TOK_COMMA key_list(L) TOK_RBRACKET. {
+	(void)INV;
+	(void)L;
+	R = seg_list_unsupported(ctx, A,
+			"index lists are not supported — use [a:b] or a value list [=a,b]");
+}
+path_seg(R) ::= bracket_open(INV) int_val(A) TOK_COMMA TOK_RBRACKET. {
+	(void)INV;
+	R = seg_list_unsupported(ctx, A,
+			"index lists are not supported — use [a:b] or a value list [=a,b]");
 }
 
 // List value segments via [= ] or [!= ]: singular, value range, value list.
 path_seg(R) ::= bracket_eq_open(INV) key_val(V) TOK_RBRACKET. {
-	if (INV) {
-		uint32_t seg_off;
-		uint32_t seg_sz;
-
-		seg_operand_span(ctx, V, AST_REF_NULL, &seg_off, &seg_sz);
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, seg_off, seg_sz,
-				"singular list segment cannot be inverted");
-	}
+	seg_inv_err(ctx, V, INV, "singular list segment cannot be inverted");
 	R = ast_new(ctx->pool, AST_LIST_VALUE);
 	ast_pool_at(ctx->pool, R)->u.seg.operand = V;
 }
 path_seg(R) ::= bracket_eq_open(INV) key_val(A) TOK_COLON key_val(B) TOK_RBRACKET. {
-	R = ast_new_range_seg(ctx->pool, AST_LIST_VALUE_RANGE, A, B);
-	if (INV) { ast_pool_at(ctx->pool, R)->u.range_seg.inverted = true; }
+	R = ast_new_range_seg(ctx->pool, AST_LIST_VALUE_RANGE, A, B, INV != 0);
 }
 path_seg(R) ::= bracket_eq_open(INV) key_val(A) TOK_COLON TOK_RBRACKET. {
-	R = ast_new_range_seg(ctx->pool, AST_LIST_VALUE_RANGE, A, AST_REF_NULL);
-	if (INV) { ast_pool_at(ctx->pool, R)->u.range_seg.inverted = true; }
+	R = ast_new_range_seg(ctx->pool, AST_LIST_VALUE_RANGE, A, AST_REF_NULL, INV != 0);
 }
 // Open-start `[=:V]`: NIL value_start — runtime treats as "from
 // smallest possible value".
 path_seg(R) ::= bracket_eq_open(INV) TOK_COLON key_val(B) TOK_RBRACKET. {
 	ast_ref nil_start = ast_new_nil(ctx->pool);
-	R = ast_new_range_seg(ctx->pool, AST_LIST_VALUE_RANGE, nil_start, B);
-	if (INV) { ast_pool_at(ctx->pool, R)->u.range_seg.inverted = true; }
+	R = ast_new_range_seg(ctx->pool, AST_LIST_VALUE_RANGE, nil_start, B, INV != 0);
 }
 path_seg(R) ::= bracket_eq_open(INV) key_val(A) TOK_COMMA key_list(L) TOK_RBRACKET. {
 	ast_node* n = ast_pool_at(ctx->pool, L);
+	// The two union variants alias -- snapshot before re-laying.
+	ast_ref tail = n->u.list.tail;
 	ast_pool_at(ctx->pool, A)->next = n->u.list.head;
 	uint32_t count = n->u.list.count + 1;
 	n->type = AST_LIST_VALUE_LIST;
 	n->u.list_seg.head = A;
+	n->u.list_seg.tail = tail;
 	n->u.list_seg.count = count;
 	n->u.list_seg.inverted = INV;
 	R = L;
@@ -1346,79 +1362,42 @@ path_seg(R) ::= bracket_eq_open(INV) key_val(V) TOK_COMMA TOK_RBRACKET. {
 	ast_node* n = ast_pool_at(ctx->pool, R);
 	ast_pool_at(ctx->pool, V)->next = AST_REF_NULL;
 	n->u.list_seg.head = V;
+	n->u.list_seg.tail = V;
 	n->u.list_seg.count = 1;
 	n->u.list_seg.inverted = INV;
 }
 
 // List rank segments via [# ] or [!# ]: singular, rank range.
-path_seg(R) ::= bracket_hash_open(INV) rank_val(V) TOK_RBRACKET. {
-	if (INV) {
-		uint32_t seg_off;
-		uint32_t seg_sz;
-
-		seg_operand_span(ctx, V, AST_REF_NULL, &seg_off, &seg_sz);
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, seg_off, seg_sz,
-				"singular list segment cannot be inverted");
-	}
+path_seg(R) ::= bracket_hash_open(INV) int_val(V) TOK_RBRACKET. {
+	seg_inv_err(ctx, V, INV, "singular list segment cannot be inverted");
 	R = ast_new(ctx->pool, AST_LIST_RANK);
 	ast_pool_at(ctx->pool, R)->u.seg.operand = V;
 }
-path_seg(R) ::= bracket_hash_open(INV) rank_val(A) TOK_COLON rank_val(B) TOK_RBRACKET. {
-	uint32_t seg_off;
-	uint32_t seg_sz;
-
-	seg_operand_span(ctx, A, B, &seg_off, &seg_sz);
-
-	if ((ast_pool_at(ctx->pool, A)->u.ival < 0) !=
-			(ast_pool_at(ctx->pool, B)->u.ival < 0)) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, seg_off, seg_sz,
-				"rank range endpoints must have the same sign — count = end - start can't be computed at parse time when signs differ");
-		R = AST_REF_NULL;
-	}
-	else {
-		R = ast_new_range_seg(ctx->pool, AST_LIST_RANK_RANGE, A, B);
-		if (INV) { ast_pool_at(ctx->pool, R)->u.range_seg.inverted = true; }
-	}
+path_seg(R) ::= bracket_hash_open(INV) int_val(A) TOK_COLON int_val(B) TOK_RBRACKET. {
+	R = seg_int_range(ctx, AST_LIST_RANK_RANGE, A, B, INV, NULL,
+			"rank range endpoints must have the same sign — count = end - start can't be computed at parse time when signs differ");
 }
-path_seg(R) ::= bracket_hash_open(INV) rank_val(A) TOK_COLON TOK_RBRACKET. {
-	R = ast_new_range_seg(ctx->pool, AST_LIST_RANK_RANGE, A, AST_REF_NULL);
-	if (INV) { ast_pool_at(ctx->pool, R)->u.range_seg.inverted = true; }
+path_seg(R) ::= bracket_hash_open(INV) int_val(A) TOK_COLON TOK_RBRACKET. {
+	R = ast_new_range_seg(ctx->pool, AST_LIST_RANK_RANGE, A, AST_REF_NULL, INV != 0);
 }
-path_seg(R) ::= bracket_hash_open(INV) TOK_COLON rank_val(B) TOK_RBRACKET. {
-	uint32_t seg_off;
-	uint32_t seg_sz;
-
-	seg_operand_span(ctx, B, AST_REF_NULL, &seg_off, &seg_sz);
-
-	if (ast_pool_at(ctx->pool, B)->u.ival < 0) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, seg_off, seg_sz,
-				"open-start rank range needs a non-negative end (synthesized start=0; mixed-sign with end<0)");
-		R = AST_REF_NULL;
-	}
-	else {
-		ast_ref zero = ast_new_int(ctx->pool, 0);
-		R = ast_new_range_seg(ctx->pool, AST_LIST_RANK_RANGE, zero, B);
-		if (INV) { ast_pool_at(ctx->pool, R)->u.range_seg.inverted = true; }
-	}
+path_seg(R) ::= bracket_hash_open(INV) TOK_COLON int_val(B) TOK_RBRACKET. {
+	R = seg_open_start_int(ctx, AST_LIST_RANK_RANGE, B, INV, NULL,
+			"open-start rank range needs a non-negative end (synthesized start=0; mixed-sign with end<0)");
 }
 // Value-relative list rank range `[#S:E~V]` and open-end `[#S:~V]`.
 // S/E are rank offsets relative to the rank of value V; emits
 // LIST_*_BY_VALUE_REL_RANK_RANGE.
-path_seg(R) ::= bracket_hash_open(INV) rank_val(A) TOK_COLON rank_val(B) TOK_TILDE key_val(V) TOK_RBRACKET. {
+path_seg(R) ::= bracket_hash_open(INV) int_val(A) TOK_COLON int_val(B) TOK_TILDE key_val(V) TOK_RBRACKET. {
 	if (! ael_rel_range_count_ok(ctx, A, B)) {
 		R = AST_REF_NULL;
 	}
 	else {
-		R = ast_new_rel_range_seg(ctx->pool, AST_LIST_RANK_REL_RANGE, A, B, V);
-		if (INV) {
-			ast_pool_at(ctx->pool, R)->u.rel_range_seg.inverted = true;
-		}
+		R = ast_new_rel_range_seg(ctx->pool, AST_LIST_RANK_REL_RANGE, A, B, V, INV != 0);
 	}
 }
-path_seg(R) ::= bracket_hash_open(INV) rank_val(A) TOK_COLON TOK_TILDE key_val(V) TOK_RBRACKET. {
+path_seg(R) ::= bracket_hash_open(INV) int_val(A) TOK_COLON TOK_TILDE key_val(V) TOK_RBRACKET. {
 	R = ast_new_rel_range_seg(ctx->pool, AST_LIST_RANK_REL_RANGE, A,
-			AST_REF_NULL, V);
-	if (INV) { ast_pool_at(ctx->pool, R)->u.rel_range_seg.inverted = true; }
+			AST_REF_NULL, V, INV != 0);
 }
 
 // `:PROPERTY` postfix on path-seg — attaches a ctx-create flag bit
@@ -1443,6 +1422,19 @@ path_seg(R) ::= path_seg(S) TOK_COLON type_name(T). {
 //
 
 // Opening bracket non-terminals (capture inverted flag).
+// No rank-list wire op exists — reject the comma shapes with guidance.
+path_seg(R) ::= bracket_hash_open(INV) int_val(A) TOK_COMMA key_list(L) TOK_RBRACKET. {
+	(void)INV;
+	(void)L;
+	R = seg_list_unsupported(ctx, A,
+			"rank lists are not supported — use [#a:b] or a value list [=a,b]");
+}
+path_seg(R) ::= bracket_hash_open(INV) int_val(A) TOK_COMMA TOK_RBRACKET. {
+	(void)INV;
+	R = seg_list_unsupported(ctx, A,
+			"rank lists are not supported — use [#a:b] or a value list [=a,b]");
+}
+
 brace_open(R) ::= TOK_LBRACE.      { R = 0; }
 brace_open(R) ::= TOK_LBRACE_BANG. { R = 1; }
 
@@ -1475,6 +1467,10 @@ key_val(R) ::= TOK_TRUE(V).   { R = ast_new_bool(ctx->pool, true); STAMP(R, V); 
 key_val(R) ::= TOK_FALSE(V).  { R = ast_new_bool(ctx->pool, false); STAMP(R, V); }
 key_val(R) ::= TOK_NIL(V).    { R = ast_new_nil(ctx->pool); STAMP(R, V); }
 key_val(R) ::= TOK_INF(V).    { R = ast_new_inf(ctx->pool); STAMP(R, V); }
+// Blob keys/values are first-class (AUTO_KEY = INT|STR|BLOB) — accept the
+// same literal forms as map_key.
+key_val(R) ::= TOK_BLOB_LITERAL(V). { R = ast_new_blob_from_hex(ctx->pool, TOK_STR(ctx, V), V.str.sz); STAMP(R, V); }
+key_val(R) ::= TOK_B64_BLOB_LITERAL(V). { R = ast_new_blob_from_b64(ctx->pool, TOK_STR(ctx, V), V.str.sz); STAMP(R, V); }
 
 // Comma-separated list of key values (at least 1 item). Trailing
 // comma is absorbed via the third rule so callers like `{@a, b,}`
@@ -1493,9 +1489,8 @@ key_list(R) ::= key_list(L) TOK_COMMA. {
 }
 
 // Integer literal for index / rank operands.
-idx_val(R) ::= TOK_INT(V). { R = ast_new_int(ctx->pool, V.ival); STAMP(R, V); }
 
-rank_val(R) ::= TOK_INT(V). { R = ast_new_int(ctx->pool, V.ival); STAMP(R, V); }
+int_val(R) ::= TOK_INT(V). { R = ast_new_int(ctx->pool, V.ival); STAMP(R, V); }
 
 //==========================================================
 // Path functions.
@@ -1559,7 +1554,7 @@ type_name(R) ::= TOK_TNAME_BOOL(T).    { R = AST_ETYPE_TRILEAN; ctx->postfix_tok
 // consumers (ael_etype_to_particle_type, ast_bin_set_implicit_type) already
 // absorb without a second diagnostic.
 type_name(R) ::= TOK_TNAME_VECTOR(T). {
-	ael_diag_add(&ctx->diags, AEL_SEV_ERROR, T.str.offset, T.str.sz,
+	ael_err(ctx, T.str.offset, T.str.sz,
 			"VECTOR is a reserved type name; not yet supported");
 	R = AST_ETYPE_ERROR;
 	ctx->postfix_token_offset = T.str.offset;
@@ -1584,20 +1579,6 @@ prop_flag(R) ::= TOK_NAME(N). {
 //==========================================================
 // Helper lists.
 //
-
-// Comma-separated list of expressions (at least 2 for exclusive, max, min).
-// A failed operand sub-parse reduces to AST_REF_NULL; AST_LIST_PUSH_TAIL skips
-// it (a diagnostic is already present), so the compile still fails cleanly.
-expr_list(R) ::= expr(A) TOK_COMMA expr(B). {
-	R = ast_new(ctx->pool, AST_LIST);
-
-	AST_LIST_PUSH_TAIL(ctx->pool, R, A);
-	AST_LIST_PUSH_TAIL(ctx->pool, R, B);
-}
-expr_list(R) ::= expr_list(L) TOK_COMMA expr(A). {
-	AST_LIST_PUSH_TAIL(ctx->pool, L, A);
-	R = L;
-}
 
 // List body: comma-separated list-elements. A list_elem is a literal or
 // one of the non-storage CDT-compare specials (INF, WILDCARD via `*`).
@@ -1709,8 +1690,7 @@ ael_run_parser(ael_context* ctx, uint32_t input_sz)
 		// diagnostic instead of letting the parser produce a generic
 		// "syntax error" at TOK_LBRACK_QPAREN.
 		if (prev_tok == TOK_AMP && tok == TOK_LBRACK_QPAREN) {
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR,
-					lex.token_offset, lex.token_sz,
+			ael_err(ctx, lex.token_offset, lex.token_sz,
 					"`&[?(` must be contiguous (no whitespace allowed)");
 			break;
 		}
@@ -1718,19 +1698,19 @@ ael_run_parser(ael_context* ctx, uint32_t input_sz)
 		// `&&` / `||` are two bit-op tokens in a row -- never valid, and
 		// almost always a logical operator carried over from another language.
 		if (prev_tok == TOK_AMP && tok == TOK_AMP) {
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, lex.token_offset,
+			ael_err(ctx, lex.token_offset,
 					lex.token_sz, "use 'and' for logical AND (not '&&')");
 			break;
 		}
 
 		if (prev_tok == TOK_PIPE && tok == TOK_PIPE) {
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, lex.token_offset,
+			ael_err(ctx, lex.token_offset,
 					lex.token_sz, "use 'or' for logical OR (not '||')");
 			break;
 		}
 
 		if (tok < 0) {
-			ael_diag_add(&ctx->diags, AEL_SEV_ERROR, lex.token_offset,
+			ael_err(ctx, lex.token_offset,
 					lex.token_sz, ael_lex_error_msg(tok));
 			break;
 		}

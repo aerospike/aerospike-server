@@ -928,6 +928,7 @@ map_subcontext_by_index(cdt_context* ctx, msgpack_in_vec* val)
 		cf_detail(AS_PARTICLE,
 				"map_subcontext_by_index() index %ld out of bounds for ele_count %u",
 				index, map.ele_count);
+		ctx->not_found = true;
 		return false;
 	}
 
@@ -986,6 +987,7 @@ map_subcontext_by_rank(cdt_context* ctx, msgpack_in_vec* val)
 		cf_detail(AS_PARTICLE,
 				"map_subcontext_by_rank() rank %ld out of bounds for ele_count %u",
 				rank, map.ele_count);
+		ctx->not_found = true;
 		return false;
 	}
 
@@ -1086,6 +1088,7 @@ map_subcontext_by_key(cdt_context* ctx, msgpack_in_vec* val)
 			}
 			else {
 				cf_detail(AS_PARTICLE, "map_subcontext_by_key() key not found");
+				ctx->not_found = true;
 			}
 
 			return false;
@@ -1114,7 +1117,15 @@ map_subcontext_by_key(cdt_context* ctx, msgpack_in_vec* val)
 				return true;
 			}
 
-			cf_detail(AS_PARTICLE, "map_subcontext_by_key() key not found");
+			if (ctx->create_flag_on && val->has_nonstorage) {
+				cf_warning(AS_PARTICLE,
+						"map_subcontext_by_key() cannot create key with non-storage element(s)");
+			}
+			else {
+				cf_detail(AS_PARTICLE, "map_subcontext_by_key() key not found");
+				ctx->not_found = true;
+			}
+
 			return false;
 		}
 
@@ -1146,6 +1157,7 @@ map_subcontext_by_value(cdt_context* ctx, msgpack_in_vec* val)
 
 	if (map.ele_count == 0) {
 		cf_detail(AS_PARTICLE, "map_subcontext_by_value() map is empty");
+		ctx->not_found = true;
 		return false;
 	}
 
@@ -1177,6 +1189,7 @@ map_subcontext_by_value(cdt_context* ctx, msgpack_in_vec* val)
 
 	if (count == 0) {
 		cf_detail(AS_PARTICLE, "map_subcontext_by_value() value not found");
+		ctx->not_found = true;
 		return false;
 	}
 
@@ -6206,20 +6219,50 @@ packed_map_sort_in_place(packed_map* map)
 	memcpy((uint8_t*)map->contents, temp_mem, map->content_sz);
 }
 
-// Key-sort a raw K_ORDERED msgpack map buffer in place. buf must be a
-// well-formed K_ORDERED map with no persist index (the AEL literal packer's
-// encoding: header count = ele_count + 1, ext pair with K_ORDERED, packed nil,
-// then the KV pairs). Returns false if the buffer doesn't parse as a map.
+// Reject a raw msgpack map buffer with duplicate keys, and key-sort it in place
+// when 'sort'. Non-storage elements (INF / wildcard) are accepted.
+// pre:  buf is the AEL literal packer's encoding, either ordered -- count one
+//       over the pair count, then a K_ORDERED ext pair and a nil -- or
+//       :UNORDERED, a plain header and the pairs alone. Neither carries a
+//       persist index. The caller packed it, so a buffer that won't parse is a
+//       programmer error; the asserts below cost a node, though, since a stored
+//       expression recompiled at startup packs its literals through here.
+// post: false and buf untouched if two keys are equal; otherwise true, with buf
+//       key-ordered when 'sort'.
 bool
-map_buf_sort_in_place(uint8_t* buf, uint32_t buf_sz)
+map_buf_check_unique_and_sort(uint8_t* buf, uint32_t buf_sz, bool sort)
 {
 	packed_map map;
+	bool parsed = packed_map_init(&map, buf, buf_sz, false);
 
-	if (! packed_map_init(&map, buf, buf_sz, false)) {
+	cf_assert(parsed, AS_PARTICLE, "map_buf_check_unique_and_sort: bad buffer");
+
+	if (map.ele_count < 2) {
+		return true;
+	}
+
+	setup_map_must_have_offidx(u, &map);
+
+	bool filled = offset_index_fill(u->offidx, true, false);
+
+	cf_assert(filled, AS_PARTICLE, "map_buf_check_unique_and_sort: bad offidx");
+
+	define_order_index(key_ordidx, map.ele_count);
+
+	map_order_index_sort(&key_ordidx, u->offidx, MAP_SORT_BY_KEY);
+
+	if (order_index_has_dups(&key_ordidx, u->offidx)) {
 		return false;
 	}
 
-	packed_map_sort_in_place(&map);
+	if (sort) {
+		define_deferred_memory(temp_mem, map.content_sz);
+
+		order_index_write_eles(&key_ordidx, map.ele_count, u->offidx, temp_mem,
+				NULL, false);
+		memcpy((uint8_t*)map.contents, temp_mem, map.content_sz);
+	}
+
 	return true;
 }
 
@@ -7580,6 +7623,16 @@ map_verify_fn(const cdt_context* ctx, rollback_alloc* alloc_idx)
 				cf_warning(AS_PARTICLE,
 						"map_verify() i=%u offset=%u mp.offset=%u keys not in order",
 						i, offset, mp.offset);
+				return false;
+			}
+
+			// Sorted keys make a duplicate adjacent, so this costs nothing on
+			// top of the order check -- and the unordered arm below rejects
+			// duplicates too, so accepting them here would be the odd one out.
+			if (cmp == MSGPACK_CMP_EQUAL) {
+				cf_warning(AS_PARTICLE,
+						"map_verify() i=%u offset=%u mp.offset=%u dup key", i,
+						offset, mp.offset);
 				return false;
 			}
 

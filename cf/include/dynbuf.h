@@ -150,9 +150,10 @@ typedef struct dynmem_s {
 #define define_dynmem(_name, _size) define_dynobj(_name, 1, _size)
 
 void dynmem_init(dynmem* dm, uint32_t obj_sz, uint32_t n_obj, void* stack_mem);
-// @return NULL if index is out of bounds
-void* dynmem_at(dynmem* dm, dynmem_obj_idx index);
-const void* dynmem_get(const dynmem* dm, dynmem_obj_idx index);
+// Out-of-bounds / arithmetic-anomaly tail of dynmem_at -- carries the
+// cf_assert diagnostics (log.h can't be included here; it includes this
+// header). Call dynmem_at, not this.
+void* dynmem_at_slow(dynmem* dm, dynmem_obj_idx index);
 
 // @return ptr to obj at index, will grow if necessary
 void* dynmem_reserve(dynmem* dm, dynmem_obj_idx* index_r);
@@ -165,6 +166,39 @@ dynmem_get_buf_idx(const dynmem* dm, dynmem_obj_idx index)
 {
 	const uint32_t high = index >> dm->shift0;
 	return (dynmem_buf_idx)(high == 0 ? 0 : (32 - __builtin_clz(high)));
+}
+
+// First object index held by buffer mem_i. Shared with dynmem_at_slow, which
+// re-derives the same position to assert on it.
+static inline uint32_t
+dynmem_get_buf_base(const dynmem* dm, dynmem_buf_idx mem_i)
+{
+	return mem_i == 0 ? 0 : (1U << (mem_i - 1)) << dm->shift0;
+}
+
+// @return NULL if index is out of bounds. Inline fast path -- object derefs
+// sit on the per-transaction expression-compile path; anything abnormal
+// drops to dynmem_at_slow for the asserted diagnostics.
+static inline void*
+dynmem_at(dynmem* dm, dynmem_obj_idx index)
+{
+	const dynmem_buf_idx mem_i = dynmem_get_buf_idx(dm, index);
+	const uint32_t sub = dynmem_get_buf_base(dm, mem_i);
+	const uint32_t offset = index - sub;
+	uint32_t byte_offset;
+
+	if (index < sub || mem_i >= dm->n_mem ||
+			__builtin_mul_overflow(offset, dm->obj_sz, &byte_offset)) {
+		return dynmem_at_slow(dm, index);
+	}
+
+	return (void*)(dm->mem[mem_i] + byte_offset);
+}
+
+static inline const void*
+dynmem_get(const dynmem* dm, dynmem_obj_idx index)
+{
+	return (const void*)dynmem_at((dynmem*)dm, index);
 }
 
 dynmem_obj_idx dynmem_get_obj_idx(const dynmem* dm, dynmem_buf_idx buf_idx,

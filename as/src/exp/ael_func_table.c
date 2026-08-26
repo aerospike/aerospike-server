@@ -97,6 +97,8 @@ static const ael_func_spec_t FUNC_TABLE[] = {
 			{ { AEL_PNAME_NONE, AST_ETYPE_AUTO_NUMERIC } } },
 	{ "min", AST_FUNC_MIN, AEL_FAM_SCALAR, true, 0, 2, AST_ETYPE_AUTO_NUMERIC,
 			{ { AEL_PNAME_NONE, AST_ETYPE_AUTO_NUMERIC } } },
+	{ "exclusive", AST_EXCLUSIVE, AEL_FAM_SCALAR, true, 0, 2, AST_ETYPE_TRILEAN,
+			{ { AEL_PNAME_NONE, AST_ETYPE_TRILEAN } } },
 
 	//------------------------------------------------
 	// Geo builtins — top-level calls (no receiver) with bespoke builders in
@@ -111,91 +113,99 @@ static const ael_func_spec_t FUNC_TABLE[] = {
 					{ AEL_PNAME_NONE, AST_ETYPE_AUTO } } },
 
 	//------------------------------------------------
-	// BLOB-bit method-style ops — named args. Per-op arg inference lives in
-	// ael_new_bit_fn / ael_new_bit_arith, so slot etypes are AUTO here.
+	// BLOB-bit method-style ops — named args. Slot etypes are declarative:
+	// the generic builder (ael_build_from_spec) pins them. `signed` stays
+	// AUTO — it's a bool literal converted to a wire int 0 / 1 by
+	// ael_build_bit's prelude. Result etypes stay derived in the finalizer
+	// (they depend on is_modify).
 
 	{ "bitGet", AST_PATH_FUNC_BIT_GET, AEL_FAM_BIT, false, 2, 2, AST_ETYPE_AUTO,
-			{ { AEL_PNAME_OFFSET, AST_ETYPE_AUTO },
-					{ AEL_PNAME_SIZE, AST_ETYPE_AUTO } } },
+			{ { AEL_PNAME_OFFSET, AST_ETYPE_INT },
+					{ AEL_PNAME_SIZE, AST_ETYPE_INT } } },
+	{ "b64Encode", AST_PATH_FUNC_BIT_B64_ENCODE, AEL_FAM_BIT, false, 0, 0,
+			AST_ETYPE_AUTO, { { 0 } } },
 	{ "bitCount", AST_PATH_FUNC_BIT_COUNT, AEL_FAM_BIT, false, 2, 2,
 			AST_ETYPE_AUTO,
-			{ { AEL_PNAME_OFFSET, AST_ETYPE_AUTO },
-					{ AEL_PNAME_SIZE, AST_ETYPE_AUTO } } },
+			{ { AEL_PNAME_OFFSET, AST_ETYPE_INT },
+					{ AEL_PNAME_SIZE, AST_ETYPE_INT } } },
 	{ "bitLscan", AST_PATH_FUNC_BIT_LSCAN, AEL_FAM_BIT, false, 3, 3,
 			AST_ETYPE_AUTO,
-			{ { AEL_PNAME_OFFSET, AST_ETYPE_AUTO },
-					{ AEL_PNAME_SIZE, AST_ETYPE_AUTO },
-					{ AEL_PNAME_VALUE, AST_ETYPE_AUTO } } },
+			{ { AEL_PNAME_OFFSET, AST_ETYPE_INT },
+					{ AEL_PNAME_SIZE, AST_ETYPE_INT },
+					{ AEL_PNAME_VALUE, AST_ETYPE_TRILEAN } } },
 	{ "bitRscan", AST_PATH_FUNC_BIT_RSCAN, AEL_FAM_BIT, false, 3, 3,
 			AST_ETYPE_AUTO,
-			{ { AEL_PNAME_OFFSET, AST_ETYPE_AUTO },
-					{ AEL_PNAME_SIZE, AST_ETYPE_AUTO },
-					{ AEL_PNAME_VALUE, AST_ETYPE_AUTO } } },
+			{ { AEL_PNAME_OFFSET, AST_ETYPE_INT },
+					{ AEL_PNAME_SIZE, AST_ETYPE_INT },
+					{ AEL_PNAME_VALUE, AST_ETYPE_TRILEAN } } },
 	{ "bitGetInt", AST_PATH_FUNC_BIT_GET_INT, AEL_FAM_BIT, false, 3, 2,
 			AST_ETYPE_AUTO,
-			{ { AEL_PNAME_OFFSET, AST_ETYPE_AUTO },
-					{ AEL_PNAME_SIZE, AST_ETYPE_AUTO },
+			{ { AEL_PNAME_OFFSET, AST_ETYPE_INT },
+					{ AEL_PNAME_SIZE, AST_ETYPE_INT },
 					{ AEL_PNAME_SIGNED, AST_ETYPE_AUTO } } },
 	{ "bitSet", AST_PATH_FUNC_BIT_SET, AEL_FAM_BIT, false, 3, 3, AST_ETYPE_AUTO,
-			{ { AEL_PNAME_OFFSET, AST_ETYPE_AUTO },
-					{ AEL_PNAME_SIZE, AST_ETYPE_AUTO },
-					{ AEL_PNAME_VALUE, AST_ETYPE_AUTO } } },
+			{ { AEL_PNAME_OFFSET, AST_ETYPE_INT },
+					{ AEL_PNAME_SIZE, AST_ETYPE_INT },
+					{ AEL_PNAME_VALUE, AST_ETYPE_BLOB } } },
 	{ "bitOr", AST_PATH_FUNC_BIT_OR, AEL_FAM_BIT, false, 3, 3, AST_ETYPE_AUTO,
-			{ { AEL_PNAME_OFFSET, AST_ETYPE_AUTO },
-					{ AEL_PNAME_SIZE, AST_ETYPE_AUTO },
-					{ AEL_PNAME_VALUE, AST_ETYPE_AUTO } } },
+			{ { AEL_PNAME_OFFSET, AST_ETYPE_INT },
+					{ AEL_PNAME_SIZE, AST_ETYPE_INT },
+					{ AEL_PNAME_VALUE, AST_ETYPE_BLOB } } },
 	{ "bitXor", AST_PATH_FUNC_BIT_XOR, AEL_FAM_BIT, false, 3, 3, AST_ETYPE_AUTO,
-			{ { AEL_PNAME_OFFSET, AST_ETYPE_AUTO },
-					{ AEL_PNAME_SIZE, AST_ETYPE_AUTO },
-					{ AEL_PNAME_VALUE, AST_ETYPE_AUTO } } },
+			{ { AEL_PNAME_OFFSET, AST_ETYPE_INT },
+					{ AEL_PNAME_SIZE, AST_ETYPE_INT },
+					{ AEL_PNAME_VALUE, AST_ETYPE_BLOB } } },
 	{ "bitAnd", AST_PATH_FUNC_BIT_AND, AEL_FAM_BIT, false, 3, 3, AST_ETYPE_AUTO,
-			{ { AEL_PNAME_OFFSET, AST_ETYPE_AUTO },
-					{ AEL_PNAME_SIZE, AST_ETYPE_AUTO },
-					{ AEL_PNAME_VALUE, AST_ETYPE_AUTO } } },
+			{ { AEL_PNAME_OFFSET, AST_ETYPE_INT },
+					{ AEL_PNAME_SIZE, AST_ETYPE_INT },
+					{ AEL_PNAME_VALUE, AST_ETYPE_BLOB } } },
 	{ "bitNot", AST_PATH_FUNC_BIT_NOT, AEL_FAM_BIT, false, 2, 2, AST_ETYPE_AUTO,
-			{ { AEL_PNAME_OFFSET, AST_ETYPE_AUTO },
-					{ AEL_PNAME_SIZE, AST_ETYPE_AUTO } } },
+			{ { AEL_PNAME_OFFSET, AST_ETYPE_INT },
+					{ AEL_PNAME_SIZE, AST_ETYPE_INT } } },
 	{ "bitLshift", AST_PATH_FUNC_BIT_LSHIFT, AEL_FAM_BIT, false, 3, 3,
 			AST_ETYPE_AUTO,
-			{ { AEL_PNAME_OFFSET, AST_ETYPE_AUTO },
-					{ AEL_PNAME_SIZE, AST_ETYPE_AUTO },
-					{ AEL_PNAME_SHIFT, AST_ETYPE_AUTO } } },
+			{ { AEL_PNAME_OFFSET, AST_ETYPE_INT },
+					{ AEL_PNAME_SIZE, AST_ETYPE_INT },
+					{ AEL_PNAME_SHIFT, AST_ETYPE_INT } } },
 	{ "bitRshift", AST_PATH_FUNC_BIT_RSHIFT, AEL_FAM_BIT, false, 3, 3,
 			AST_ETYPE_AUTO,
-			{ { AEL_PNAME_OFFSET, AST_ETYPE_AUTO },
-					{ AEL_PNAME_SIZE, AST_ETYPE_AUTO },
-					{ AEL_PNAME_SHIFT, AST_ETYPE_AUTO } } },
+			{ { AEL_PNAME_OFFSET, AST_ETYPE_INT },
+					{ AEL_PNAME_SIZE, AST_ETYPE_INT },
+					{ AEL_PNAME_SHIFT, AST_ETYPE_INT } } },
 	{ "bitAdd", AST_PATH_FUNC_BIT_ADD, AEL_FAM_BIT, false, 4, 3, AST_ETYPE_AUTO,
-			{ { AEL_PNAME_OFFSET, AST_ETYPE_AUTO },
-					{ AEL_PNAME_SIZE, AST_ETYPE_AUTO },
-					{ AEL_PNAME_VALUE, AST_ETYPE_AUTO },
+			{ { AEL_PNAME_OFFSET, AST_ETYPE_INT },
+					{ AEL_PNAME_SIZE, AST_ETYPE_INT },
+					{ AEL_PNAME_VALUE, AST_ETYPE_INT },
 					{ AEL_PNAME_SIGNED, AST_ETYPE_AUTO } } },
 	{ "bitSubtract", AST_PATH_FUNC_BIT_SUBTRACT, AEL_FAM_BIT, false, 4, 3,
 			AST_ETYPE_AUTO,
-			{ { AEL_PNAME_OFFSET, AST_ETYPE_AUTO },
-					{ AEL_PNAME_SIZE, AST_ETYPE_AUTO },
-					{ AEL_PNAME_VALUE, AST_ETYPE_AUTO },
+			{ { AEL_PNAME_OFFSET, AST_ETYPE_INT },
+					{ AEL_PNAME_SIZE, AST_ETYPE_INT },
+					{ AEL_PNAME_VALUE, AST_ETYPE_INT },
 					{ AEL_PNAME_SIGNED, AST_ETYPE_AUTO } } },
 	{ "bitSetInt", AST_PATH_FUNC_BIT_SET_INT, AEL_FAM_BIT, false, 3, 3,
 			AST_ETYPE_AUTO,
-			{ { AEL_PNAME_OFFSET, AST_ETYPE_AUTO },
-					{ AEL_PNAME_SIZE, AST_ETYPE_AUTO },
-					{ AEL_PNAME_VALUE, AST_ETYPE_AUTO } } },
+			{ { AEL_PNAME_OFFSET, AST_ETYPE_INT },
+					{ AEL_PNAME_SIZE, AST_ETYPE_INT },
+					{ AEL_PNAME_VALUE, AST_ETYPE_INT } } },
 	{ "bitResize", AST_PATH_FUNC_BIT_RESIZE, AEL_FAM_BIT, false, 1, 1,
-			AST_ETYPE_AUTO, { { AEL_PNAME_BYTE_SIZE, AST_ETYPE_AUTO } } },
+			AST_ETYPE_AUTO, { { AEL_PNAME_BYTE_SIZE, AST_ETYPE_INT } } },
 	{ "bitInsert", AST_PATH_FUNC_BIT_INSERT, AEL_FAM_BIT, false, 2, 2,
 			AST_ETYPE_AUTO,
-			{ { AEL_PNAME_BYTE_OFFSET, AST_ETYPE_AUTO },
-					{ AEL_PNAME_VALUE, AST_ETYPE_AUTO } } },
+			{ { AEL_PNAME_BYTE_OFFSET, AST_ETYPE_INT },
+					{ AEL_PNAME_VALUE, AST_ETYPE_BLOB } } },
 	{ "bitRemove", AST_PATH_FUNC_BIT_REMOVE, AEL_FAM_BIT, false, 2, 2,
 			AST_ETYPE_AUTO,
-			{ { AEL_PNAME_BYTE_OFFSET, AST_ETYPE_AUTO },
-					{ AEL_PNAME_BYTE_SIZE, AST_ETYPE_AUTO } } },
+			{ { AEL_PNAME_BYTE_OFFSET, AST_ETYPE_INT },
+					{ AEL_PNAME_BYTE_SIZE, AST_ETYPE_INT } } },
 
 	//------------------------------------------------
 	// HLL method-style ops. Read set-ops take one positional list; hllInit
 	// is named; hllAdd mixes a positional list with named indexBits /
-	// minHashBits. Arg inference / list auto-wrap lives in ael_new_hll_*.
+	// minHashBits. hllInit / hllAdd slots are declarative (generic
+	// builder); the set-ops stay AUTO — their list elements pin per
+	// element (HLL) in ael_new_hll_set_fn, which a wrapper-LIST pin can't
+	// express.
 
 	{ "hllCount", AST_PATH_FUNC_HLL_COUNT, AEL_FAM_HLL, false, 0, 0,
 			AST_ETYPE_AUTO, { { 0 } } },
@@ -212,12 +222,12 @@ static const ael_func_spec_t FUNC_TABLE[] = {
 	{ "hllSimilarity", AST_PATH_FUNC_HLL_SIMILARITY, AEL_FAM_HLL, false, 1, 1,
 			AST_ETYPE_AUTO, { { AEL_PNAME_NONE, AST_ETYPE_AUTO } } },
 	{ "hllInit", AST_PATH_FUNC_HLL_INIT, AEL_FAM_HLL, false, 2, 1, AST_ETYPE_AUTO,
-			{ { AEL_PNAME_INDEX_BITS, AST_ETYPE_AUTO },
-					{ AEL_PNAME_MIN_HASH_BITS, AST_ETYPE_AUTO } } },
+			{ { AEL_PNAME_INDEX_BITS, AST_ETYPE_INT },
+					{ AEL_PNAME_MIN_HASH_BITS, AST_ETYPE_INT } } },
 	{ "hllAdd", AST_PATH_FUNC_HLL_ADD, AEL_FAM_HLL, false, 3, 1, AST_ETYPE_AUTO,
-			{ { AEL_PNAME_NONE, AST_ETYPE_AUTO },
-					{ AEL_PNAME_INDEX_BITS, AST_ETYPE_AUTO },
-					{ AEL_PNAME_MIN_HASH_BITS, AST_ETYPE_AUTO } } },
+			{ { AEL_PNAME_NONE, AST_ETYPE_LIST },
+					{ AEL_PNAME_INDEX_BITS, AST_ETYPE_INT },
+					{ AEL_PNAME_MIN_HASH_BITS, AST_ETYPE_INT } } },
 
 	//------------------------------------------------
 	// CDT path functions — method-style `recv.name(...)`. Build an
@@ -275,13 +285,17 @@ static const ael_func_spec_t FUNC_TABLE[] = {
 			{ { AEL_PNAME_NONE, AST_ETYPE_AUTO } } },
 	// Bulk collection mutations — one collection arg (list for
 	// append/insert, map for put), read raw by the runtime
-	// (AS_CDT_PARAM_STORAGE). The arg is pinned LIST / MAP in the resolver.
+	// (AS_CDT_PARAM_STORAGE). The arg's LIST / MAP pin lives in
+	// cdt_pf_resolve_op_and_types (it needs the leaf / container
+	// context), so the slot stays AUTO here like the other PATH rows.
 	{ "appendItems", AST_PATH_FUNC_APPEND_ITEMS, AEL_FAM_PATH, false, 1, 1,
-			AST_ETYPE_AUTO, { { AEL_PNAME_NONE, AST_ETYPE_LIST } } },
+			AST_ETYPE_AUTO, { { AEL_PNAME_NONE, AST_ETYPE_AUTO } } },
 	{ "insertItems", AST_PATH_FUNC_INSERT_ITEMS, AEL_FAM_PATH, false, 1, 1,
-			AST_ETYPE_AUTO, { { AEL_PNAME_NONE, AST_ETYPE_LIST } } },
+			AST_ETYPE_AUTO, { { AEL_PNAME_NONE, AST_ETYPE_AUTO } } },
 	{ "putItems", AST_PATH_FUNC_PUT_ITEMS, AEL_FAM_PATH, false, 1, 1,
-			AST_ETYPE_AUTO, { { AEL_PNAME_NONE, AST_ETYPE_MAP } } },
+			AST_ETYPE_AUTO, { { AEL_PNAME_NONE, AST_ETYPE_AUTO } } },
+	{ "updateItems", AST_PATH_FUNC_UPDATE_ITEMS, AEL_FAM_PATH, false, 1, 1,
+			AST_ETYPE_AUTO, { { AEL_PNAME_NONE, AST_ETYPE_AUTO } } },
 	// join(separator) — LIST -> STR. One positional separator; the runtime
 	// validates it is a string (etype owned by the finalizer, so AUTO).
 	{ "join", AST_PATH_FUNC_JOIN, AEL_FAM_PATH, false, 1, 1, AST_ETYPE_AUTO,
@@ -294,7 +308,7 @@ static const ael_func_spec_t FUNC_TABLE[] = {
 	// separately (list-arg / regex-literal).
 
 	// Reads.
-	{ "length", AST_PATH_FUNC_STR_LENGTH, AEL_FAM_STR, false, 0, 0,
+	{ "strlen", AST_PATH_FUNC_STR_LENGTH, AEL_FAM_STR, false, 0, 0,
 			AST_ETYPE_INT, { { 0 } } },
 	{ "substr", AST_PATH_FUNC_STR_SUBSTR, AEL_FAM_STR, false, 2, 1, AST_ETYPE_STR,
 			{ { AEL_PNAME_FROM, AST_ETYPE_INT },
@@ -302,6 +316,12 @@ static const ael_func_spec_t FUNC_TABLE[] = {
 	{ "find", AST_PATH_FUNC_STR_INDEX_OF, AEL_FAM_STR, false, 2, 1, AST_ETYPE_INT,
 			{ { AEL_PNAME_NEEDLE, AST_ETYPE_STR },
 					{ AEL_PNAME_OCCURRENCE, AST_ETYPE_INT } } },
+	{ "charAt", AST_PATH_FUNC_STR_CHAR_AT, AEL_FAM_STR, false, 1, 1,
+			AST_ETYPE_STR, { { AEL_PNAME_INDEX, AST_ETYPE_INT } } },
+	// The spec labels this one and leaves startsWith / endsWith positional,
+	// so a single argument does not by itself imply positional here.
+	{ "contains", AST_PATH_FUNC_STR_CONTAINS, AEL_FAM_STR, false, 1, 1,
+			AST_ETYPE_TRILEAN, { { AEL_PNAME_NEEDLE, AST_ETYPE_STR } } },
 	{ "startsWith", AST_PATH_FUNC_STR_STARTS_WITH, AEL_FAM_STR, false, 1, 1,
 			AST_ETYPE_TRILEAN, { { AEL_PNAME_NONE, AST_ETYPE_STR } } },
 	{ "endsWith", AST_PATH_FUNC_STR_ENDS_WITH, AEL_FAM_STR, false, 1, 1,
@@ -320,7 +340,7 @@ static const ael_func_spec_t FUNC_TABLE[] = {
 			AST_ETYPE_BLOB, { { 0 } } },
 	{ "split", AST_PATH_FUNC_STR_SPLIT, AEL_FAM_STR, false, 1, 1,
 			AST_ETYPE_LIST, { { AEL_PNAME_NONE, AST_ETYPE_STR } } },
-	{ "fromBase64", AST_PATH_FUNC_STR_FROM_BASE64, AEL_FAM_STR, false, 0, 0,
+	{ "b64Decode", AST_PATH_FUNC_STR_FROM_BASE64, AEL_FAM_STR, false, 0, 0,
 			AST_ETYPE_BLOB, { { 0 } } },
 
 	// Modifies — MODIFY_LOCAL: produce a new value, do not persist.
@@ -353,13 +373,13 @@ static const ael_func_spec_t FUNC_TABLE[] = {
 			AST_ETYPE_STR,
 			{ { AEL_PNAME_PATTERN, AST_ETYPE_AUTO },
 					{ AEL_PNAME_REPLACE, AST_ETYPE_STR } } },
-	{ "uppercase", AST_PATH_FUNC_STR_UPPERCASE, AEL_FAM_STR, false, 0, 0,
+	{ "upper", AST_PATH_FUNC_STR_UPPERCASE, AEL_FAM_STR, false, 0, 0,
 			AST_ETYPE_STR, { { 0 } } },
-	{ "lowercase", AST_PATH_FUNC_STR_LOWERCASE, AEL_FAM_STR, false, 0, 0,
+	{ "lower", AST_PATH_FUNC_STR_LOWERCASE, AEL_FAM_STR, false, 0, 0,
 			AST_ETYPE_STR, { { 0 } } },
-	{ "casefold", AST_PATH_FUNC_STR_CASEFOLD, AEL_FAM_STR, false, 0, 0,
+	{ "caseFold", AST_PATH_FUNC_STR_CASEFOLD, AEL_FAM_STR, false, 0, 0,
 			AST_ETYPE_STR, { { 0 } } },
-	{ "normalize", AST_PATH_FUNC_STR_NORMALIZE, AEL_FAM_STR, false, 0, 0,
+	{ "normalizeNFC", AST_PATH_FUNC_STR_NORMALIZE, AEL_FAM_STR, false, 0, 0,
 			AST_ETYPE_STR, { { 0 } } },
 	{ "trim", AST_PATH_FUNC_STR_TRIM, AEL_FAM_STR, false, 0, 0, AST_ETYPE_STR,
 			{ { 0 } } },
@@ -414,6 +434,7 @@ static const struct {
 	{ AEL_PNAME_FROM, "from" },
 	{ AEL_PNAME_TO, "to" },
 	{ AEL_PNAME_NEEDLE, "needle" },
+	{ AEL_PNAME_INDEX, "index" },
 	{ AEL_PNAME_OCCURRENCE, "occurrence" },
 	{ AEL_PNAME_LENGTH, "length" },
 	{ AEL_PNAME_PAD, "pad" },
@@ -427,6 +448,10 @@ static const struct {
 
 #define PNAME_TABLE_COUNT (sizeof(PNAME_TABLE) / sizeof(PNAME_TABLE[0]))
 
+// PNAME_TABLE rows sit at [tag - 1] in enum order -- ael_pname_str indexes
+// directly (asserting per row) instead of scanning.
+COMPILER_ASSERT(PNAME_TABLE_COUNT == AEL_PNAME_X);
+
 //==========================================================
 // Public API.
 //
@@ -435,9 +460,7 @@ const ael_func_spec_t*
 ael_func_lookup(const char* name, uint32_t sz)
 {
 	for (size_t i = 0; i < FUNC_TABLE_COUNT; i++) {
-		const char* cand = FUNC_TABLE[i].name;
-
-		if (strlen(cand) == sz && memcmp(cand, name, sz) == 0) {
+		if (ael_name_eq(FUNC_TABLE[i].name, name, sz)) {
 			return &FUNC_TABLE[i];
 		}
 	}
@@ -521,9 +544,7 @@ ael_pname_t
 ael_pname_match(const char* name, uint32_t sz)
 {
 	for (size_t i = 0; i < PNAME_TABLE_COUNT; i++) {
-		const char* cand = PNAME_TABLE[i].str;
-
-		if (strlen(cand) == sz && memcmp(cand, name, sz) == 0) {
+		if (ael_name_eq(PNAME_TABLE[i].str, name, sz)) {
 			return PNAME_TABLE[i].name;
 		}
 	}
@@ -534,11 +555,13 @@ ael_pname_match(const char* name, uint32_t sz)
 const char*
 ael_pname_str(ael_pname_t name)
 {
-	for (size_t i = 0; i < PNAME_TABLE_COUNT; i++) {
-		if (PNAME_TABLE[i].name == name) {
-			return PNAME_TABLE[i].str;
-		}
+	if (name == AEL_PNAME_NONE || (size_t)name > PNAME_TABLE_COUNT) {
+		return "?";
 	}
 
-	return "?";
+	const size_t i = (size_t)name - 1;
+
+	cf_assert(PNAME_TABLE[i].name == name, AS_EXP,
+			"PNAME_TABLE order mismatch at %zu", i);
+	return PNAME_TABLE[i].str;
 }

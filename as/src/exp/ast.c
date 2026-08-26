@@ -54,15 +54,19 @@
 // Forward declarations.
 //
 
+static const char* ast_esubtype_name(ast_esubtype sub);
 static const char* ast_etype_name(ast_etype et);
 static const char* ast_etype_str(ast_etype et, char* buf, size_t sz);
+static ast_etype ast_set_implicit_type_lr(ael_context* ctx, ast_node_t op,
+		ast_ref left, ast_ref right, ast_etype etype);
 
 //==========================================================
 // Node info table.
 //
 
 #define N(t, n, k, ...) [t] = { .name = (n), .kind = (k), __VA_ARGS__ }
-#define N_CMD(t, n, c, k) [t] = { .name = (n), .exp_cmd = (c), .kind = (k) }
+#define N_CMD(t, n, c, k, ...)                                                 \
+	[t] = { .name = (n), .exp_cmd = (c), .kind = (k), __VA_ARGS__ }
 
 // Single-select path segs accept CTX_CREATE props (LIST_*, MAP_*,
 // PERSIST_INDEX) and any leaf etype via :T postfix.
@@ -77,17 +81,10 @@ static const char* ast_etype_str(ast_etype et, char* buf, size_t sz);
 		.valid_types = AST_ETYPE_AUTO }
 
 // Multi-select segs accept :T (propagates to the wrapping GET) but no
-// CTX_CREATE props (those need a single concrete seg to land in).
-#define N_SEG_MR(t, n, f, ctx_t, get, rm)                                      \
-	[t] = { .name = (n),                                                       \
-		.flags = (f),                                                          \
-		.ctx_type = (ctx_t),                                                   \
-		.cdt_get_op = (get),                                                   \
-		.cdt_remove_op = (rm),                                                 \
-		.kind = NK_SEG_M,                                                      \
-		.valid_types = AST_ETYPE_AUTO }
-
-#define N_SEG_ML(t, n, f, ctx_t, get, rm)                                      \
+// CTX_CREATE props (those need a single concrete seg to land in). Range
+// and list segs share the row shape; the layout split (u.range_seg vs
+// u.list_seg) is carried by AST_NF_LIST_SEG in the flags.
+#define N_SEG_M(t, n, f, ctx_t, get, rm)                                       \
 	[t] = { .name = (n),                                                       \
 		.flags = (f),                                                          \
 		.ctx_type = (ctx_t),                                                   \
@@ -128,10 +125,10 @@ const ast_node_info ast_node_table[AST_NODE_TYPE_COUNT] = {
 	//==========================================================
 	// Arithmetic.
 
-	N_CMD(AST_ADD, "+", EXP_ADD, NK_NMATH),
-	N_CMD(AST_SUB, "-", EXP_SUB, NK_BMATH),
-	N_CMD(AST_MUL, "*", EXP_MUL, NK_NMATH),
-	N_CMD(AST_DIV, "/", EXP_DIV, NK_BMATH),
+	N_CMD(AST_ADD, "+", EXP_ADD, NK_NMATH, .flags = AST_NF_NEEDS_ETYPE),
+	N_CMD(AST_SUB, "-", EXP_SUB, NK_BMATH, .flags = AST_NF_NEEDS_ETYPE),
+	N_CMD(AST_MUL, "*", EXP_MUL, NK_NMATH, .flags = AST_NF_NEEDS_ETYPE),
+	N_CMD(AST_DIV, "/", EXP_DIV, NK_BMATH, .flags = AST_NF_NEEDS_ETYPE),
 	N_CMD(AST_MOD, "%", EXP_MOD, NK_BMATH),
 	N_CMD(AST_POW, "**", EXP_POW, NK_BMATH),
 
@@ -156,7 +153,7 @@ const ast_node_info ast_node_table[AST_NODE_TYPE_COUNT] = {
 	N(AST_BOOL, "bool", NK_LEAF),
 	N(AST_BLOB, "blob", NK_LEAF),
 	N(AST_B64_BLOB, "b64_blob", NK_LEAF),
-	N(AST_GEO_LITERAL, "geojson", NK_LEAF),
+	N(AST_GEO_LITERAL, "geoJson", NK_LEAF),
 	N(AST_INF, "inf", NK_LEAF),
 	N(AST_WILDCARD, "wildcard", NK_LEAF),
 
@@ -174,7 +171,7 @@ const ast_node_info ast_node_table[AST_NODE_TYPE_COUNT] = {
 	N(AST_BIN_TYPE, "bin_type", NK_LEAF),
 	N(AST_BIN_EXISTS, "bin_exists", NK_LEAF),
 	N(AST_PATH_CTX, "path_ctx", NK_NONE),
-	N(AST_PATH_CALL, "path_call", NK_NONE),
+	N(AST_PATH_CALL, "path_call", NK_NONE, .flags = AST_NF_NEEDS_ETYPE),
 	// AST_META covers $.key() / $.ttl() / digest_modulo / etc.; the
 	// only meta op that takes a :T postfix is EXP_REC_KEY (via the
 	// $.key():T grammar rule), so the AUTO_KEY mask is what the
@@ -193,8 +190,8 @@ const ast_node_info ast_node_table[AST_NODE_TYPE_COUNT] = {
 	N_CMD(AST_FUNC_FLOOR, "floor", EXP_FLOOR, NK_UNARY),
 	N_CMD(AST_FUNC_LOG, "log", EXP_LOG, NK_BINARY),
 	N_CMD(AST_FUNC_POW, "pow", EXP_POW, NK_BINARY),
-	N_CMD(AST_FUNC_MAX, "max", EXP_MAX, NK_NMATH),
-	N_CMD(AST_FUNC_MIN, "min", EXP_MIN, NK_NMATH),
+	N_CMD(AST_FUNC_MAX, "max", EXP_MAX, NK_NMATH, .flags = AST_NF_NEEDS_ETYPE),
+	N_CMD(AST_FUNC_MIN, "min", EXP_MIN, NK_NMATH, .flags = AST_NF_NEEDS_ETYPE),
 	N_CMD(AST_FUNC_COUNT_ONE_BITS, "countOneBits", EXP_INT_COUNT, NK_UNARY),
 	N_CMD(AST_FUNC_FIND_BIT_LEFT, "findBitLeft", EXP_INT_LSCAN, NK_BINARY),
 	N_CMD(AST_FUNC_FIND_BIT_RIGHT, "findBitRight", EXP_INT_RSCAN, NK_BINARY),
@@ -229,7 +226,8 @@ const ast_node_info ast_node_table[AST_NODE_TYPE_COUNT] = {
 	// join() — LIST → STR. Op + STR result forced in the resolver; the
 	// separator rides the u.cdt_op chain. :T pin is meaningless (result is
 	// always STR), so valid_types is STR.
-	N_CDT_OP(AST_PATH_FUNC_JOIN, "join()", 0, .valid_types = AST_ETYPE_STR),
+	N_CDT_OP(AST_PATH_FUNC_JOIN, "join()", AST_NF_WHOLE_COLL,
+			.valid_types = AST_ETYPE_STR),
 
 	// BLOB bit-op path functions (transient pf_types — morphed to
 	// AST_BIT_OP by ael_finalize_bit_call). The exp_cmd slot carries
@@ -237,6 +235,8 @@ const ast_node_info ast_node_table[AST_NODE_TYPE_COUNT] = {
 	// Modify ops carry AST_NF_MODIFY; ael_finalize_bit_call sets
 	// EXP_CALL_FLAG_MODIFY_LOCAL on the wrapping path-call's stype.
 	N(AST_PATH_FUNC_BIT_GET, "bitGet()", NK_CDT_OP, .exp_cmd = AS_BITS_OP_GET),
+	N(AST_PATH_FUNC_BIT_B64_ENCODE, "b64Encode()", NK_CDT_OP,
+			.exp_cmd = AS_BITS_OP_B64_ENCODE),
 	N(AST_PATH_FUNC_BIT_COUNT, "bitCount()", NK_CDT_OP,
 			.exp_cmd = AS_BITS_OP_COUNT),
 	N(AST_PATH_FUNC_BIT_LSCAN, "bitLscan()", NK_CDT_OP,
@@ -246,38 +246,38 @@ const ast_node_info ast_node_table[AST_NODE_TYPE_COUNT] = {
 	N(AST_PATH_FUNC_BIT_GET_INT, "bitGetInt()", NK_CDT_OP,
 			.exp_cmd = AS_BITS_OP_GET_INT),
 	N(AST_PATH_FUNC_BIT_SET, "bitSet()", NK_CDT_OP, .exp_cmd = AS_BITS_OP_SET,
-			.flags = AST_NF_MODIFY, .valid_props = AST_PROP_VALID_BIT_MODIFY),
+			.flags = AST_NF_MODIFY, .valid_props = AST_PROP_VALID_BIT_INPLACE),
 	N(AST_PATH_FUNC_BIT_OR, "bitOr()", NK_CDT_OP, .exp_cmd = AS_BITS_OP_OR,
-			.flags = AST_NF_MODIFY, .valid_props = AST_PROP_VALID_BIT_MODIFY),
+			.flags = AST_NF_MODIFY, .valid_props = AST_PROP_VALID_BIT_INPLACE),
 	N(AST_PATH_FUNC_BIT_XOR, "bitXor()", NK_CDT_OP, .exp_cmd = AS_BITS_OP_XOR,
-			.flags = AST_NF_MODIFY, .valid_props = AST_PROP_VALID_BIT_MODIFY),
+			.flags = AST_NF_MODIFY, .valid_props = AST_PROP_VALID_BIT_INPLACE),
 	N(AST_PATH_FUNC_BIT_AND, "bitAnd()", NK_CDT_OP, .exp_cmd = AS_BITS_OP_AND,
-			.flags = AST_NF_MODIFY, .valid_props = AST_PROP_VALID_BIT_MODIFY),
+			.flags = AST_NF_MODIFY, .valid_props = AST_PROP_VALID_BIT_INPLACE),
 	N(AST_PATH_FUNC_BIT_NOT, "bitNot()", NK_CDT_OP, .exp_cmd = AS_BITS_OP_NOT,
-			.flags = AST_NF_MODIFY, .valid_props = AST_PROP_VALID_BIT_MODIFY),
+			.flags = AST_NF_MODIFY, .valid_props = AST_PROP_VALID_BIT_INPLACE),
 	N(AST_PATH_FUNC_BIT_LSHIFT, "bitLshift()", NK_CDT_OP,
 			.exp_cmd = AS_BITS_OP_LSHIFT, .flags = AST_NF_MODIFY,
-			.valid_props = AST_PROP_VALID_BIT_MODIFY),
+			.valid_props = AST_PROP_VALID_BIT_INPLACE),
 	N(AST_PATH_FUNC_BIT_RSHIFT, "bitRshift()", NK_CDT_OP,
 			.exp_cmd = AS_BITS_OP_RSHIFT, .flags = AST_NF_MODIFY,
-			.valid_props = AST_PROP_VALID_BIT_MODIFY),
+			.valid_props = AST_PROP_VALID_BIT_INPLACE),
 	N(AST_PATH_FUNC_BIT_ADD, "bitAdd()", NK_CDT_OP, .exp_cmd = AS_BITS_OP_ADD,
-			.flags = AST_NF_MODIFY, .valid_props = AST_PROP_VALID_BIT_MODIFY),
+			.flags = AST_NF_MODIFY, .valid_props = AST_PROP_VALID_BIT_ARITH),
 	N(AST_PATH_FUNC_BIT_SUBTRACT, "bitSubtract()", NK_CDT_OP,
 			.exp_cmd = AS_BITS_OP_SUBTRACT, .flags = AST_NF_MODIFY,
-			.valid_props = AST_PROP_VALID_BIT_MODIFY),
+			.valid_props = AST_PROP_VALID_BIT_ARITH),
 	N(AST_PATH_FUNC_BIT_SET_INT, "bitSetInt()", NK_CDT_OP,
 			.exp_cmd = AS_BITS_OP_SET_INT, .flags = AST_NF_MODIFY,
-			.valid_props = AST_PROP_VALID_BIT_MODIFY),
+			.valid_props = AST_PROP_VALID_BIT_ARITH),
 	N(AST_PATH_FUNC_BIT_RESIZE, "bitResize()", NK_CDT_OP,
 			.exp_cmd = AS_BITS_OP_RESIZE, .flags = AST_NF_MODIFY,
-			.valid_props = AST_PROP_VALID_BIT_MODIFY),
+			.valid_props = AST_PROP_VALID_BIT_SIZING),
 	N(AST_PATH_FUNC_BIT_INSERT, "bitInsert()", NK_CDT_OP,
 			.exp_cmd = AS_BITS_OP_INSERT, .flags = AST_NF_MODIFY,
-			.valid_props = AST_PROP_VALID_BIT_MODIFY),
+			.valid_props = AST_PROP_VALID_BIT_SIZING),
 	N(AST_PATH_FUNC_BIT_REMOVE, "bitRemove()", NK_CDT_OP,
 			.exp_cmd = AS_BITS_OP_REMOVE, .flags = AST_NF_MODIFY,
-			.valid_props = AST_PROP_VALID_BIT_MODIFY),
+			.valid_props = AST_PROP_VALID_BIT_INPLACE),
 
 	// HLL transient pf_types (morphed to AST_HLL_OP by
 	// ael_finalize_hll_call). exp_cmd carries the AS_HLL_OP_* opcode.
@@ -306,12 +306,16 @@ const ast_node_info ast_node_table[AST_NODE_TYPE_COUNT] = {
 	// STRING transient pf_types (morphed to AST_STR_OP). exp_cmd carries the
 	// AS_STRING_OP_* opcode; AST_NF_MODIFY marks the value-producing ops (they
 	// get MODIFY_LOCAL). No :PROPERTY flags on string ops -- valid_props is 0.
-	N(AST_PATH_FUNC_STR_LENGTH, "length()", NK_CDT_OP,
+	N(AST_PATH_FUNC_STR_LENGTH, "strlen()", NK_CDT_OP,
 			.exp_cmd = AS_STRING_OP_STRLEN),
 	N(AST_PATH_FUNC_STR_SUBSTR, "substr()", NK_CDT_OP,
 			.exp_cmd = AS_STRING_OP_SUBSTR),
 	N(AST_PATH_FUNC_STR_INDEX_OF, "find()", NK_CDT_OP,
 			.exp_cmd = AS_STRING_OP_FIND),
+	N(AST_PATH_FUNC_STR_CHAR_AT, "charAt()", NK_CDT_OP,
+			.exp_cmd = AS_STRING_OP_CHAR_AT),
+	N(AST_PATH_FUNC_STR_CONTAINS, "contains()", NK_CDT_OP,
+			.exp_cmd = AS_STRING_OP_CONTAINS),
 	N(AST_PATH_FUNC_STR_STARTS_WITH, "startsWith()", NK_CDT_OP,
 			.exp_cmd = AS_STRING_OP_STARTS_WITH),
 	N(AST_PATH_FUNC_STR_ENDS_WITH, "endsWith()", NK_CDT_OP,
@@ -332,46 +336,61 @@ const ast_node_info ast_node_table[AST_NODE_TYPE_COUNT] = {
 			.exp_cmd = AS_STRING_OP_TO_BLOB),
 	N(AST_PATH_FUNC_STR_SPLIT, "split()", NK_CDT_OP,
 			.exp_cmd = AS_STRING_OP_SPLIT),
-	N(AST_PATH_FUNC_STR_FROM_BASE64, "fromBase64()", NK_CDT_OP,
+	N(AST_PATH_FUNC_STR_FROM_BASE64, "b64Decode()", NK_CDT_OP,
 			.exp_cmd = AS_STRING_OP_B64_DECODE),
 	N(AST_PATH_FUNC_STR_REGEX_COMPARE, "=~", NK_CDT_OP,
 			.exp_cmd = AS_STRING_OP_REGEX_COMPARE),
 	N(AST_PATH_FUNC_STR_INSERT, "splice()", NK_CDT_OP,
-			.exp_cmd = AS_STRING_OP_INSERT, .flags = AST_NF_MODIFY),
+			.exp_cmd = AS_STRING_OP_INSERT, .flags = AST_NF_MODIFY,
+			.valid_props = AST_PROP_VALID_STR_MODIFY),
 	N(AST_PATH_FUNC_STR_OVERWRITE, "overwrite()", NK_CDT_OP,
-			.exp_cmd = AS_STRING_OP_OVERWRITE, .flags = AST_NF_MODIFY),
+			.exp_cmd = AS_STRING_OP_OVERWRITE, .flags = AST_NF_MODIFY,
+			.valid_props = AST_PROP_VALID_STR_MODIFY),
 	N(AST_PATH_FUNC_STR_SNIP, "snip()", NK_CDT_OP, .exp_cmd = AS_STRING_OP_SNIP,
-			.flags = AST_NF_MODIFY),
+			.flags = AST_NF_MODIFY, .valid_props = AST_PROP_VALID_STR_MODIFY),
 	N(AST_PATH_FUNC_STR_REPLACE, "replace()", NK_CDT_OP,
-			.exp_cmd = AS_STRING_OP_REPLACE, .flags = AST_NF_MODIFY),
+			.exp_cmd = AS_STRING_OP_REPLACE, .flags = AST_NF_MODIFY,
+			.valid_props = AST_PROP_VALID_STR_MODIFY),
 	N(AST_PATH_FUNC_STR_REPLACE_ALL, "replaceAll()", NK_CDT_OP,
-			.exp_cmd = AS_STRING_OP_REPLACE_ALL, .flags = AST_NF_MODIFY),
-	N(AST_PATH_FUNC_STR_UPPERCASE, "uppercase()", NK_CDT_OP,
-			.exp_cmd = AS_STRING_OP_UPPER, .flags = AST_NF_MODIFY),
-	N(AST_PATH_FUNC_STR_LOWERCASE, "lowercase()", NK_CDT_OP,
-			.exp_cmd = AS_STRING_OP_LOWER, .flags = AST_NF_MODIFY),
-	N(AST_PATH_FUNC_STR_CASEFOLD, "casefold()", NK_CDT_OP,
-			.exp_cmd = AS_STRING_OP_CASE_FOLD, .flags = AST_NF_MODIFY),
-	N(AST_PATH_FUNC_STR_NORMALIZE, "normalize()", NK_CDT_OP,
-			.exp_cmd = AS_STRING_OP_NORMALIZE_NFC, .flags = AST_NF_MODIFY),
+			.exp_cmd = AS_STRING_OP_REPLACE_ALL, .flags = AST_NF_MODIFY,
+			.valid_props = AST_PROP_VALID_STR_MODIFY),
+	N(AST_PATH_FUNC_STR_UPPERCASE, "upper()", NK_CDT_OP,
+			.exp_cmd = AS_STRING_OP_UPPER, .flags = AST_NF_MODIFY,
+			.valid_props = AST_PROP_VALID_STR_MODIFY),
+	N(AST_PATH_FUNC_STR_LOWERCASE, "lower()", NK_CDT_OP,
+			.exp_cmd = AS_STRING_OP_LOWER, .flags = AST_NF_MODIFY,
+			.valid_props = AST_PROP_VALID_STR_MODIFY),
+	N(AST_PATH_FUNC_STR_CASEFOLD, "caseFold()", NK_CDT_OP,
+			.exp_cmd = AS_STRING_OP_CASE_FOLD, .flags = AST_NF_MODIFY,
+			.valid_props = AST_PROP_VALID_STR_MODIFY),
+	N(AST_PATH_FUNC_STR_NORMALIZE, "normalizeNFC()", NK_CDT_OP,
+			.exp_cmd = AS_STRING_OP_NORMALIZE_NFC, .flags = AST_NF_MODIFY,
+			.valid_props = AST_PROP_VALID_STR_MODIFY),
 	N(AST_PATH_FUNC_STR_TRIM_START, "trimStart()", NK_CDT_OP,
-			.exp_cmd = AS_STRING_OP_TRIM_START, .flags = AST_NF_MODIFY),
+			.exp_cmd = AS_STRING_OP_TRIM_START, .flags = AST_NF_MODIFY,
+			.valid_props = AST_PROP_VALID_STR_MODIFY),
 	N(AST_PATH_FUNC_STR_TRIM_END, "trimEnd()", NK_CDT_OP,
-			.exp_cmd = AS_STRING_OP_TRIM_END, .flags = AST_NF_MODIFY),
+			.exp_cmd = AS_STRING_OP_TRIM_END, .flags = AST_NF_MODIFY,
+			.valid_props = AST_PROP_VALID_STR_MODIFY),
 	N(AST_PATH_FUNC_STR_TRIM, "trim()", NK_CDT_OP, .exp_cmd = AS_STRING_OP_TRIM,
-			.flags = AST_NF_MODIFY),
+			.flags = AST_NF_MODIFY, .valid_props = AST_PROP_VALID_STR_MODIFY),
 	N(AST_PATH_FUNC_STR_PAD_START, "padStart()", NK_CDT_OP,
-			.exp_cmd = AS_STRING_OP_PAD_START, .flags = AST_NF_MODIFY),
+			.exp_cmd = AS_STRING_OP_PAD_START, .flags = AST_NF_MODIFY,
+			.valid_props = AST_PROP_VALID_STR_MODIFY),
 	N(AST_PATH_FUNC_STR_PAD_END, "padEnd()", NK_CDT_OP,
-			.exp_cmd = AS_STRING_OP_PAD_END, .flags = AST_NF_MODIFY),
+			.exp_cmd = AS_STRING_OP_PAD_END, .flags = AST_NF_MODIFY,
+			.valid_props = AST_PROP_VALID_STR_MODIFY),
 	N(AST_PATH_FUNC_STR_REPEAT, "repeat()", NK_CDT_OP,
-			.exp_cmd = AS_STRING_OP_REPEAT, .flags = AST_NF_MODIFY),
+			.exp_cmd = AS_STRING_OP_REPEAT, .flags = AST_NF_MODIFY,
+			.valid_props = AST_PROP_VALID_STR_MODIFY),
 	N(AST_PATH_FUNC_STR_REGEX_REPLACE, "regexReplace()", NK_CDT_OP,
-			.exp_cmd = AS_STRING_OP_REGEX_REPLACE, .flags = AST_NF_MODIFY),
+			.exp_cmd = AS_STRING_OP_REGEX_REPLACE, .flags = AST_NF_MODIFY,
+			.valid_props = AST_PROP_VALID_STR_MODIFY),
 
 	// concat's fold block — AS_STRING_OP_APPEND (scalar-arg modify).
 	N(AST_PATH_FUNC_STR_APPEND, "concat()", NK_CDT_OP,
-			.exp_cmd = AS_STRING_OP_APPEND, .flags = AST_NF_MODIFY),
+			.exp_cmd = AS_STRING_OP_APPEND, .flags = AST_NF_MODIFY,
+			.valid_props = AST_PROP_VALID_STR_MODIFY),
 
 	//==========================================================
 	// Single-select map segments.
@@ -402,52 +421,50 @@ const ast_node_info ast_node_table[AST_NODE_TYPE_COUNT] = {
 	//==========================================================
 	// Multi-select map range segments.
 
-	N_SEG_MR(AST_MAP_KEY_RANGE, "map_key_range", AST_NF_MAP_SEG | AST_NF_PLURAL,
+	N_SEG_M(AST_MAP_KEY_RANGE, "map_key_range", AST_NF_MAP_SEG | AST_NF_PLURAL,
 			(AS_CDT_CTX_MAP | AS_CDT_CTX_KEY_INTERVAL),
 			AS_CDT_OP_MAP_GET_BY_KEY_INTERVAL,
 			AS_CDT_OP_MAP_REMOVE_BY_KEY_INTERVAL),
-	N_SEG_MR(AST_MAP_INDEX_RANGE, "map_index_range",
-			AST_NF_MAP_SEG | AST_NF_PLURAL,
+	N_SEG_M(AST_MAP_INDEX_RANGE, "map_index_range", AST_NF_MAP_SEG | AST_NF_PLURAL,
 			(AS_CDT_CTX_MAP | AS_CDT_CTX_INDEX_RANGE),
 			AS_CDT_OP_MAP_GET_BY_INDEX_RANGE, AS_CDT_OP_MAP_REMOVE_BY_INDEX_RANGE),
-	N_SEG_MR(AST_MAP_VALUE_RANGE, "map_value_range",
-			AST_NF_MAP_SEG | AST_NF_PLURAL,
+	N_SEG_M(AST_MAP_VALUE_RANGE, "map_value_range", AST_NF_MAP_SEG | AST_NF_PLURAL,
 			(AS_CDT_CTX_MAP | AS_CDT_CTX_VALUE_INTERVAL),
 			AS_CDT_OP_MAP_GET_BY_VALUE_INTERVAL,
 			AS_CDT_OP_MAP_REMOVE_BY_VALUE_INTERVAL),
-	N_SEG_MR(AST_MAP_RANK_RANGE, "map_rank_range", AST_NF_MAP_SEG | AST_NF_PLURAL,
+	N_SEG_M(AST_MAP_RANK_RANGE, "map_rank_range", AST_NF_MAP_SEG | AST_NF_PLURAL,
 			(AS_CDT_CTX_MAP | AS_CDT_CTX_RANK_RANGE),
 			AS_CDT_OP_MAP_GET_BY_RANK_RANGE, AS_CDT_OP_MAP_REMOVE_BY_RANK_RANGE),
 
 	//==========================================================
 	// Multi-select list range segments.
 
-	N_SEG_MR(AST_LIST_INDEX_RANGE, "list_index_range", AST_NF_PLURAL,
+	N_SEG_M(AST_LIST_INDEX_RANGE, "list_index_range", AST_NF_PLURAL,
 			(AS_CDT_CTX_LIST | AS_CDT_CTX_INDEX_RANGE),
 			AS_CDT_OP_LIST_GET_BY_INDEX_RANGE,
 			AS_CDT_OP_LIST_REMOVE_BY_INDEX_RANGE),
-	N_SEG_MR(AST_LIST_VALUE_RANGE, "list_value_range", AST_NF_PLURAL,
+	N_SEG_M(AST_LIST_VALUE_RANGE, "list_value_range", AST_NF_PLURAL,
 			(AS_CDT_CTX_LIST | AS_CDT_CTX_VALUE_INTERVAL),
 			AS_CDT_OP_LIST_GET_BY_VALUE_INTERVAL,
 			AS_CDT_OP_LIST_REMOVE_BY_VALUE_INTERVAL),
-	N_SEG_MR(AST_LIST_RANK_RANGE, "list_rank_range", AST_NF_PLURAL,
+	N_SEG_M(AST_LIST_RANK_RANGE, "list_rank_range", AST_NF_PLURAL,
 			(AS_CDT_CTX_LIST | AS_CDT_CTX_RANK_RANGE),
 			AS_CDT_OP_LIST_GET_BY_RANK_RANGE, AS_CDT_OP_LIST_REMOVE_BY_RANK_RANGE),
 
 	//==========================================================
 	// Relative range segments.
 
-	N_SEG_MR(AST_MAP_INDEX_REL_RANGE, "map_index_rel_range",
+	N_SEG_M(AST_MAP_INDEX_REL_RANGE, "map_index_rel_range",
 			AST_NF_MAP_SEG | AST_NF_PLURAL | AST_NF_REL_RANGE,
 			(AS_CDT_CTX_MAP | AS_CDT_CTX_KEY_REL_INDEX_RANGE),
 			AS_CDT_OP_MAP_GET_BY_KEY_REL_INDEX_RANGE,
 			AS_CDT_OP_MAP_REMOVE_BY_KEY_REL_INDEX_RANGE),
-	N_SEG_MR(AST_MAP_RANK_REL_RANGE, "map_rank_rel_range",
+	N_SEG_M(AST_MAP_RANK_REL_RANGE, "map_rank_rel_range",
 			AST_NF_MAP_SEG | AST_NF_PLURAL | AST_NF_REL_RANGE,
 			(AS_CDT_CTX_MAP | AS_CDT_CTX_VALUE_REL_RANK_RANGE),
 			AS_CDT_OP_MAP_GET_BY_VALUE_REL_RANK_RANGE,
 			AS_CDT_OP_MAP_REMOVE_BY_VALUE_REL_RANK_RANGE),
-	N_SEG_MR(AST_LIST_RANK_REL_RANGE, "list_rank_rel_range",
+	N_SEG_M(AST_LIST_RANK_REL_RANGE, "list_rank_rel_range",
 			AST_NF_PLURAL | AST_NF_REL_RANGE,
 			(AS_CDT_CTX_LIST | AS_CDT_CTX_VALUE_REL_RANK_RANGE),
 			AS_CDT_OP_LIST_GET_BY_VALUE_REL_RANK_RANGE,
@@ -456,11 +473,11 @@ const ast_node_info ast_node_table[AST_NODE_TYPE_COUNT] = {
 	//==========================================================
 	// Multi-select map list segments.
 
-	N_SEG_ML(AST_MAP_KEY_LIST, "map_key_list",
+	N_SEG_M(AST_MAP_KEY_LIST, "map_key_list",
 			AST_NF_MAP_SEG | AST_NF_PLURAL | AST_NF_LIST_SEG,
 			(AS_CDT_CTX_MAP | AS_CDT_CTX_KEY_LIST),
 			AS_CDT_OP_MAP_GET_BY_KEY_LIST, AS_CDT_OP_MAP_REMOVE_BY_KEY_LIST),
-	N_SEG_ML(AST_MAP_VALUE_LIST, "map_value_list",
+	N_SEG_M(AST_MAP_VALUE_LIST, "map_value_list",
 			AST_NF_MAP_SEG | AST_NF_PLURAL | AST_NF_LIST_SEG,
 			(AS_CDT_CTX_MAP | AS_CDT_CTX_VALUE_LIST),
 			AS_CDT_OP_MAP_GET_BY_VALUE_LIST, AS_CDT_OP_MAP_REMOVE_BY_VALUE_LIST),
@@ -468,7 +485,7 @@ const ast_node_info ast_node_table[AST_NODE_TYPE_COUNT] = {
 	//==========================================================
 	// Multi-select list list segments.
 
-	N_SEG_ML(AST_LIST_VALUE_LIST, "list_value_list",
+	N_SEG_M(AST_LIST_VALUE_LIST, "list_value_list",
 			AST_NF_PLURAL | AST_NF_LIST_SEG,
 			(AS_CDT_CTX_LIST | AS_CDT_CTX_VALUE_LIST),
 			AS_CDT_OP_LIST_GET_ALL_BY_VALUE_LIST,
@@ -477,37 +494,49 @@ const ast_node_info ast_node_table[AST_NODE_TYPE_COUNT] = {
 	//==========================================================
 	// Modify path functions.
 
-	// CDT modifies accept the union of LIST + MAP modify flags. Codegen
-	// drops map-only bits on list ops so the wider mask is safe at the
-	// validation layer.
+	// Rows serving both containers carry the union; ael_check_cdt_op_props
+	// re-checks against the receiver once the leaf selector fixes it.
 	N_CDT_OP(AST_PATH_FUNC_REMOVE, "remove()", AST_NF_MODIFY | AST_NF_MOD_TARGET,
-			.valid_props = AST_PROP_VALID_CDT_MAP_MODIFY),
+			.valid_props = AST_PROP_VALID_CDT_MODIFY),
 	// setTo (identifier SET) — DEFAULT upsert.
-	N_CDT_OP(AST_PATH_FUNC_SET, "setTo()", AST_NF_MODIFY | AST_NF_MOD_TARGET,
-			.valid_props = AST_PROP_VALID_CDT_MAP_MODIFY),
+	N_CDT_OP(AST_PATH_FUNC_SET, "setTo()",
+			AST_NF_MODIFY | AST_NF_MOD_TARGET | AST_NF_NEEDS_LEAF,
+			.valid_props = AST_PROP_VALID_CDT_MODIFY),
 	// insert — map CREATE_ONLY (NO_OVERWRITE preset) / list positional.
-	N_CDT_OP(AST_PATH_FUNC_INSERT, "insert()", AST_NF_MODIFY | AST_NF_MOD_TARGET,
-			.valid_props = AST_PROP_VALID_CDT_MAP_MODIFY),
+	N_CDT_OP(AST_PATH_FUNC_INSERT, "insert()",
+			AST_NF_MODIFY | AST_NF_MOD_TARGET | AST_NF_NEEDS_LEAF,
+			.valid_props = AST_PROP_VALID_CDT_MODIFY),
 	// update — map UPDATE_ONLY (NO_CREATE preset); rejected on lists.
-	N_CDT_OP(AST_PATH_FUNC_UPDATE, "update()", AST_NF_MODIFY | AST_NF_MOD_TARGET,
+	N_CDT_OP(AST_PATH_FUNC_UPDATE, "update()",
+			AST_NF_MODIFY | AST_NF_MOD_TARGET | AST_NF_NEEDS_LEAF,
 			.valid_props = AST_PROP_VALID_CDT_MAP_MODIFY),
-	N_CDT_OP(AST_PATH_FUNC_APPEND, "append()", AST_NF_MODIFY,
-			.valid_props = AST_PROP_VALID_CDT_MAP_MODIFY),
-	// Bulk *Items — one raw collection arg. appendItems/putItems are whole-
-	// collection (no leaf); insertItems consumes a list index (MOD_TARGET).
-	N_CDT_OP(AST_PATH_FUNC_APPEND_ITEMS, "appendItems()", AST_NF_MODIFY,
-			.valid_props = AST_PROP_VALID_CDT_MAP_MODIFY),
+	N_CDT_OP(AST_PATH_FUNC_APPEND, "append()", AST_NF_MODIFY | AST_NF_WHOLE_COLL,
+			.valid_props = AST_PROP_VALID_CDT_LIST_MODIFY),
+	// Bulk *Items — one raw collection arg. appendItems/putItems/updateItems
+	// are whole-collection (no leaf); insertItems takes a list index on a list
+	// receiver and is whole-collection on a map.
+	N_CDT_OP(AST_PATH_FUNC_APPEND_ITEMS, "appendItems()",
+			AST_NF_MODIFY | AST_NF_WHOLE_COLL,
+			.valid_props = AST_PROP_VALID_CDT_LIST_ITEMS),
 	N_CDT_OP(AST_PATH_FUNC_INSERT_ITEMS, "insertItems()",
 			AST_NF_MODIFY | AST_NF_MOD_TARGET,
-			.valid_props = AST_PROP_VALID_CDT_MAP_MODIFY),
-	N_CDT_OP(AST_PATH_FUNC_PUT_ITEMS, "putItems()", AST_NF_MODIFY,
-			.valid_props = AST_PROP_VALID_CDT_MAP_MODIFY),
+			.valid_props = AST_PROP_VALID_CDT_ITEMS),
+	N_CDT_OP(AST_PATH_FUNC_PUT_ITEMS, "putItems()",
+			AST_NF_MODIFY | AST_NF_WHOLE_COLL,
+			.valid_props = AST_PROP_VALID_CDT_MAP_ITEMS),
+	N_CDT_OP(AST_PATH_FUNC_UPDATE_ITEMS, "updateItems()",
+			AST_NF_MODIFY | AST_NF_WHOLE_COLL,
+			.valid_props = AST_PROP_VALID_CDT_MAP_ITEMS),
 	// add (identifier INCREMENT).
-	N_CDT_OP(AST_PATH_FUNC_INCREMENT, "add()", AST_NF_MODIFY | AST_NF_MOD_TARGET,
-			.valid_props = AST_PROP_VALID_CDT_MAP_MODIFY),
-	N_CDT_OP(AST_PATH_FUNC_CLEAR, "clear()", AST_NF_MODIFY,
-			.valid_props = AST_PROP_VALID_CDT_MAP_MODIFY),
-	N_CDT_OP(AST_PATH_FUNC_SORT, "sort()", AST_NF_MODIFY,
+	N_CDT_OP(AST_PATH_FUNC_INCREMENT, "add()",
+			AST_NF_MODIFY | AST_NF_MOD_TARGET | AST_NF_NEEDS_LEAF,
+			.valid_props = AST_PROP_VALID_CDT_MODIFY),
+	// No modify-flags slot on either container's wire op, so :NO_FAIL cannot
+	// ride the op -- it rides the context list instead (ael_ctx_path_flags),
+	// which is what makes an absent path a no-op rather than an error.
+	N_CDT_OP(AST_PATH_FUNC_CLEAR, "clear()", AST_NF_MODIFY | AST_NF_WHOLE_COLL,
+			.valid_props = AST_PROP_VALID_CDT_CLEAR),
+	N_CDT_OP(AST_PATH_FUNC_SORT, "sort()", AST_NF_MODIFY | AST_NF_WHOLE_COLL,
 			.valid_props = AST_PROP_VALID_CDT_SORT),
 
 	//==========================================================
@@ -534,8 +563,8 @@ const ast_node_info ast_node_table[AST_NODE_TYPE_COUNT] = {
 	// .select() / .modify() / wildcard-.remove() path functions —
 	// distinct codegen path (emit_select_call) rather than the regular
 	// path-call wrapper.
-	N(AST_PATH_FUNC_SELECT, "select()", NK_NONE,
-			.valid_props = AST_PROP_VALID_SELECT_MODIFY),
+	// A select is a read, so it takes no tolerance flag.
+	N(AST_PATH_FUNC_SELECT, "select()", NK_NONE),
 	N(AST_PATH_FUNC_MODIFY, "modify()", NK_NONE,
 			.valid_props = AST_PROP_VALID_SELECT_MODIFY),
 	N(AST_PATH_FUNC_PSELECT_REMOVE, "remove()*", NK_NONE,
@@ -578,8 +607,7 @@ const ast_node_info ast_node_table[AST_NODE_TYPE_COUNT] = {
 #undef N
 #undef N_CMD
 #undef N_SEG_S
-#undef N_SEG_MR
-#undef N_SEG_ML
+#undef N_SEG_M
 #undef N_CDT_OP
 
 //==========================================================
@@ -599,18 +627,6 @@ ast_pool_init(ast_pool* pool)
 			pool->stack_mem);
 }
 
-ast_node*
-ast_pool_at(ast_pool* pool, ast_ref r)
-{
-	if (r == AST_REF_NULL) {
-		return NULL;
-	}
-
-	ast_node* n = (ast_node*)dynmem_at(&pool->dm, r);
-	cf_assert(n != NULL, CF_MISC, "ast_pool_at: dynmem_at null at %u", r);
-	return n;
-}
-
 ast_ref
 ast_pool_alloc(ast_pool* pool)
 {
@@ -628,15 +644,10 @@ ast_pool_alloc(ast_pool* pool)
 		}
 	}
 
-	*n = (ast_node) {
-		.next = AST_REF_NULL,
-		.u = {
-			.list = {
-				.head = AST_REF_NULL,
-				.tail = AST_REF_NULL,
-			},
-		},
-	};
+	// The union is fully zeroed — no variant's "empty" bit pattern leaks
+	// into another variant's fields. Chain-bearing kinds get their
+	// AST_REF_NULL head/tail in ast_new, keyed on the node kind.
+	*n = (ast_node){ .next = AST_REF_NULL };
 
 	return id;
 }
@@ -659,21 +670,12 @@ ast_pool_release(ast_pool* pool, ast_ref r)
 }
 
 void
-ast_pool_reset(ast_pool* pool)
-{
-	dynmem_destroy(&pool->dm);
-	pool->free_head = AST_REF_NULL;
-	dynmem_init(&pool->dm, (uint32_t)sizeof(ast_node), AST_POOL_DEFAULT_INIT,
-			pool->stack_mem);
-}
-
-void
 ast_pool_destroy(ast_pool* pool)
 {
 	dynmem_destroy(&pool->dm);
 }
 
-ast_ref
+static ast_ref
 ast_pool_next_ref(const ast_pool* pool, ast_ref ref)
 {
 	const ast_node* n = (const ast_node*)dynmem_get(&pool->dm, ref);
@@ -738,18 +740,25 @@ ast_new(ast_pool* pool, ast_node_t type)
 	n->offset = pool->cur_offset;
 	n->sz = pool->cur_sz;
 
-	// Variant init for fields that overlay AST_REF_NULL's bit pattern
-	// from the pool's default u.list.head = AST_REF_NULL initializer.
-	// The 0x00FFFFFF of AST_REF_NULL writes 0xFF into the second byte of
-	// u.list.head, which is the low byte of u.{seg,cdt_op}.props. Without
-	// this, fresh seg / cdt_op nodes start with bits 0-7 of props set
-	// (including AST_PROP_NO_FAIL).
-	if (ast_node_table[type].kind == NK_SEG_S) {
-		n->u.seg.props = 0;
-	}
-	else if (ast_node_table[type].kind == NK_CDT_OP) {
-		n->u.cdt_op.props = 0;
-		n->u.cdt_op.blob_inline = false;
+	// Chain-bearing kinds start with an empty chain. Only refs that mean
+	// "no node" need AST_REF_NULL (0 is a valid pool index); every other
+	// variant field starts zeroed from ast_pool_alloc, and constructors
+	// set what they use.
+	switch (ast_node_table[type].kind) {
+	case NK_LIST:
+		n->u.list.head = AST_REF_NULL;
+		n->u.list.tail = AST_REF_NULL;
+		break;
+	case NK_CDT_OP:
+		n->u.cdt_op.head = AST_REF_NULL;
+		n->u.cdt_op.tail = AST_REF_NULL;
+		break;
+	default:
+		if (type == AST_PATH_CTX) {
+			n->u.ctx_list.head = AST_REF_NULL;
+			n->u.ctx_list.tail = AST_REF_NULL;
+		}
+		break;
 	}
 
 	return r;
@@ -855,10 +864,9 @@ ast_new_string(ast_pool* pool, const char* s, uint32_t sz, bool has_escape)
 // body before constructing the AST_STRING. On invalid escape, emits a
 // parse-time diag pinned at the offending backslash and returns an
 // AST_UNKNOWN stand-in so the rest of the parse can proceed without
-// NULL-deref. The body bytes still alias the source buffer — decoding
-// is deferred to codegen (ael_count_sz / ael_build_node in exp.c;
-// AST_STRING case in ael_codegen.c). The has_escape flag is captured here
-// so codegen can skip a rescan for the no-escape common case.
+// NULL-deref. The body bytes still alias the source buffer — decoding is
+// deferred to codegen. The has_escape flag is captured here so codegen can skip
+// a rescan for the no-escape common case.
 ast_ref
 ast_new_string_token(ael_context* ctx, uint32_t name_offset, uint32_t name_sz)
 {
@@ -868,8 +876,7 @@ ast_new_string_token(ael_context* ctx, uint32_t name_offset, uint32_t name_sz)
 	const char* err;
 
 	if (! ael_string_validate(s, name_sz, &has_escape, &bad_offset, &err)) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, name_offset + bad_offset, 2,
-				err);
+		ael_err(ctx, name_offset + bad_offset, 2, err);
 		return ast_new(ctx->pool, AST_UNKNOWN);
 	}
 
@@ -950,12 +957,11 @@ bin_name_check(ael_context* ctx, uint32_t name_offset, uint32_t name_sz)
 	}
 
 	if (name_sz >= AS_BIN_NAME_MAX_SZ) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, name_offset, name_sz,
+		ael_err(ctx, name_offset, name_sz,
 				"bin name too long (max 15 characters)");
 	}
 	else {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, name_offset, name_sz,
-				"bin name cannot contain NUL bytes");
+		ael_err(ctx, name_offset, name_sz, "bin name cannot contain NUL bytes");
 	}
 
 	return false;
@@ -970,7 +976,7 @@ ast_new_bin(ael_context* ctx, uint32_t ref_offset, uint32_t ref_end,
 	uint32_t ref_sz = ref_end > ref_offset ? ref_end - ref_offset : name_sz;
 
 	if (ctx->filter_depth > 0) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, name_offset, name_sz,
+		ael_err(ctx, name_offset, name_sz,
 				"$.bin not allowed inside filter / modify body");
 		return ast_new(pool, AST_UNKNOWN);
 	}
@@ -1033,7 +1039,7 @@ ast_new_local_bin(ael_context* ctx, uint32_t ref_offset, uint32_t ref_end,
 	uint32_t ref_sz = ref_end > ref_offset ? ref_end - ref_offset : name_sz;
 
 	if (ctx->filter_depth > 0) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, name_offset, name_sz,
+		ael_err(ctx, name_offset, name_sz,
 				"$.bin not allowed inside filter / modify body");
 		return ast_new(ctx->pool, AST_UNKNOWN);
 	}
@@ -1063,15 +1069,15 @@ ast_new_local_bin(ael_context* ctx, uint32_t ref_offset, uint32_t ref_end,
 
 // Record a "<what>: <A> vs <B>" diagnostic naming both etypes. Centralizes the
 // two-buffer ast_etype_str formatting the type-conflict sites share.
-static void
+void
 ast_diag_type_conflict(ael_context* ctx, uint32_t offset, uint32_t byte_sz,
 		const char* what, ast_etype a, ast_etype b)
 {
 	char a_buf[AEL_ETYPE_STR_SZ];
 	char b_buf[AEL_ETYPE_STR_SZ];
 
-	ael_diag_addf(&ctx->diags, AEL_SEV_ERROR, offset, byte_sz, "%s: %s vs %s",
-			what, ast_etype_str(a, a_buf, sizeof a_buf),
+	ael_errf(ctx, offset, byte_sz, "%s: %s vs %s", what,
+			ast_etype_str(a, a_buf, sizeof a_buf),
 			ast_etype_str(b, b_buf, sizeof b_buf));
 }
 
@@ -1124,7 +1130,7 @@ ast_diag_operand_conflict(ael_context* ctx, ast_node_t op, ast_etype required,
 	char req_buf[AEL_ETYPE_STR_SZ];
 	char got_buf[AEL_ETYPE_STR_SZ];
 
-	ael_diag_addf(&ctx->diags, AEL_SEV_ERROR, ast_disp_offset(bad), bad->sz,
+	ael_errf(ctx, ast_disp_offset(bad), bad->sz,
 			"operand of '%s' must be %s, got %s", ast_node_table[op].name,
 			ast_etype_str(required, req_buf, sizeof req_buf),
 			ast_etype_str(bad->etype, got_buf, sizeof got_buf));
@@ -1143,31 +1149,31 @@ ast_new_bcmp(ael_context* ctx, ast_node_t ntype, ast_ref left, ast_ref right)
 	ast_node* lp = ast_pool_at(pool, left);
 	ast_node* rp = ast_pool_at(pool, right);
 
-	if (! ast_type_resolved(lp->etype) && ! ast_type_resolved(rp->etype) &&
-			! lp->has_deferable && ! rp->has_deferable) {
-		uint32_t offset;
-		uint32_t byte_sz;
+	// Both checks apply only when neither side can still be narrowed by
+	// downstream context (no deferable bins / vars).
+	if (! lp->has_deferable && ! rp->has_deferable) {
+		if (! ast_type_resolved(lp->etype) && ! ast_type_resolved(rp->etype)) {
+			uint32_t offset;
+			uint32_t byte_sz;
 
-		ast_operand_pair_span(lp, rp, &offset, &byte_sz);
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, offset, byte_sz,
-				"cannot infer types for comparison");
-		return AST_REF_NULL;
-	}
+			ast_operand_pair_span(lp, rp, &offset, &byte_sz);
+			ael_err(ctx, offset, byte_sz, "cannot infer types for comparison");
+			return AST_REF_NULL;
+		}
 
-	// Operand etypes must have at least one type in common — otherwise the
-	// comparison can never succeed. Fully unresolved (AUTO) intersects to
-	// AUTO ≠ ERROR, so this only fires for genuinely incompatible types
-	// (e.g. INT vs NIL literals). Deferable sides may still be narrowed by
-	// downstream context, so don't reject those here.
-	if ((lp->etype & rp->etype) == AST_ETYPE_ERROR && ! lp->has_deferable &&
-			! rp->has_deferable) {
-		uint32_t offset;
-		uint32_t byte_sz;
+		// Operand etypes must have at least one type in common — otherwise
+		// the comparison can never succeed. Fully unresolved (AUTO)
+		// intersects to AUTO ≠ ERROR, so this only fires for genuinely
+		// incompatible types (e.g. INT vs NIL literals).
+		if ((lp->etype & rp->etype) == AST_ETYPE_ERROR) {
+			uint32_t offset;
+			uint32_t byte_sz;
 
-		ast_operand_pair_span(lp, rp, &offset, &byte_sz);
-		ast_diag_type_conflict(ctx, offset, byte_sz, "cannot compare",
-				lp->etype, rp->etype);
-		return AST_REF_NULL;
+			ast_operand_pair_span(lp, rp, &offset, &byte_sz);
+			ast_diag_type_conflict(ctx, offset, byte_sz, "cannot compare",
+					lp->etype, rp->etype);
+			return AST_REF_NULL;
+		}
 	}
 
 	ast_ref r = ast_new_binary(pool, ntype, left, right);
@@ -1211,12 +1217,10 @@ ast_new_in(ael_context* ctx, ast_ref left, ast_ref right)
 		}
 	}
 
+	// Both operands were null-checked above, so ast_new_binary can't fail.
 	ast_ref r = ast_new_binary(pool, AST_CMP_IN, left, right);
 
-	if (r != AST_REF_NULL) {
-		ast_pool_at(pool, r)->etype = AST_ETYPE_TRILEAN;
-	}
-
+	ast_pool_at(pool, r)->etype = AST_ETYPE_TRILEAN;
 	return r;
 }
 
@@ -1257,24 +1261,6 @@ ast_span_children(ast_pool* pool, ast_ref ref, ast_ref a, ast_ref b, ast_ref c)
 	ast_set_span(pool, ref, start, end - start);
 }
 
-// Grow R's existing span to also cover child C (union of the two spans). Used
-// when a chain fold (a + b + c) appends into an existing n-ary node so the
-// node's span tracks the whole chain, not just its first two operands.
-static void
-ast_span_extend(ast_pool* pool, ast_ref ref, ast_ref child)
-{
-	const ast_node* n = ast_pool_at(pool, ref);
-	const ast_node* c = ast_pool_at(pool, child);
-	uint32_t n_start = ast_disp_offset(n);
-	uint32_t c_start = ast_disp_offset(c);
-	uint32_t start = n_start < c_start ? n_start : c_start;
-	uint32_t n_end = n_start + n->sz;
-	uint32_t c_end = c_start + c->sz;
-	uint32_t end = n_end > c_end ? n_end : c_end;
-
-	ast_set_span(pool, ref, start, end - start);
-}
-
 ast_ref
 ast_new_bmath(ael_context* ctx, ast_node_t type, ast_ref left, ast_ref right,
 		ast_etype operand_etype)
@@ -1311,32 +1297,33 @@ ast_new_binary(ast_pool* pool, ast_node_t type, ast_ref left, ast_ref right)
 }
 
 ast_ref
-ast_new_range_seg(ast_pool* pool, ast_node_t type, ast_ref start, ast_ref end)
+ast_new_range_seg(ast_pool* pool, ast_node_t type, ast_ref start, ast_ref end,
+		bool inverted)
 {
 	ast_ref r = ast_new(pool, type);
 	ast_node* n = ast_pool_at(pool, r);
 	n->u.range_seg.start = start;
 	n->u.range_seg.end = end;
-	n->u.range_seg.inverted = false;
+	n->u.range_seg.inverted = inverted;
 	ast_span_children(pool, r, start, end, AST_REF_NULL);
 	return r;
 }
 
 ast_ref
 ast_new_rel_range_seg(ast_pool* pool, ast_node_t type, ast_ref start,
-		ast_ref end, ast_ref relative_to)
+		ast_ref end, ast_ref relative_to, bool inverted)
 {
 	ast_ref r = ast_new(pool, type);
 	ast_node* n = ast_pool_at(pool, r);
 	n->u.rel_range_seg.start = start;
 	n->u.rel_range_seg.end = end;
 	n->u.rel_range_seg.relative_to = relative_to;
-	n->u.rel_range_seg.inverted = false;
+	n->u.rel_range_seg.inverted = inverted;
 	ast_span_children(pool, r, start, end, relative_to);
 	return r;
 }
 
-ast_ref
+static ast_ref
 ast_new_nary(ael_context* ctx, ast_node_t type, ast_ref left, ast_ref right,
 		ast_etype etype)
 {
@@ -1442,7 +1429,7 @@ ast_new_var_ref(ael_context* ctx, uint32_t name_offset, uint32_t name_sz)
 		// here would reference an outer-scope let-var. Sub-programs are
 		// separate as_exp blobs with their own var-slot space, so outer
 		// slots can't be addressed at runtime.
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, name_offset, name_sz,
+		ael_err(ctx, name_offset, name_sz,
 				"${var} not allowed inside filter / modify body");
 		return ast_new(ctx->pool, AST_UNKNOWN);
 	}
@@ -1450,8 +1437,7 @@ ast_new_var_ref(ael_context* ctx, uint32_t name_offset, uint32_t name_sz)
 	ael_var_lookup v = ael_find_var(ctx, name, name_sz);
 
 	if (! v.found) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, name_offset, name_sz,
-				"undefined variable");
+		ael_err(ctx, name_offset, name_sz, "undefined variable");
 		// Sentinel UNKNOWN so the rest of the parse-time reduction
 		// chain has a non-NULL operand to walk; the diagnostic stops
 		// the build before codegen.
@@ -1469,6 +1455,13 @@ ast_new_var_ref(ael_context* ctx, uint32_t name_offset, uint32_t name_sz)
 	n->u.var.parent = AST_REF_NULL;
 	n->etype = v.etype;
 	n->has_deferable = ! ast_type_resolved(v.etype);
+
+	// Push onto the def's reference chain so a later narrowing of the
+	// def's value reaches this reference (and climbs its parents).
+	ast_node* dp = ast_pool_at(ctx->pool, v.def);
+	n->u.var.ref_next = dp->u.var_def.ref_root;
+	dp->u.var_def.ref_root = r;
+
 	return r;
 }
 
@@ -1483,15 +1476,26 @@ ast_new_var_def(ael_context* ctx, uint32_t name_offset, uint32_t name_sz,
 	const char* name = ctx->input + name_offset;
 
 	if (ctx->filter_depth > 0) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, name_offset, name_sz,
+		ael_err(ctx, name_offset, name_sz,
 				"with(...) not allowed inside filter / modify body");
 		return ast_new(ctx->pool, AST_UNKNOWN);
 	}
 
+	if (name_sz > AEL_VAR_NAME_MAX) {
+		ael_errf(ctx, name_offset, name_sz,
+				"variable name too long (max %u bytes)", AEL_VAR_NAME_MAX);
+		return AST_REF_NULL;
+	}
+
+	if (ctx->scope_idx >= AEL_VAR_MAX) {
+		ael_errf(ctx, name_offset, name_sz, "too many variables (max %u)",
+				AEL_VAR_MAX);
+		return AST_REF_NULL;
+	}
+
 	// Check for duplicate name in current scope.
 	if (ael_find_var(ctx, name, name_sz).found) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, name_offset, name_sz,
-				"duplicate variable name");
+		ael_err(ctx, name_offset, name_sz, "duplicate variable name");
 		return AST_REF_NULL;
 	}
 
@@ -1500,7 +1504,7 @@ ast_new_var_def(ael_context* ctx, uint32_t name_offset, uint32_t name_sz,
 	ast_node* vp = ast_pool_at(ctx->pool, value);
 
 	if (! ast_type_resolved(vp->etype) && ! vp->has_deferable) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, name_offset, name_sz,
+		ael_err(ctx, name_offset, name_sz,
 				"cannot infer type for variable definition");
 		return AST_REF_NULL;
 	}
@@ -1509,12 +1513,21 @@ ast_new_var_def(ael_context* ctx, uint32_t name_offset, uint32_t name_sz,
 	ast_node* dp = ast_pool_at(ctx->pool, r);
 	dp->u.var_def.name_sz = name_sz;
 	dp->u.var_def.value = value;
+	dp->u.var_def.ref_root = AST_REF_NULL;
 	dp->next = AST_REF_NULL;
+	ctx->var_by_idx[ctx->scope_idx] = r;
+
+	// Parent the value to this def so a narrowing that starts inside the
+	// value (e.g. its bin pinned by another occurrence) climbs here and
+	// fans out to the ${name} references — see ast_climb_and_propagate.
+	ast_set_parent(ctx->pool, value, r);
 
 	// Span over `name = value` so a parent that folds this node (via
-	// ast_span_extend) gets a precise caret, not the parser lookahead. The
+	// ast_span_children) gets a precise caret, not the parser lookahead. The
 	// node anchors on the name, so name_offset is both the semantic locator
-	// and the display start -- no disp_pre reach-back.
+	// and the display start -- no disp_pre reach-back. That offset also serves
+	// as the def's name position (read by ael_find_var and the emitters —
+	// there is no u.var_def.name_offset).
 	const ast_node* val_node = ast_pool_at(ctx->pool, value);
 	uint32_t val_end = ast_disp_offset(val_node) + val_node->sz;
 	ast_set_span(ctx->pool, r, name_offset,
@@ -1529,7 +1542,7 @@ ast_new_let_scope(ael_context* ctx, uint32_t name_offset, uint32_t name_sz,
 		ast_ref value)
 {
 	if (ctx->filter_depth > 0) {
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, name_offset, name_sz,
+		ael_err(ctx, name_offset, name_sz,
 				"with(...) not allowed inside filter / modify body");
 		return ast_new(ctx->pool, AST_UNKNOWN);
 	}
@@ -1591,6 +1604,9 @@ ast_new_loop_var(ast_pool* pool, as_exp_builtin builtin)
 	ast_node* n = ast_pool_at(pool, r);
 
 	n->u.loop_var.builtin = builtin;
+	// @index never chains (always pinned INT), so make its "no chain"
+	// explicit rather than relying on the alloc fill.
+	n->u.loop_var.next_same_kind = AST_REF_NULL;
 
 	switch (builtin) {
 	case AS_EXP_BUILTIN_INDEX:
@@ -1612,26 +1628,16 @@ ast_new_loop_var(ast_pool* pool, as_exp_builtin builtin)
 
 // Build an NK_CDT_OP node. The node's type IS the path-function kind
 // (AST_PATH_FUNC_GET / EXISTS / COUNT / REMOVE / SET / INSERT / INCREMENT /
-// APPEND / CLEAR / SORT). op_code is left at 0 (resolved at the call
-// combine step from ctx_list + leaf seg context). The wire payload chain
-// starts empty; finalize_cdt_op pushes ret_type, leaf_seg, and/or value
-// onto it as appropriate for the path-func's wire shape. Explicit zero
-// of op_code / is_modify / leaf_consumed / props is required: the pool's
-// default initializer sets u.list.head/tail to AST_REF_NULL (0x00FFFFFF),
-// which overlays into u.cdt_op.props as 0x00FF — pre-setting bits 0-7
-// including AST_PROP_NO_FAIL.
+// APPEND / CLEAR / SORT). op_code stays 0 (resolved at the call combine
+// step from ctx_list + leaf seg context); the wire payload chain starts
+// empty — finalize_cdt_op pushes ret_type, leaf_seg, and/or value onto it
+// per the path-func's wire shape.
 ast_ref
 ast_new_cdt_op(ast_pool* pool, ast_node_t pf_type)
 {
-	ast_ref r = ast_new(pool, pf_type);
-	ast_node* n = ast_pool_at(pool, r);
-
-	n->u.cdt_op.op_code = 0;
-	n->u.cdt_op.is_modify = false;
-	n->u.cdt_op.leaf_consumed = false;
-	n->u.cdt_op.props = 0;
-	AST_CHAIN_CLR(pool, r);
-	return r;
+	// op_code / is_modify / leaf_consumed / props start zeroed from the
+	// pool; the chain head/tail are nulled by ast_new's NK_CDT_OP arm.
+	return ast_new(pool, pf_type);
 }
 
 ast_ref
@@ -1739,7 +1745,7 @@ ast_children_foreach(ast_pool* pool, ast_ref ref, ast_child_cb cb, void* arg)
 		cb(pool, np->u.binary.right, arg);
 		break;
 	case NK_SEG_M: {
-		uint8_t flags = ast_node_table[np->type].flags;
+		uint32_t flags = ast_node_table[np->type].flags;
 
 		// Flag order matches ast_seg_inverted: by-exp, then rel-range, then
 		// list, then plain range.
@@ -1847,7 +1853,7 @@ ast_nmath_merge(ael_context* ctx, ast_node_t type, ast_ref left, ast_ref right,
 		n_left->u.nmath.tail = n_right->u.nmath.tail;
 		n_left->u.nmath.count += n_right->u.nmath.count;
 		n_left->has_deferable |= n_right->has_deferable;
-		ast_span_extend(pool, left, right);
+		ast_span_children(pool, left, left, right, AST_REF_NULL);
 		ast_pool_release(pool, right);
 		return left;
 	}
@@ -1861,7 +1867,7 @@ ast_nmath_merge(ael_context* ctx, ast_node_t type, ast_ref left, ast_ref right,
 		n_left->u.nmath.count++;
 		n_left->has_deferable |= n_right->has_deferable;
 		ast_set_parent(pool, right, left);
-		ast_span_extend(pool, left, right);
+		ast_span_children(pool, left, left, right, AST_REF_NULL);
 		return left;
 	}
 
@@ -1873,7 +1879,7 @@ ast_nmath_merge(ael_context* ctx, ast_node_t type, ast_ref left, ast_ref right,
 		n_right->u.nmath.count++;
 		n_right->has_deferable |= n_left->has_deferable;
 		ast_set_parent(pool, left, right);
-		ast_span_extend(pool, right, left);
+		ast_span_children(pool, right, right, left, AST_REF_NULL);
 		return right;
 	}
 
@@ -1895,7 +1901,7 @@ ast_list_merge(ael_context* ctx, ast_node_t type, ast_ref left, ast_ref right)
 		n_left->u.list.tail = n_right->u.list.tail;
 		n_left->u.list.count += n_right->u.list.count;
 		n_left->has_deferable |= n_right->has_deferable;
-		ast_span_extend(pool, left, right);
+		ast_span_children(pool, left, left, right, AST_REF_NULL);
 		ast_pool_release(pool, right);
 		return left;
 	}
@@ -1904,7 +1910,7 @@ ast_list_merge(ael_context* ctx, ast_node_t type, ast_ref left, ast_ref right)
 		// A is n-ary: append B as last child.
 		AST_LIST_PUSH_TAIL(pool, left, right);
 		n_left->has_deferable |= n_right->has_deferable;
-		ast_span_extend(pool, left, right);
+		ast_span_children(pool, left, left, right, AST_REF_NULL);
 		return left;
 	}
 
@@ -1912,7 +1918,7 @@ ast_list_merge(ael_context* ctx, ast_node_t type, ast_ref left, ast_ref right)
 		// B is n-ary: prepend A as first child.
 		AST_LIST_PUSH_HEAD(pool, right, left);
 		n_right->has_deferable |= n_left->has_deferable;
-		ast_span_extend(pool, right, left);
+		ast_span_children(pool, right, right, left, AST_REF_NULL);
 		return right;
 	}
 
@@ -1954,6 +1960,10 @@ ast_nary_merge(ael_context* ctx, ast_node_t type, ast_ref left, ast_ref right,
 	ast_ref r;
 
 	if (ast_node_table[type].kind == NK_NMATH) {
+		// The splice / append / prepend arms don't re-set the surviving
+		// node's etype: the ast_set_implicit_type calls above already
+		// narrowed it (their NK_NMATH arm) when it was an operand here --
+		// hence the kind check on the etype write below.
 		r = ast_nmath_merge(ctx, type, left, right, etype);
 	}
 	else {
@@ -1974,12 +1984,12 @@ ast_nary_merge(ael_context* ctx, ast_node_t type, ast_ref left, ast_ref right,
 	}
 
 	// No re-stamp needed: the merge branches extend the surviving node's
-	// span over the absorbed operand (ast_span_extend), so a flattened
+	// span over the absorbed operand (ast_span_children), so a flattened
 	// chain's span tracks the whole chain.
 	return r;
 }
 
-ast_etype
+static ast_etype
 ast_set_implicit_type_lr(ael_context* ctx, ast_node_t op, ast_ref left,
 		ast_ref right, ast_etype etype)
 {
@@ -2004,37 +2014,16 @@ ast_set_implicit_type_lr(ael_context* ctx, ast_node_t op, ast_ref left,
 	return merged;
 }
 
-// Find the var_def node for a given var_idx by walking the scope chain.
+// Find the var_def node for a given var_idx -- direct index into the
+// context's dense slot map (works even after the def's scope popped).
 static ast_ref
 ast_find_var_def(ael_context* ctx, uint32_t var_idx)
 {
-	ast_pool* pool = ctx->pool;
-
-	for (ast_ref lr = ctx->cur_scope; lr != AST_REF_NULL;) {
-		ast_node* list = ast_pool_at(pool, lr);
-		ast_node* scope = ast_pool_at(pool, list->u.list.head);
-		uint32_t idx = scope->u.let_scope.start_idx;
-
-		for (ast_ref def = scope->next; def != AST_REF_NULL;
-				def = ast_pool_at(pool, def)->next) {
-			ast_node* dp = ast_pool_at(pool, def);
-
-			if (dp->type != AST_VAR_DEF) {
-				break;
-			}
-
-			if (idx == var_idx) {
-				return def;
-			}
-
-			idx++;
-		}
-
-		lr = scope->u.let_scope.parent;
-	}
-
-	return AST_REF_NULL;
+	return var_idx < ctx->scope_idx ? ctx->var_by_idx[var_idx] : AST_REF_NULL;
 }
+
+static void ast_var_def_propagate_refs(ael_context* ctx, ast_ref def_ref,
+		ast_etype etype, ast_ref skip_ref);
 
 static void
 ast_set_implicit_type_body(ael_context* ctx, ast_ref node, ast_etype etype)
@@ -2068,22 +2057,33 @@ ast_set_implicit_type_body(ael_context* ctx, ast_ref node, ast_etype etype)
 
 		np->etype = narrowed;
 
-		// Find the var_def and propagate to its value expression.
+		// Find the var_def; propagate to its value expression and to the
+		// sibling ${name} references (each climbs its own parents).
 		ast_ref var_def = ast_find_var_def(ctx, np->u.var.var_idx);
 
 		if (var_def != AST_REF_NULL) {
 			ast_node* dp = ast_pool_at(pool, var_def);
 			ast_set_implicit_type(ctx, dp->u.var_def.value, narrowed);
+			ast_var_def_propagate_refs(ctx, var_def, narrowed, node);
 		}
 
 		return;
 	}
 
 	if (np->type == AST_PATH_CALL) {
-		// Modify calls return the modified collection -- not narrowable
-		// through the CDT op chain, but a requested type the collection
-		// can't be (e.g. BOOL on a logical operand) is still a conflict.
-		if ((np->u.call.stype & EXP_CALL_FLAG_MODIFY_LOCAL) != 0) {
+		ast_ref op_ref = np->u.call.call_op;
+
+		// Opaque calls -- modify calls return the modified collection, and
+		// .select() / .modify() / wildcard-.remove() return types are set
+		// by the call's own semantics (u.modify layout). Neither is
+		// narrowable through the CDT op chain, but a requested type they
+		// can't be (e.g. BOOL on a logical operand) is still a conflict,
+		// not a silent pass.
+		bool opaque = (np->u.call.stype & EXP_CALL_FLAG_MODIFY_LOCAL) != 0 ||
+				(op_ref != AST_REF_NULL &&
+						ast_is_select_family(ast_pool_at(pool, op_ref)->type));
+
+		if (opaque) {
 			if ((np->etype & etype) == AST_ETYPE_ERROR) {
 				ast_diag_type_conflict(ctx, ast_disp_offset(np), np->sz,
 						"type mismatch", np->etype, etype);
@@ -2091,8 +2091,6 @@ ast_set_implicit_type_body(ael_context* ctx, ast_ref node, ast_etype etype)
 
 			return;
 		}
-
-		ast_ref op_ref = np->u.call.call_op;
 
 		if (op_ref == AST_REF_NULL) {
 			return;
@@ -2105,8 +2103,7 @@ ast_set_implicit_type_body(ael_context* ctx, ast_ref node, ast_etype etype)
 		// narrowable through the regular CDT op chain -- but a requested
 		// type it can't satisfy (e.g. BOOL on a list-returning select) is
 		// a conflict, not a silent pass.
-		if (op->type == AST_PATH_FUNC_SELECT || op->type == AST_PATH_FUNC_MODIFY ||
-				op->type == AST_PATH_FUNC_PSELECT_REMOVE) {
+		if (ast_is_select_family(op->type)) {
 			if ((np->etype & etype) == AST_ETYPE_ERROR) {
 				ast_diag_type_conflict(ctx, ast_disp_offset(np), np->sz,
 						"type mismatch", np->etype, etype);
@@ -2203,8 +2200,7 @@ ast_set_implicit_type(ael_context* ctx, ast_ref node, ast_etype etype)
 			sz = np->sz;
 		}
 
-		ael_diag_add(&ctx->diags, AEL_SEV_ERROR, off, sz,
-				"expression too deeply nested");
+		ael_err(ctx, off, sz, "expression too deeply nested");
 		return;
 	}
 
@@ -2230,9 +2226,10 @@ ast_climb_and_propagate(ael_context* ctx, ast_ref node, ast_ref parent,
 	ast_pool* pool = ctx->pool;
 	ast_ref top = node;
 	ast_ref pr = parent;
+	ast_node* pp = NULL; // node at pr whenever pr is non-NULL below
 
 	while (pr != AST_REF_NULL) {
-		ast_node* pp = ast_pool_at(pool, pr);
+		pp = ast_pool_at(pool, pr);
 		ast_node_kind k = ast_node_table[pp->type].kind;
 
 		if (k != NK_NMATH && k != NK_BMATH) {
@@ -2246,8 +2243,6 @@ ast_climb_and_propagate(ael_context* ctx, ast_ref node, ast_ref parent,
 	ast_set_implicit_type(ctx, top, etype);
 
 	if (pr != AST_REF_NULL) {
-		ast_node* pp = ast_pool_at(pool, pr);
-
 		// Relational operands share a type: narrow the sibling too, so a bin
 		// pinned later flows across (ast_new_bcmp only cross-infers at
 		// reduction) -- inference is order-independent and transitive.
@@ -2257,6 +2252,46 @@ ast_climb_and_propagate(ael_context* ctx, ast_ref node, ast_ref parent,
 
 			ast_set_implicit_type(ctx, other, etype);
 		}
+		else if (pp->type == AST_VAR_DEF) {
+			// The narrowing started inside a with-binding's value (e.g. its
+			// bin was pinned by another occurrence) -- flow it to every
+			// ${name} reference chained off the def.
+			ast_var_def_propagate_refs(ctx, pr, etype, AST_REF_NULL);
+		}
+	}
+}
+
+// Narrow every ${name} reference chained off a var_def and climb each
+// reference's parents -- the var twin of ast_bin_set_implicit_type's
+// ref-stack walk. skip_ref is the reference that initiated the narrowing
+// (already narrowed by its caller), or AST_REF_NULL when the narrowing came
+// from inside the def's value. Convergent: a reference whose etype doesn't
+// change is not re-climbed, so mutually-triggered walks terminate.
+static void
+ast_var_def_propagate_refs(ael_context* ctx, ast_ref def_ref, ast_etype etype,
+		ast_ref skip_ref)
+{
+	ast_pool* pool = ctx->pool;
+	const ast_node* dp = ast_pool_at(pool, def_ref);
+
+	for (ast_ref rr = dp->u.var_def.ref_root; rr != AST_REF_NULL;) {
+		ast_node* ref = ast_pool_at(pool, rr);
+		ast_ref next = ref->u.var.ref_next;
+
+		if (rr != skip_ref) {
+			ast_etype narrowed = ref->etype & etype;
+
+			if (narrowed == AST_ETYPE_ERROR) {
+				ast_diag_type_conflict(ctx, ref->offset, ref->u.var.name_sz,
+						"variable type conflict", ref->etype, etype);
+			}
+			else if (narrowed != ref->etype) {
+				ref->etype = narrowed;
+				ast_climb_and_propagate(ctx, rr, ref->u.var.parent, narrowed);
+			}
+		}
+
+		rr = next;
 	}
 }
 
@@ -2325,6 +2360,21 @@ ast_type_name(ast_node_t type)
 {
 	const char* name = ast_node_table[type].name;
 	return name != NULL ? name : "?";
+}
+
+static const char*
+ast_esubtype_name(ast_esubtype sub)
+{
+	switch (sub) {
+	case AST_ESUBTYPE_UNORDERED:
+		return "UNORDERED";
+	case AST_ESUBTYPE_ORDERED:
+		return "ORDERED";
+	case AST_ESUBTYPE_KEY_VALUE_ORDERED:
+		return "KEY_VALUE_ORDERED";
+	default:
+		return "?";
+	}
 }
 
 static const char*
@@ -2455,6 +2505,26 @@ ast_unify_loop_var_chain(ast_pool* pool, ast_ref head, ael_diag_list* diags)
 	}
 }
 
+typedef struct {
+	const char* input;
+	int indent;
+} print_walk;
+
+// ast_children_foreach hands over empty slots too; skip them so an absent
+// optional child (open-ended range end, bare '*', select()'s null value)
+// prints nothing rather than a "(null)" line.
+static void
+ast_print_child(ast_pool* pool, ast_ref child, void* arg)
+{
+	if (child == AST_REF_NULL) {
+		return;
+	}
+
+	print_walk* w = arg;
+
+	ast_print(pool, w->input, child, w->indent + 2);
+}
+
 void
 ast_print(ast_pool* pool, const char* input, ast_ref node, int indent)
 {
@@ -2466,6 +2536,10 @@ ast_print(ast_pool* pool, const char* input, ast_ref node, int indent)
 	ast_node* np = ast_pool_at(pool, node);
 
 	printf("%*s(%s", indent, "", ast_type_name(np->type));
+
+	if (np->esubtype != AST_ESUBTYPE_UNSET) {
+		printf(":%s", ast_esubtype_name(np->esubtype));
+	}
 
 	switch (np->type) {
 	case AST_INT:
@@ -2515,6 +2589,9 @@ ast_print(ast_pool* pool, const char* input, ast_ref node, int indent)
 				(long)np->u.meta.param);
 		break;
 
+	// Plain child descent — the walker owns the per-layout knowledge; the
+	// bespoke cases below (map pairs, filters, call headers) keep their
+	// structural labels.
 	case AST_CMP_EQ:
 	case AST_CMP_NE:
 	case AST_CMP_GT:
@@ -2529,35 +2606,12 @@ ast_print(ast_pool* pool, const char* input, ast_ref node, int indent)
 	case AST_LSHIFT:
 	case AST_RSHIFT_ARITH:
 	case AST_RSHIFT_LOGIC:
-		printf("\n");
-		ast_print(pool, input, np->u.binary.left, indent + 2);
-		ast_print(pool, input, np->u.binary.right, indent + 2);
-		printf("%*s)\n", indent, "");
-		break;
-
 	case AST_NOT:
 	case AST_BIT_NOT:
-		printf("\n");
-		ast_print(pool, input, np->u.unary.operand, indent + 2);
-		printf("%*s)\n", indent, "");
-		break;
-
 	case AST_ADD:
 	case AST_MUL:
 	case AST_FUNC_MAX:
-	case AST_FUNC_MIN: {
-		ast_ref head = ast_nmath_head(pool, np);
-		ast_ref e = head;
-
-		printf("\n");
-		for (uint32_t i = 0; i < np->u.nmath.count; i++) {
-			ast_print(pool, input, e, indent + 2);
-			e = ast_pool_at(pool, e)->next;
-		}
-		printf("%*s)\n", indent, "");
-		break;
-	}
-
+	case AST_FUNC_MIN:
 	case AST_AND:
 	case AST_OR:
 	case AST_BIT_AND:
@@ -2567,13 +2621,42 @@ ast_print(ast_pool* pool, const char* input, ast_ref node, int indent)
 	case AST_LIST:
 	case AST_LET:
 	case AST_WHEN:
-		printf("\n");
-		for (ast_ref e = np->u.list.head; e != AST_REF_NULL;
-				e = ast_pool_at(pool, e)->next) {
-			ast_print(pool, input, e, indent + 2);
+	case AST_MAP_KEY:
+	case AST_MAP_VALUE:
+	case AST_MAP_INDEX:
+	case AST_MAP_RANK:
+	case AST_LIST_INDEX:
+	case AST_LIST_VALUE:
+	case AST_LIST_RANK:
+	case AST_PATH_FUNC_CAST_INT:
+	case AST_PATH_FUNC_CAST_FLOAT:
+	case AST_PATH_FUNC_CAST_STRING:
+	case AST_PATH_FUNC_TYPE:
+	case AST_MAP_KEY_RANGE:
+	case AST_MAP_INDEX_RANGE:
+	case AST_MAP_VALUE_RANGE:
+	case AST_MAP_RANK_RANGE:
+	case AST_LIST_INDEX_RANGE:
+	case AST_LIST_VALUE_RANGE:
+	case AST_LIST_RANK_RANGE:
+	case AST_MAP_KEY_LIST:
+	case AST_MAP_VALUE_LIST:
+	case AST_LIST_VALUE_LIST:
+	case AST_MAP_INDEX_REL_RANGE:
+	case AST_MAP_RANK_REL_RANGE:
+	case AST_LIST_RANK_REL_RANGE: {
+		if (ast_seg_inverted(np)) {
+			printf(" INVERTED");
 		}
+
+		printf("\n");
+
+		print_walk w = { .input = input, .indent = indent };
+
+		ast_children_foreach(pool, node, ast_print_child, &w);
 		printf("%*s)\n", indent, "");
 		break;
+	}
 
 	case AST_PATH_CTX:
 		printf(" count=%u%s%s\n", np->u.ctx_list.count,
@@ -2687,11 +2770,15 @@ ast_print(ast_pool* pool, const char* input, ast_ref node, int indent)
 		printf("%*s)\n", indent, "");
 		break;
 
-	case AST_VAR_DEF:
+	case AST_VAR_DEF: {
 		printf(" \"%.*s\"\n", (int)np->u.var_def.name_sz, input + np->offset);
-		ast_print(pool, input, np->u.var_def.value, indent + 2);
+
+		print_walk w = { .input = input, .indent = indent };
+
+		ast_children_foreach(pool, node, ast_print_child, &w);
 		printf("%*s)\n", indent, "");
 		break;
+	}
 
 	case AST_FUNC_ABS:
 	case AST_FUNC_CEIL:
@@ -2733,64 +2820,11 @@ ast_print(ast_pool* pool, const char* input, ast_ref node, int indent)
 		break;
 	}
 
-	case AST_MAP_KEY:
-	case AST_MAP_VALUE:
-	case AST_MAP_INDEX:
-	case AST_MAP_RANK:
-	case AST_LIST_INDEX:
-	case AST_LIST_VALUE:
-	case AST_LIST_RANK:
-		printf("\n");
-		ast_print(pool, input, ast_seg_operand(np), indent + 2);
-		printf("%*s)\n", indent, "");
-		break;
-
-	case AST_PATH_FUNC_CAST_INT:
-	case AST_PATH_FUNC_CAST_FLOAT:
-	case AST_PATH_FUNC_CAST_STRING:
-	case AST_PATH_FUNC_TYPE:
-		printf("\n");
-		ast_print(pool, input, np->u.unary.operand, indent + 2);
-		printf("%*s)\n", indent, "");
-		break;
-
-	case AST_MAP_KEY_RANGE:
-	case AST_MAP_INDEX_RANGE:
-	case AST_MAP_VALUE_RANGE:
-	case AST_MAP_RANK_RANGE:
-	case AST_LIST_INDEX_RANGE:
-	case AST_LIST_VALUE_RANGE:
-	case AST_LIST_RANK_RANGE:
-		if (ast_seg_inverted(np)) {
-			printf(" INVERTED");
-		}
-		printf("\n");
-		ast_print(pool, input, np->u.binary.left, indent + 2);
-		ast_print(pool, input, np->u.binary.right, indent + 2);
-		printf("%*s)\n", indent, "");
-		break;
-
-	case AST_MAP_KEY_LIST:
-	case AST_MAP_VALUE_LIST:
-	case AST_LIST_VALUE_LIST:
-		if (ast_seg_inverted(np)) {
-			printf(" INVERTED");
-		}
-		printf("\n");
-		for (uint32_t i = 0, e = np->u.list.head; i < np->u.list.count; i++) {
-			ast_print(pool, input, e, indent + 2);
-			if (i + 1 < np->u.list.count) {
-				e = ast_pool_next_ref(pool, e);
-			}
-		}
-		printf("%*s)\n", indent, "");
-		break;
-
 	case AST_LOOP_VAR: {
-		const char* names[] = { "@key", "@", "@index" };
+		const char* names[AS_EXP_BUILTIN_COUNT] = { "@key", "@", "@index" };
 		uint8_t idx = np->u.loop_var.builtin;
 
-		printf(" %s)\n", idx < 3 ? names[idx] : "@?");
+		printf(" %s)\n", idx < AS_EXP_BUILTIN_COUNT ? names[idx] : "@?");
 		break;
 	}
 

@@ -168,6 +168,7 @@ typedef enum ast_node_e {
 	// entries (in ast_node_table) get EXP_CALL_FLAG_MODIFY_LOCAL on the
 	// wrapping path-call's stype.
 	AST_PATH_FUNC_BIT_GET,
+	AST_PATH_FUNC_BIT_B64_ENCODE,
 	AST_PATH_FUNC_BIT_COUNT,
 	AST_PATH_FUNC_BIT_LSCAN,
 	AST_PATH_FUNC_BIT_RSCAN,
@@ -206,6 +207,8 @@ typedef enum ast_node_e {
 	AST_PATH_FUNC_STR_LENGTH,
 	AST_PATH_FUNC_STR_SUBSTR,
 	AST_PATH_FUNC_STR_INDEX_OF,
+	AST_PATH_FUNC_STR_CHAR_AT,
+	AST_PATH_FUNC_STR_CONTAINS,
 	AST_PATH_FUNC_STR_STARTS_WITH,
 	AST_PATH_FUNC_STR_ENDS_WITH,
 	AST_PATH_FUNC_STR_TO_INT,
@@ -287,6 +290,7 @@ typedef enum ast_node_e {
 	AST_PATH_FUNC_APPEND_ITEMS,
 	AST_PATH_FUNC_INSERT_ITEMS,
 	AST_PATH_FUNC_PUT_ITEMS,
+	AST_PATH_FUNC_UPDATE_ITEMS,
 	AST_PATH_FUNC_INCREMENT,
 	AST_PATH_FUNC_CLEAR,
 	AST_PATH_FUNC_SORT,
@@ -407,6 +411,21 @@ typedef enum ast_etype_e {
 	AST_ETYPE_AUTO = (1 << EXP_RTYPE_INPUT_END) - 1,
 } __attribute__((packed)) ast_etype;
 
+// The container order named by a create-order suffix, held on the element the
+// suffix was written on -- unlike the AST_PROP_CR_* bit, which travels one
+// element toward the leaf to reach the position the wire orders from.
+//
+// Not a bitmask: one order per element, and which spelling a value stands for
+// depends on the element's etype, the way the wire's shared unordered value
+// does. UNSORTED_PAD is UNORDERED here -- padding is not an order, and the bit
+// asking for it stays in props, which is what codegen reads.
+typedef enum ast_esubtype_e {
+	AST_ESUBTYPE_UNSET = 0,
+	AST_ESUBTYPE_UNORDERED = 1, // list UNSORTED / UNSORTED_PAD, map UNORDERED
+	AST_ESUBTYPE_ORDERED = 2, // list SORTED, map KEY_ORDERED
+	AST_ESUBTYPE_KEY_VALUE_ORDERED = 3, // map only
+} __attribute__((packed)) ast_esubtype;
+
 // A type is resolved when exactly one bit is set (concrete type).
 static inline bool
 ast_type_resolved(ast_etype etype)
@@ -439,6 +458,16 @@ enum {
 	AST_NF_REL_RANGE = 0x20, // u.rel_range_seg layout (extra operand)
 	AST_NF_BY_EXP = 0x40, // wildcard `*` / `*[?(filter)]`; AS_CDT_CTX_EXP wire
 	AST_NF_AND_EXP = 0x80, // `&[?(filter)]`; AS_CDT_CTX_AND|AS_CDT_CTX_EXP wire
+	// Modify op that must be anchored on a leaf seg (setTo / insert / update /
+	// add).
+	AST_NF_NEEDS_LEAF = 0x100,
+	// Whole-collection op — takes no leaf seg (append / appendItems /
+	// putItems / clear / sort / join).
+	AST_NF_WHOLE_COLL = 0x200,
+	// Post-parse requires a single concrete etype here. Both emitters read
+	// this node's wire rtype from its etype and neither can invent one, so a
+	// multi-bit etype is the author's to disambiguate with `:T`.
+	AST_NF_NEEDS_ETYPE = 0x400,
 };
 
 // Property bitmask — flags that attach to a node via the `:PROPERTY`
@@ -461,6 +490,8 @@ typedef enum ast_prop_bits_e {
 	AST_PROP_CREATE_ONLY = 1 << 2,
 	AST_PROP_UPDATE_ONLY = 1 << 3,
 	AST_PROP_PARTIAL = 1 << 4,
+	// Map write modes, preset by the insert / update / insertItems / updateItems
+	// verbs -- these two carry no `:FLAG` spelling of their own.
 	AST_PROP_NO_OVERWRITE = 1 << 5,
 	AST_PROP_NO_CREATE = 1 << 6,
 	// list sort() drop-duplicates option (`:DROP_DUPS`). Claims the last
@@ -468,14 +499,27 @@ typedef enum ast_prop_bits_e {
 	// the enum widened or a family-shared bit.
 	AST_PROP_DROP_DUPS = 1 << 7,
 
+	// List modify-op flag: ADD_UNIQUE fails (or skips, under NO_FAIL) an element
+	// already present. Map writes have no equivalent -- their modes ride on the
+	// verb-preset NO_OVERWRITE / NO_CREATE. Bit 1 << 11 is free.
+	//
+	// There is deliberately no INSERT_BOUNDED property. AEL emits the wire's
+	// bounded flag by default on every list write that could nil-pad, so the
+	// only knob is the opt-out, :UNSORTED_PAD -- see ael_cdt_flag_shape.
+	AST_PROP_ADD_UNIQUE = 1 << 8,
+
 	// Path-seg create-order flags: an explicit "create-if-missing with this
 	// order" (default = don't create). The container is fixed by the selector
-	// (`.k`/`{...}` map, `.[i]` list), so the flag has no MAP_/LIST_ prefix and
-	// is container-validated at apply: ORDERED is list-only, KEY_ORDERED /
-	// KEY_VALUE_ORDERED map-only, UNORDERED (bit 0 above) either. Bits 1 << 8,
-	// 1 << 9, 1 << 11 are free: 1 << 9 was LIST_UNORDERED_UNBOUND (removed --
-	// not spec'd, a wrong index balloons the list); 1 << 8 / 1 << 11 were the
-	// per-container UNORDERED flags, folded into bit 0.
+	// (`.k`/`{...}` map, `.[i]` list), so the flag carries no MAP_/LIST_ prefix
+	// and is container-validated at apply: SORTED / UNSORTED / UNSORTED_PAD
+	// are list-only, KEY_ORDERED / KEY_VALUE_ORDERED / UNORDERED map-only.
+	// UNSORTED and UNORDERED share bit 0 -- one wire value serves both
+	// containers (AS_CDT_CTX_CREATE_LIST_UNORDERED == ..._MAP_UNORDERED) -- so
+	// the spelling, not the bit, is what the container check tests.
+	//
+	// UNSORTED_PAD opts in to nil-padding a list out to a navigated index;
+	// the ctx-create path is bounded by default and errors without it.
+	AST_PROP_CR_UNSORTED_PAD = 1 << 9,
 	AST_PROP_CR_ORDERED = 1 << 10,
 	AST_PROP_CR_KEY_ORDERED = 1 << 12,
 	AST_PROP_CR_KEY_VALUE_ORDERED = 1 << 13,
@@ -490,28 +534,52 @@ typedef enum ast_prop_bits_e {
 	// each container (the apply-time validator). PERSIST_INDEX is orthogonal
 	// (combines with any order) so it sits outside GROUP_CR_ORDER.
 	AST_PROP_GROUP_CR_ORDER = AST_PROP_UNORDERED | AST_PROP_CR_ORDERED |
-			AST_PROP_CR_KEY_ORDERED | AST_PROP_CR_KEY_VALUE_ORDERED,
-	AST_PROP_CR_ORDER_LIST = AST_PROP_UNORDERED | AST_PROP_CR_ORDERED,
+			AST_PROP_CR_UNSORTED_PAD | AST_PROP_CR_KEY_ORDERED |
+			AST_PROP_CR_KEY_VALUE_ORDERED,
+	AST_PROP_CR_ORDER_LIST =
+			AST_PROP_UNORDERED | AST_PROP_CR_ORDERED | AST_PROP_CR_UNSORTED_PAD,
 	AST_PROP_CR_ORDER_MAP = AST_PROP_UNORDERED | AST_PROP_CR_KEY_ORDERED |
 			AST_PROP_CR_KEY_VALUE_ORDERED,
 	AST_PROP_GROUP_CTX_CR = AST_PROP_GROUP_CR_ORDER | AST_PROP_PERSIST_INDEX,
 
 	// Per-attachment valid masks. ael_apply_prop checks `bit & ~valid`.
-	AST_PROP_VALID_BIT_MODIFY = AST_PROP_NO_FAIL | AST_PROP_CREATE_ONLY |
-			AST_PROP_UPDATE_ONLY | AST_PROP_PARTIAL,
+	//
+	// Bit ops accept flags per op, matching bits_op_def.bad_flags in
+	// particle_blob.c -- the runtime rejects a disallowed bit with
+	// AS_ERR_PARAMETER, so a wider mask here would compile expressions that
+	// cannot execute. SIZING = the two ops that change the blob's length,
+	// INPLACE = the ones that can be clipped to it, ARITH = the integer ops.
+	AST_PROP_VALID_BIT_SIZING =
+			AST_PROP_NO_FAIL | AST_PROP_CREATE_ONLY | AST_PROP_UPDATE_ONLY,
+	AST_PROP_VALID_BIT_INPLACE =
+			AST_PROP_NO_FAIL | AST_PROP_UPDATE_ONLY | AST_PROP_PARTIAL,
+	AST_PROP_VALID_BIT_ARITH = AST_PROP_NO_FAIL | AST_PROP_UPDATE_ONLY,
 	// HLL modify superset — INIT row uses this directly; ADD row uses
 	// NO_FAIL | CREATE_ONLY (no UPDATE_ONLY, since ADD has no
 	// create-vs-update mode).
 	AST_PROP_VALID_HLL_MODIFY =
 			AST_PROP_NO_FAIL | AST_PROP_CREATE_ONLY | AST_PROP_UPDATE_ONLY,
-	// List modifies don't have a wire NO_OVERWRITE flag (list uses
-	// ADD_UNIQUE / INSERT_BOUNDED instead — out of scope this PR).
-	AST_PROP_VALID_CDT_LIST_MODIFY = AST_PROP_NO_FAIL | AST_PROP_PARTIAL,
-	AST_PROP_VALID_CDT_MAP_MODIFY = AST_PROP_VALID_CDT_LIST_MODIFY |
-			AST_PROP_NO_OVERWRITE | AST_PROP_NO_CREATE,
-	// list sort() accepts only :DROP_DUPS.
-	AST_PROP_VALID_CDT_SORT = AST_PROP_DROP_DUPS,
-	// SELECT doesn't have a wire DO_PARTIAL flag yet — only NO_FAIL.
+	// CDT write masks. PARTIAL is multi-item only: the single-key map put never
+	// reads do_partial, and per-item skipping is meaningless for one item.
+	// Rows serving both containers carry the union; the container-exclusive
+	// flags are re-checked once the leaf fixes the receiver.
+	AST_PROP_VALID_CDT_LIST_MODIFY = AST_PROP_NO_FAIL | AST_PROP_ADD_UNIQUE,
+	AST_PROP_VALID_CDT_LIST_ITEMS =
+			AST_PROP_VALID_CDT_LIST_MODIFY | AST_PROP_PARTIAL,
+	AST_PROP_VALID_CDT_MAP_MODIFY = AST_PROP_NO_FAIL,
+	AST_PROP_VALID_CDT_MAP_ITEMS =
+			AST_PROP_VALID_CDT_MAP_MODIFY | AST_PROP_PARTIAL,
+	AST_PROP_VALID_CDT_MODIFY =
+			AST_PROP_VALID_CDT_LIST_MODIFY | AST_PROP_VALID_CDT_MAP_MODIFY,
+	AST_PROP_VALID_CDT_ITEMS =
+			AST_PROP_VALID_CDT_LIST_ITEMS | AST_PROP_VALID_CDT_MAP_ITEMS,
+	// list sort() accepts :DROP_DUPS, plus path tolerance.
+	AST_PROP_VALID_CDT_SORT = AST_PROP_DROP_DUPS | AST_PROP_NO_FAIL,
+	// clear() takes no op-level flag, only path tolerance.
+	AST_PROP_VALID_CDT_CLEAR = AST_PROP_NO_FAIL,
+	// A string modify takes path tolerance only, and only when pathed --
+	// ael_finalize_str_call refuses it on a bare bin, which has no path.
+	AST_PROP_VALID_STR_MODIFY = AST_PROP_NO_FAIL,
 	AST_PROP_VALID_SELECT_MODIFY = AST_PROP_NO_FAIL,
 	AST_PROP_VALID_PATH_SEG = AST_PROP_GROUP_CTX_CR,
 	// Positional getters (getIndexes / getRanks) accept only :REVERSE.
@@ -547,7 +615,7 @@ typedef struct {
 	int16_t ctx_type;
 	int16_t cdt_get_op;
 	int16_t cdt_remove_op;
-	uint8_t flags;
+	uint16_t flags;
 	ast_node_kind kind;
 	ast_prop_bits valid_props; // accepted AST_PROP_* bits via :PROPERTY
 	ast_etype valid_types; // accepted AST_ETYPE_* bits via :TYPE
@@ -573,6 +641,14 @@ typedef enum {
 // allow up to 64 levels of plain ctx + up to 128 multi-element steps + 1
 // terminator; plain CDT eval ops are far below that. 256 is the safe cap.
 #define AST_PATH_CTX_MAX 256
+
+// Maximum let-variable definitions per expression and maximum variable-name
+// length, enforced at ast_new_var_def. Bounds the O(defs) scope walks on the
+// per-transaction parse path and sizes u.var's var_idx:16 / name_sz:16
+// fields. AEL-only; the legacy wire runtime keeps its own (unlimited)
+// behavior.
+#define AEL_VAR_MAX 1024
+#define AEL_VAR_NAME_MAX 255
 
 // Canonical nesting cap for every recursive expression traversal — the wire
 // build (build_next / build_count_sz), the AEL sizer/builder, and, transitively,
@@ -616,31 +692,32 @@ typedef struct ast_node_s {
 		// bin_next chains all distinct bins from ctx->bin_root.
 		// ref_root is the head of the AST_BIN_REF stack for this bin.
 		// allow_unresolved=true marks bins used only by name (.exists()
-		// / .type()) or in name-only contexts (e.g. left of IN) — the
-		// post-parse strict-typing check skips them. Conflicts (etype
-		// = ERROR) still surface regardless.
+		// / .type()) — the post-parse strict-typing check skips them.
+		// Conflicts (etype = ERROR) still surface regardless.
 		struct {
 			ast_ref bin_next;
 			ast_ref ref_root;
 			ast_ref parent : 24;
-			uint8_t name_sz : 7;
+			uint8_t name_sz : 7; // 1..15 (AS_BIN_NAME_MAX_SZ - 1)
 			bool allow_unresolved : 1;
 		} bin;
 
 		// AST_BIN_REF: subsequent reference to a canonical AST_BIN.
 		// ref_next chains to the next ref in the canonical bin's stack.
+		// (allow_unresolved lives only on the canonical AST_BIN — the
+		// writers deref to it and the strict-typing pass walks only
+		// canonical bins.)
 		struct {
 			ast_ref bin; // ref to canonical AST_BIN node
 			ast_ref ref_next; // next bin_ref in stack, or AST_REF_NULL
 			ast_ref parent : 24;
-			bool allow_unresolved : 1; // e.g. left of IN
 		} bin_ref;
 
 		// AST_BIN_TYPE / AST_BIN_EXISTS: bin queries. The name is at
 		// node.offset / name_sz, and the display span (offset/disp_pre/sz)
 		// is copied whole from the bin reference. No chain linkage.
 		struct {
-			uint8_t name_sz;
+			uint8_t name_sz; // 1..15 (AS_BIN_NAME_MAX_SZ - 1)
 		} bin_type;
 
 		// AST_META (op_code is exp_op_code: EXP_META_* or EXP_REC_KEY).
@@ -676,12 +753,12 @@ typedef struct ast_node_s {
 		} unary;
 
 		// Singular path segments (AST_MAP_KEY, AST_MAP_VALUE, etc.)
-		// `props` carries CR_LIST_* / CR_MAP_* / PERSIST_INDEX bits
+		// `props` carries CR_* create-order / PERSIST_INDEX bits
 		// applied via the `:PROPERTY` postfix grammar (e.g.
-		// $.l.[0]:LIST_UNORDERED).
-		// Packed to avoid the 4-byte tail pad. Readers of u.seg must
-		// gate on `ast_node_table[type].kind == NK_SEG_S`.
-		struct __attribute__((packed)) {
+		// $.l.[0]:UNORDERED).
+		// Readers of u.seg must gate on
+		// `ast_node_table[type].kind == NK_SEG_S`.
+		struct {
 			ast_prop_bits props;
 			ast_ref operand;
 		} seg;
@@ -720,10 +797,15 @@ typedef struct ast_node_s {
 		} rel_range_seg;
 
 		// List path segments (AST_MAP_KEY_LIST, AST_MAP_VALUE_LIST, etc.)
+		// Built by re-typing an AST_LIST in place; tail is carried across
+		// the morph so the reverse morph (cdtprm_push_leaf_elems) is a
+		// field copy, not a chain rescan. count matches u.list.count's
+		// 24-bit budget.
 		struct {
-			ast_ref head;
-			uint32_t count;
-			bool inverted;
+			ast_ref head : 24;
+			ast_ref tail : 24;
+			uint32_t count : 24;
+			bool inverted : 1;
 		} list_seg;
 
 		// All NK_LIST nodes: children chained via `next` as siblings.
@@ -752,13 +834,17 @@ typedef struct ast_node_s {
 			uint32_t order_override : 2; // ael_order_override (AST_LIST/AST_MAP)
 		} list;
 
-		// AST_VAR_DEF: value ref; sibling chain is node->next. The name
-		// starts at node.offset (ast_new_var_def spans the node from the
-		// name); name_sz is stored because node.sz covers the whole
-		// `name = value` binding.
+		// AST_VAR_DEF: value ref + reference-chain head; sibling chain is
+		// node->next. The name starts at node.offset (ast_new_var_def spans
+		// the node from the name); name_sz is stored because node.sz covers
+		// the whole `name = value` binding. ref_root heads the AST_VAR
+		// reference chain (linked via u.var.ref_next) so a narrowing of the
+		// value's type flows to every ${name} reference — the var twin of
+		// the canonical bin's ref_root stack.
 		struct {
-			uint32_t name_sz;
-			ast_ref value;
+			uint32_t name_sz; // 1..AEL_VAR_NAME_MAX (255)
+			ast_ref value : 24;
+			ast_ref ref_root : 24;
 		} var_def;
 
 		// AST_ARG: transient function-call argument. name_sz == 0 means
@@ -773,9 +859,14 @@ typedef struct ast_node_s {
 
 		// AST_VAR: resolved variable reference. The name is at node.offset
 		// (into input, for codegen wire format) / name_sz.
+		// ref_next chains all references to the same var_def (head at the
+		// def's u.var_def.ref_root). var_idx:16 is bounded by AEL_VAR_MAX;
+		// name_sz:16 is bounded by AEL_VAR_NAME_MAX (both checked at
+		// ast_new_var_def, and a reference only matches a stored def).
 		struct {
-			uint32_t var_idx;
-			uint32_t name_sz;
+			ast_ref ref_next;
+			uint32_t var_idx : 16; // 0..AEL_VAR_MAX - 1 (1023)
+			uint32_t name_sz : 16; // 1..AEL_VAR_NAME_MAX (255)
 			ast_ref parent;
 		} var;
 
@@ -833,7 +924,7 @@ typedef struct ast_node_s {
 		//   CLEAR / SORT / SIZE               []
 		// The bin operand lives at the head of the enclosing AST_PATH_CTX.
 		// op_code is 0 until the call combine step resolves it.
-		struct __attribute__((packed)) {
+		struct {
 			uint16_t op_code : 13; // CDT op (AS_CDT_OP_*); 0 = unresolved
 			bool is_modify : 1; // set on the resolved-op morph for stype
 			bool leaf_consumed : 1; // op took a leaf seg as a chain operand
@@ -898,9 +989,11 @@ typedef struct ast_node_s {
 	ast_node_t type; // 8-bit node kind
 	uint32_t offset : 24; // offset into input buffer (16 MB cap — plenty)
 	uint8_t sz; // span size in source bytes, clamped to 255
-	ast_etype etype : 13; // 16-bit type code, 1 bit per type
+	ast_etype etype : 13; // type bitmask, 1 bit per type (10 bits used)
+	ast_esubtype esubtype : 2; // container order, on the element that named it
 	bool is_free : 1;
 	bool has_deferable : 1;
+	uint32_t padding : 7;
 	// How many bytes BEFORE offset the display span starts, so the display
 	// span is [offset - disp_pre, offset - disp_pre + sz). Set when the
 	// displayed construct reaches back past the node's own anchor -- over a
@@ -908,9 +1001,9 @@ typedef struct ast_node_s {
 	// wrap a node of any kind. It exists so that widening never has to move
 	// `offset`, which for a bin or variable is the name codegen puts on the
 	// wire (see u.bin / u.var / u.var_def). Written only by
-	// ast_set_display_span, read only via ast_disp_offset.
+	// ast_set_display_span, read only via ast_disp_offset. Last in the header
+	// so that it starts on a byte boundary.
 	uint32_t disp_pre : 8;
-	uint32_t padding : 9;
 } __attribute__((packed)) ast_node;
 
 // The union is budgeted at 12 bytes (see the per-variant packing notes above);
@@ -1044,6 +1137,27 @@ ast_cdt_op_blob_inline(const ast_node* np)
 	return np->u.cdt_op.blob_inline;
 }
 
+// .select() / .modify() / wildcard-.remove() — the ops that emit the
+// SELECT wire form (distinct blob shape, rtype from ael_select_shape).
+// Both emitters gate on this; keep it single-sourced.
+static inline bool
+ast_is_select_family(ast_node_t t)
+{
+	return t == AST_PATH_FUNC_SELECT || t == AST_PATH_FUNC_MODIFY ||
+			t == AST_PATH_FUNC_PSELECT_REMOVE;
+}
+
+// Number of path segments after the bin in an AST_PATH_CTX — its stored
+// count includes the bin (maintained by the CTXCHAIN pushes and
+// ctx_pop_tail), so no chain walk is needed.
+static inline uint32_t
+ast_ctx_seg_count(const ast_node* cxn)
+{
+	cf_assert(cxn->type == AST_PATH_CTX, AS_EXP, "ast_ctx_seg_count on type=%d",
+			cxn->type);
+	return (uint32_t)cxn->u.ctx_list.count - 1;
+}
+
 static inline bool
 ast_seg_is_multi(const ast_node* np)
 {
@@ -1100,8 +1214,41 @@ ast_ref ast_pool_alloc(ast_pool* pool);
 // An ast_node* stays valid for the pool's lifetime: dynmem grows by appending a
 // new block (dynmem_grow) and never reallocates the ones already handed out. So
 // a node pointer held across an ast_new* / ast_pool_alloc call is safe, and code
-// may keep one rather than re-deriving it from the ref.
-ast_node* ast_pool_at(ast_pool* pool, ast_ref r);
+// may keep one rather than re-deriving it from the ref. Inline -- node derefs
+// dominate the per-transaction compile path, and the visible body lets the
+// compiler share repeated derefs of the same ref.
+static inline ast_node*
+ast_pool_at(ast_pool* pool, ast_ref r)
+{
+	if (r == AST_REF_NULL) {
+		return NULL;
+	}
+
+	ast_node* n = (ast_node*)dynmem_at(&pool->dm, r);
+
+	cf_assert(n != NULL, CF_MISC, "ast_pool_at: dynmem_at null at %u", r);
+	return n;
+}
+
+// Canonical AST_BIN node for a bin occurrence (identity for AST_BIN,
+// deref for AST_BIN_REF). The canonical node carries name_sz / offset /
+// the ref stack; etype is mirrored on refs.
+static inline ast_node*
+ast_bin_canonical(ast_pool* pool, ast_node* np)
+{
+	return np->type == AST_BIN_REF ? ast_pool_at(pool, np->u.bin_ref.bin) : np;
+}
+
+// A path call whose receiver is a single value expression rather than an
+// AST_PATH_CTX list — BITS always (it reuses u.call.ctx for its one
+// receiver), and any HLL / STR / value-recv CDT call whose ctx slot holds
+// the receiver expression. Both emitters pick their emit shape on this.
+static inline bool
+ast_call_is_value_recv(ast_pool* pool, const ast_node* np)
+{
+	return np->u.call.stype == EXP_CALL_BITS ||
+			ast_pool_at(pool, np->u.call.ctx)->type != AST_PATH_CTX;
+}
 
 // Stamp a node's source span, overriding ast_new's lookahead-based default.
 // offset is a 24-bit field, sz an 8-bit field (clamped) -- both always fit the
@@ -1224,14 +1371,13 @@ ast_copy_span(ast_pool* pool, ast_ref dst, ast_ref src)
 	ast_put_span(pool, dst, ast_get_span(pool, src));
 }
 void ast_pool_release(ast_pool* pool, ast_ref r);
-void ast_pool_reset(ast_pool* pool);
 void ast_pool_destroy(ast_pool* pool);
 
 // Intrusive lists: sibling chain via ast_node.next; head/tail/count live on u.list,
 // u.ctx_list, or u.cdt_op. Low-level FIELD macros expose head/tail/count lvalues;
-// LIST_* / CHAIN_* take ast_ref owning nodes; PLIST_* take ast_node* for u.list;
-// POP requires GNU ({ ... }). PUSH_* skip a AST_REF_NULL noderef (a failed
-// sub-parse), leaving the list unchanged.
+// LIST_* / CHAIN_* take ast_ref owning nodes; PLIST_* take ast_node* for u.list.
+// PUSH_* skip a AST_REF_NULL noderef (a failed sub-parse), leaving the list
+// unchanged.
 
 #define AST_LIST_FIELDS_CLEAR(head, tail, count)                               \
 	do {                                                                       \
@@ -1273,131 +1419,76 @@ void ast_pool_destroy(ast_pool* pool);
 		(count)++;                                                             \
 	} while (0)
 
-#define AST_LIST_FIELDS_POP_HEAD(pool, head, tail, count)                      \
-	({                                                                         \
-		ast_pool* __ast_ap = (pool);                                           \
-		ast_ref __mh = (head);                                                 \
-		ast_ref __mr = AST_REF_NULL;                                           \
-		if (__mh != AST_REF_NULL) {                                            \
-			__mr = __mh;                                                       \
-			(head) = ast_pool_at(__ast_ap, __mh)->next;                        \
-			ast_pool_at(__ast_ap, __mh)->next = AST_REF_NULL;                  \
-			if ((head) == AST_REF_NULL) {                                      \
-				(tail) = AST_REF_NULL;                                         \
-			}                                                                  \
-			(count)--;                                                         \
-		}                                                                      \
-		__mr;                                                                  \
-	})
-
-#define AST_LIST_CLR(pool, list_owner_ref)                                     \
-	AST_LIST_FIELDS_CLEAR(ast_pool_at((pool), (list_owner_ref))->u.list.head,  \
-			ast_pool_at((pool), (list_owner_ref))->u.list.tail,                \
-			ast_pool_at((pool), (list_owner_ref))->u.list.count)
-
+// The ref-taking forms bind the owner node once -- the FIELDS bodies
+// reference each field lvalue several times, and an ast_pool_at per
+// mention adds up on the compile path.
 #define AST_LIST_PUSH_TAIL(pool, list_owner_ref, node_ref)                     \
-	AST_LIST_FIELDS_PUSH_TAIL((pool),                                          \
-			ast_pool_at((pool), (list_owner_ref))->u.list.head,                \
-			ast_pool_at((pool), (list_owner_ref))->u.list.tail,                \
-			ast_pool_at((pool), (list_owner_ref))->u.list.count, (node_ref));
+	do {                                                                       \
+		ast_pool* __ast_lp = (pool);                                           \
+		ast_node* __ast_lo = ast_pool_at(__ast_lp, (list_owner_ref));          \
+		AST_LIST_FIELDS_PUSH_TAIL(__ast_lp, __ast_lo->u.list.head,             \
+				__ast_lo->u.list.tail, __ast_lo->u.list.count, (node_ref));    \
+	} while (0)
 
 #define AST_LIST_PUSH_HEAD(pool, list_owner_ref, node_ref)                     \
-	AST_LIST_FIELDS_PUSH_HEAD((pool),                                          \
-			ast_pool_at((pool), (list_owner_ref))->u.list.head,                \
-			ast_pool_at((pool), (list_owner_ref))->u.list.tail,                \
-			ast_pool_at((pool), (list_owner_ref))->u.list.count, (node_ref));
+	do {                                                                       \
+		ast_pool* __ast_lp = (pool);                                           \
+		ast_node* __ast_lo = ast_pool_at(__ast_lp, (list_owner_ref));          \
+		AST_LIST_FIELDS_PUSH_HEAD(__ast_lp, __ast_lo->u.list.head,             \
+				__ast_lo->u.list.tail, __ast_lo->u.list.count, (node_ref));    \
+	} while (0)
 
 // Same for ast_node * (NK_LIST-bearing node).
 #define AST_PLIST_PUSH_TAIL(pool, np, node_ref)                                \
 	AST_LIST_FIELDS_PUSH_TAIL((pool), (np)->u.list.head, (np)->u.list.tail,    \
 			(np)->u.list.count, (node_ref));
 
-#define AST_PLIST_PUSH_HEAD(pool, np, node_ref)                                \
-	AST_LIST_FIELDS_PUSH_HEAD((pool), (np)->u.list.head, (np)->u.list.tail,    \
-			(np)->u.list.count, (node_ref));
-
-#define AST_PLIST_CLR(np)                                                      \
-	AST_LIST_FIELDS_CLEAR((np)->u.list.head, (np)->u.list.tail,                \
-			(np)->u.list.count)
-
 // NK path-func CDT wire chain (u.cdt_op).
 #define AST_CHAIN_CLR(pool, op_ref)                                            \
-	AST_LIST_FIELDS_CLEAR(ast_pool_at((pool), (op_ref))->u.cdt_op.head,        \
-			ast_pool_at((pool), (op_ref))->u.cdt_op.tail,                      \
-			ast_pool_at((pool), (op_ref))->u.cdt_op.count)
+	do {                                                                       \
+		ast_node* __ast_co = ast_pool_at((pool), (op_ref));                    \
+		AST_LIST_FIELDS_CLEAR(__ast_co->u.cdt_op.head,                         \
+				__ast_co->u.cdt_op.tail, __ast_co->u.cdt_op.count);            \
+	} while (0)
 
 // u.cdt_op.count is uint8_t (packed-union budget); cap pushes at
 // UINT8_MAX so wraparound can't silently emit a 0-length msgpack
 // list header in codegen.
-#define AST_CHAIN_PUSH_TAIL(pool, op_ref, node_ref)                            \
-	do {                                                                       \
-		if (ast_pool_at((pool), (op_ref))->u.cdt_op.count == UINT8_MAX) {      \
-			cf_warning(AS_EXP,                                                 \
-					"AST_CHAIN_PUSH_TAIL - chain length exceeds 255");         \
-			break;                                                             \
-		}                                                                      \
-		AST_LIST_FIELDS_PUSH_TAIL((pool),                                      \
-				ast_pool_at((pool), (op_ref))->u.cdt_op.head,                  \
-				ast_pool_at((pool), (op_ref))->u.cdt_op.tail,                  \
-				ast_pool_at((pool), (op_ref))->u.cdt_op.count, (node_ref));    \
+#define AST_CHAIN_PUSH_TAIL(pool, op_ref, node_ref)                             \
+	do {                                                                        \
+		ast_pool* __ast_cp = (pool);                                            \
+		ast_node* __ast_co = ast_pool_at(__ast_cp, (op_ref));                   \
+		if (__ast_co->u.cdt_op.count == UINT8_MAX) {                            \
+			cf_warning(AS_EXP,                                                  \
+					"AST_CHAIN_PUSH_TAIL - chain length exceeds 255");          \
+			break;                                                              \
+		}                                                                       \
+		AST_LIST_FIELDS_PUSH_TAIL(__ast_cp, __ast_co->u.cdt_op.head,            \
+				__ast_co->u.cdt_op.tail, __ast_co->u.cdt_op.count, (node_ref)); \
 	} while (0)
 
-#define AST_CHAIN_PUSH_HEAD(pool, op_ref, node_ref)                            \
-	do {                                                                       \
-		if (ast_pool_at((pool), (op_ref))->u.cdt_op.count == UINT8_MAX) {      \
-			cf_warning(AS_EXP,                                                 \
-					"AST_CHAIN_PUSH_HEAD - chain length exceeds 255");         \
-			break;                                                             \
-		}                                                                      \
-		AST_LIST_FIELDS_PUSH_HEAD((pool),                                      \
-				ast_pool_at((pool), (op_ref))->u.cdt_op.head,                  \
-				ast_pool_at((pool), (op_ref))->u.cdt_op.tail,                  \
-				ast_pool_at((pool), (op_ref))->u.cdt_op.count, (node_ref));    \
+#define AST_CHAIN_PUSH_HEAD(pool, op_ref, node_ref)                             \
+	do {                                                                        \
+		ast_pool* __ast_cp = (pool);                                            \
+		ast_node* __ast_co = ast_pool_at(__ast_cp, (op_ref));                   \
+		if (__ast_co->u.cdt_op.count == UINT8_MAX) {                            \
+			cf_warning(AS_EXP,                                                  \
+					"AST_CHAIN_PUSH_HEAD - chain length exceeds 255");          \
+			break;                                                              \
+		}                                                                       \
+		AST_LIST_FIELDS_PUSH_HEAD(__ast_cp, __ast_co->u.cdt_op.head,            \
+				__ast_co->u.cdt_op.tail, __ast_co->u.cdt_op.count, (node_ref)); \
 	} while (0)
-
-#define AST_CHAIN_POP_HEAD(pool, op_ref)                                       \
-	AST_LIST_FIELDS_POP_HEAD((pool),                                           \
-			ast_pool_at((pool), (op_ref))->u.cdt_op.head,                      \
-			ast_pool_at((pool), (op_ref))->u.cdt_op.tail,                      \
-			ast_pool_at((pool), (op_ref))->u.cdt_op.count)
-
-// ast_node * variant for CDT op chain (NK_CDT_OP / unresolved path func before morph).
-#define AST_PLCHAIN_PUSH_TAIL(pool, np, node_ref)                              \
-	do {                                                                       \
-		if ((np)->u.cdt_op.count == UINT8_MAX) {                               \
-			cf_warning(AS_EXP,                                                 \
-					"AST_PLCHAIN_PUSH_TAIL - chain length exceeds 255");       \
-			break;                                                             \
-		}                                                                      \
-		AST_LIST_FIELDS_PUSH_TAIL((pool), (np)->u.cdt_op.head,                 \
-				(np)->u.cdt_op.tail, (np)->u.cdt_op.count, (node_ref));        \
-	} while (0)
-
-#define AST_PLCHAIN_PUSH_HEAD(pool, np, node_ref)                              \
-	do {                                                                       \
-		if ((np)->u.cdt_op.count == UINT8_MAX) {                               \
-			cf_warning(AS_EXP,                                                 \
-					"AST_PLCHAIN_PUSH_HEAD - chain length exceeds 255");       \
-			break;                                                             \
-		}                                                                      \
-		AST_LIST_FIELDS_PUSH_HEAD((pool), (np)->u.cdt_op.head,                 \
-				(np)->u.cdt_op.tail, (np)->u.cdt_op.count, (node_ref));        \
-	} while (0)
-
-#define AST_PLCHAIN_POP_HEAD(pool, np)                                         \
-	AST_LIST_FIELDS_POP_HEAD((pool), (np)->u.cdt_op.head, (np)->u.cdt_op.tail, \
-			(np)->u.cdt_op.count)
-
-#define AST_PLCHAIN_CLR(np)                                                    \
-	AST_LIST_FIELDS_CLEAR((np)->u.cdt_op.head, (np)->u.cdt_op.tail,            \
-			(np)->u.cdt_op.count)
 
 // PATH_CTX segment chain (u.ctx_list).
 #define AST_CTXCHAIN_PUSH_TAIL(pool, ctx_ref, node_ref)                        \
-	AST_LIST_FIELDS_PUSH_TAIL((pool),                                          \
-			ast_pool_at((pool), (ctx_ref))->u.ctx_list.head,                   \
-			ast_pool_at((pool), (ctx_ref))->u.ctx_list.tail,                   \
-			ast_pool_at((pool), (ctx_ref))->u.ctx_list.count, (node_ref));
+	do {                                                                       \
+		ast_pool* __ast_xp = (pool);                                           \
+		ast_node* __ast_xo = ast_pool_at(__ast_xp, (ctx_ref));                 \
+		AST_LIST_FIELDS_PUSH_TAIL(__ast_xp, __ast_xo->u.ctx_list.head,         \
+				__ast_xo->u.ctx_list.tail, __ast_xo->u.ctx_list.count,         \
+				(node_ref));                                                   \
+	} while (0)
 
 #define AST_PLCTX_PUSH_TAIL(pool, np, node_ref)                                \
 	AST_LIST_FIELDS_PUSH_TAIL((pool), (np)->u.ctx_list.head,                   \
@@ -1452,11 +1543,9 @@ ast_ref ast_new_bmath(ael_context* ctx, ast_node_t type, ast_ref left,
 ast_ref ast_new_binary(ast_pool* pool, ast_node_t type, ast_ref left,
 		ast_ref right);
 ast_ref ast_new_range_seg(ast_pool* pool, ast_node_t type, ast_ref start,
-		ast_ref end);
+		ast_ref end, bool inverted);
 ast_ref ast_new_rel_range_seg(ast_pool* pool, ast_node_t type, ast_ref start,
-		ast_ref end, ast_ref relative_to);
-ast_ref ast_new_nary(ael_context* ctx, ast_node_t type, ast_ref left,
-		ast_ref right, ast_etype etype);
+		ast_ref end, ast_ref relative_to, bool inverted);
 ast_ref ast_new_unary(ast_pool* pool, ast_node_t type, ast_ref operand);
 ast_ref ast_new_func1(ael_context* ctx, ast_node_t type, ast_ref arg,
 		ast_etype etype);
@@ -1527,8 +1616,10 @@ void ast_free(ast_pool* pool, ast_ref node);
 ast_ref ast_nary_merge(ael_context* ctx, ast_node_t type, ast_ref A, ast_ref B,
 		ast_etype etype);
 
-ast_etype ast_set_implicit_type_lr(ael_context* ctx, ast_node_t op,
-		ast_ref left, ast_ref right, ast_etype etype);
+// Record a "<what>: <A> vs <B>" diagnostic naming both etypes.
+void ast_diag_type_conflict(ael_context* ctx, uint32_t offset, uint32_t byte_sz,
+		const char* what, ast_etype a, ast_etype b);
+
 // Set etype on the implicit GET at the leaf of an AST_PATH_CALL, or on a
 // bare bin reference.
 void ast_set_implicit_type(ael_context* ctx, ast_ref node, ast_etype etype);

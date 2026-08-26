@@ -37,7 +37,7 @@
 // AEL emit helpers.
 //
 // The msgpack-emission primitives (AST -> wire) shared by the two AEL
-// emitters: exp.c's runtime build pass (ael_build_node) and ael_codegen.c's
+// emitters: exp_ael.c's runtime build pass (ael_build_node) and ael_codegen.c's
 // static emitter. The complementary parse phase -- grammar actions that build
 // and validate the AST -- lives in ael_actions.h.
 
@@ -52,35 +52,75 @@
 int ael_pack_ctx_seg_pair(as_packer* pk, ast_pool* pool, const char* input,
 		ast_ref seg_ref);
 
-// Pack the inner CDT op blob (no ctx wrapper):
-// `[op_code, param0, param1, ..., create_flags?, modify_flags?]`.
-// Params come from `cdtprm_push_leaf_elems` in ael_actions.c -- always
-// literals post-dyn-removal. AST_LIST entries (transmuted from LIST_SEG)
-// are recursed into. `props_flags` is the AST_PROP_* bitmask from the
-// path-func node — when non-zero and the op supports trailing flag args
-// at the wire level, the projection appends them (padding create_flags=0
-// where the op shape requires it).
-int ael_emit_cdt_op_blob(as_packer* pk, ast_pool* pool, const char* input,
-		int cdt_op, ast_ref param_head, uint8_t param_count,
-		ast_prop_bits props_flags);
+// Literal emitters — the single source of literal msgpack bytes for BOTH
+// emitters (ael_codegen_emit and exp_ael.c's ael_pack_literal). Scalar covers
+// every non-collection literal node (returns -1 on a non-literal type).
+// The list/map emitters own the collection shape — element/pair headers,
+// the :ORDERED / :UNORDERED ext headers, and the ordered/dup-key buffer
+// validations — while `child_emit` keeps element dispatch per-context:
+// the wire form (ael_codegen_emit) QUOTE-wraps a nested list, the raw
+// runtime-literal form (ael_pack_literal) stays raw all the way down.
+typedef int (*ael_lit_child_emit)(as_packer* pk, ast_pool* pool,
+		const char* input, ast_ref child);
 
-// Wire-shape helpers — used by ael_emit_cdt_op_blob's internals and by the
-// AEL fast path's ael_pack_call_blob (exp.c). Same per-op rules either
-// way.
-uint64_t ael_prop_to_cdt_flag(ast_prop_bits props);
-// AST_PROP_CR_* / PERSIST_INDEX -> a CDT op's create_flags slot (packed-flag
-// space AS_PACKED_MAP_FLAG_* / AS_PACKED_LIST_FLAG_*). Distinct from the
-// CTX-nav create space (prop_to_ctx_create, 0x40/0x80/0xc0) -- don't conflate
-// them. UNORDERED is the packed default, so it projects to 0.
-uint64_t ael_prop_to_cdt_create_flag(ast_prop_bits props);
-uint64_t ael_prop_to_select_flag(ast_prop_bits props);
-// list sort() :DROP_DUPS -> the AS_CDT_SORT_* flags int. Distinct from the
-// modify-flags projection above: sort's flag is the op's own (optional) FLAGS
-// param, not a trailing modify slot. Returns 0 when the prop is absent (bare
-// sort() emits no flags arg).
-uint64_t ael_sort_flags(ast_prop_bits props);
+int ael_emit_scalar_literal(as_packer* pk, const ast_node* node);
+int ael_emit_list_literal(as_packer* pk, ast_pool* pool, const char* input,
+		ast_ref node, ael_lit_child_emit child_emit);
+int ael_emit_map_literal(as_packer* pk, ast_pool* pool, const char* input,
+		ast_ref node, ael_lit_child_emit child_emit);
+
+// Select-family (.select() / .modify() / wildcard-.remove()) wire shape,
+// resolved from the pf node + the path's bin. modify / wildcard-remove
+// return the (mutated) container, so rtype mirrors the bin; SELECT TREE
+// matches the bin's shape; COUNT -> INT, EXISTS -> TRILEAN, LEAF_* ->
+// LIST. Single-sourced so the customer-visible rtype can't drift between
+// the two emitters.
+typedef struct {
+	as_cdt_select_flags sel_type;
+	bool is_apply;
+	ast_ref apply_expr; // AST_REF_NULL unless .modify()
+	exp_rtype rtype;
+} ael_select_shape_t;
+
+ael_select_shape_t ael_select_shape(ast_pool* pool, ast_ref pf_ref,
+		ast_ref bin_ref);
+
+// Pack the SELECT op blob (no CALL wrapper, no ctx wrapper):
+//   [SELECT, [ (ctx_type, value), ... ], flags_int [, apply_blob]]
+// Wildcard segs emit (AS_CDT_CTX_EXP, true) for bare `*` or
+// (AS_CDT_CTX_EXP, filter_expr_msgpack) for `*[?(filter)]`. .modify()
+// appends its apply expression; wildcard-.remove() synthesizes the
+// one-op [EXP_RESULT_REMOVE] apply. Shared by both emitters.
+int ael_pack_select_op_blob(as_packer* pk, ast_pool* pool, const char* input,
+		ast_ref ctx_seg_head, uint32_t seg_count, ast_ref pf_ref,
+		const ael_select_shape_t* shape);
+
+// A CDT op's trailing-flag wire shape, derived once from (op, props) and
+// shared by both emitters so the trailing-arg order/pad contract
+// ([args..., sort_flags?, create_flags?, modify_flags?]) is
+// single-sourced. sort() :DROP_DUPS rides the op's own FLAGS param; the
+// create slot appears when a create-order flag is set, or as a
+// pad-to-position before a modify flag on a two-slot op.
+typedef struct {
+	uint64_t sort_flags;
+	uint64_t create_flags;
+	uint64_t modify_flags;
+	bool emit_sort;
+	bool emit_create;
+	bool emit_modify;
+	uint32_t extra; // trailing wire-arg count
+} ael_cdt_flag_shape_t;
+
+ael_cdt_flag_shape_t ael_cdt_flag_shape(int cdt_op, ast_prop_bits props,
+		ast_node_t op_type);
+
+// Pack the trailing flag args per the shape (no-op when extra == 0).
+int ael_emit_cdt_trailing_flags(as_packer* pk, const ael_cdt_flag_shape_t* fs);
+
+// Whether an op has a create-flags or modify-flags slot at all -- the
+// per-op table the trailing-flag shape is derived from.
 bool ael_cdt_op_has_create_flags_slot(int cdt_op);
-bool ael_cdt_op_no_modify_flags_slot(int cdt_op);
+bool ael_cdt_op_has_modify_flags_slot(int cdt_op);
 
 // Reserve space in pk for a typed-string body (str header + type byte
 // + sz body bytes), handing the caller a pointer to write the body

@@ -60,6 +60,10 @@ uint32_t ael_string_decode(const char* src, uint32_t sz, uint8_t* dst);
 // ael_b64_decoded_sz(src, sz) bytes. Returns the number written.
 uint32_t ael_b64_decode(const char* src, uint32_t sz, uint8_t* dst);
 
+// Decode a (lexer-validated) hex literal into dst, one byte per digit pair.
+// Returns the number written.
+uint32_t ael_hex_decode(const char* src, uint32_t sz, uint8_t* dst);
+
 // Hex digit -> nibble [0..15]. Caller must have already validated
 // that c is a hex character (the parser regex / blob-odd-hex check
 // guarantees this); returns 0 on a stray invalid char.

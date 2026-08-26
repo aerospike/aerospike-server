@@ -88,6 +88,13 @@ typedef struct lexer_s {
 	// True when the token just returned was the bare name `pattern`; a
 	// following `:` arms expect_regex for regexReplace's pattern arg.
 	bool prev_name_pattern;
+	// True when the token just returned can end an operand (name, literal,
+	// closing bracket, ...). A `-` glued to a following numeric literal is
+	// then infix subtraction ($.a-1, 1-2), not the literal's sign -- the
+	// numeric rules split it off and return TOK_MINUS. Without this, re2c's
+	// longest match would make `-1` beat TOK_MINUS and `$.a-1` would lex as
+	// two adjacent operands (a syntax error).
+	bool prev_ends_operand;
 } lexer_t;
 
 void lexer_init(lexer_t* lex, const char* input, uint32_t input_sz);

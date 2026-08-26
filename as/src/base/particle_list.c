@@ -700,6 +700,7 @@ list_subcontext_by_index(cdt_context* ctx, msgpack_in_vec* val)
 					cf_detail(AS_PARTICLE,
 							"list_subcontext_by_index() index %ld out of bounds for ele_count %u",
 							index, list.ele_count);
+					ctx->not_found = true;
 					return false;
 				}
 			}
@@ -723,6 +724,7 @@ list_subcontext_by_index(cdt_context* ctx, msgpack_in_vec* val)
 			cf_detail(AS_PARTICLE,
 					"list_subcontext_by_index() index %ld out of bounds for ele_count %u",
 					index, list.ele_count);
+			ctx->not_found = true;
 			return false;
 		}
 	}
@@ -783,6 +785,7 @@ list_subcontext_by_rank(cdt_context* ctx, msgpack_in_vec* val)
 		cf_detail(AS_PARTICLE,
 				"list_subcontext_by_rank() rank %ld out of bounds for ele_count %u",
 				rank, list.ele_count);
+		ctx->not_found = true;
 		return false;
 	}
 
@@ -839,6 +842,7 @@ list_subcontext_by_value(cdt_context* ctx, msgpack_in_vec* val)
 
 	if (list.ele_count == 0) {
 		cf_detail(AS_PARTICLE, "list_subcontext_by_value() list is empty");
+		ctx->not_found = true;
 		return false;
 	}
 
@@ -871,6 +875,7 @@ list_subcontext_by_value(cdt_context* ctx, msgpack_in_vec* val)
 
 	if (count == 0) {
 		cf_detail(AS_PARTICLE, "list_subcontext_by_value() value not found");
+		ctx->not_found = true;
 		return false;
 	}
 

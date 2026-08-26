@@ -22,19 +22,15 @@
 
 #pragma once
 
+//==========================================================
+// Includes.
+//
+
 #include <stdint.h>
 
 //==========================================================
-// CDT wire-format constants.
+// Typedefs & constants.
 //
-// Shared by the runtime CDT code paths (cdt.c, particle_list.c,
-// particle_map.c) and the AEL compiler (ael_actions.c, ael_codegen.c,
-// exp.c). Kept separate from the broader client protocol in proto.h
-// so non-CDT consumers don't transitively pull these enums in.
-//
-
-// So we know it can't be (first byte of) msgpack list/map.
-#define CDT_MAGIC 0xC0
 
 typedef enum {
 	AS_CDT_PARAM_NONE = 0,
@@ -129,6 +125,25 @@ typedef enum {
 #define AS_CDT_CTX_CREATE_PERSIST_INDEX 0x100
 #define AS_CDT_CTX_AND 0x200
 #define AS_CDT_CTX_INVERTED 0x400
+
+// Path-level flags, carried as a leading element of the context list. The list
+// is otherwise [type, val] pairs -- always even -- so an odd count means the
+// first element is this word.
+//
+// One bit per tolerated failure mode, so a server that has never heard of a mode
+// rejects the word instead of tolerating less than the caller asked for. CREATE
+// (the path is not there) is the only mode implemented; MISMATCH -- the path
+// exists but is not the kind described -- is the likely next ask, and 0x02.
+#define AS_CDT_CTX_FLAG_NO_FAIL_CREATE 0x01
+#define AS_CDT_CTX_FLAG_NO_FAIL_MISMATCH 0x02 // Reserved placeholder
+
+// What a bare `:NO_FAIL` means: every mode this server tolerates. Emitters use
+// this, so a new mode is a change here and nowhere else.
+#define AS_CDT_CTX_FLAGS_NO_FAIL_ALL AS_CDT_CTX_FLAG_NO_FAIL_CREATE
+
+// Every path flag this server accepts. MISMATCH is defined but excluded --
+// reserving a bit is not the same as honouring it.
+#define AS_CDT_CTX_FLAGS_MASK AS_CDT_CTX_FLAGS_NO_FAIL_ALL
 
 typedef enum {
 	// List operations.
@@ -225,6 +240,10 @@ typedef enum {
 	AS_CDT_OP_MAP_GET_BY_VALUE_LIST = 108,
 	AS_CDT_OP_MAP_GET_BY_KEY_REL_INDEX_RANGE = 109,
 	AS_CDT_OP_MAP_GET_BY_VALUE_REL_RANK_RANGE = 110,
+
+	// One past the last family op, for the guard that keeps this family clear of
+	// the sentinels.
+	AS_CDT_OP_END = 111,
 
 	// Polymorphic — element count of either a list or a map at the
 	// navigated position. Errors on a scalar.

@@ -127,9 +127,18 @@ typedef struct cdt_context_s {
 
 	uint32_t list_nil_pad;
 
+	bool not_found;
+
 	const uint8_t* create_hdr_ptr;
 } cdt_context;
 
+// One step of a context walk: descend ctx into the element val names.
+// post: true and ctx advanced, or false and ctx unchanged. On false, sets
+//       ctx->not_found if and only if the step failed because the element is
+//       absent -- an index or rank past the end, a key or value with no match.
+//       Malformed input, an unsupported context kind and a corrupt container all
+//       leave it clear, which is what lets cdt_context_dig() tolerate absence
+//       without tolerating those.
 typedef bool (*cdt_subcontext_fn)(cdt_context* ctx, msgpack_in_vec* val);
 
 typedef struct cdt_op_mem_s {
@@ -636,7 +645,7 @@ bool map_buf_adjust_ordidx(uint8_t* buf, uint32_t buf_sz, const uint8_t* old,
 		uint32_t old_sz);
 bool map_buf_get_all_k_or_v(const uint8_t* buf, uint32_t buf_sz,
 		cdt_result_data* rd);
-bool map_buf_sort_in_place(uint8_t* buf, uint32_t buf_sz);
+bool map_buf_check_unique_and_sort(uint8_t* buf, uint32_t buf_sz, bool sort);
 
 uint32_t map_calc_ext_content_sz(uint8_t flags, uint32_t ele_count,
 		uint32_t content_sz);
@@ -662,6 +671,17 @@ uint8_t* cdt_context_create_new_particle(cdt_context* ctx, uint32_t subctx_sz);
 void cdt_context_push(cdt_context* ctx, uint32_t idx, uint8_t type);
 
 bool cdt_context_read_check_peek(const msgpack_in_vec* ctx);
+
+// How many flag words an emitter may append to this op -- its count of trailing
+// optional FLAGS args. 0 for an unknown op.
+uint32_t cdt_op_trailing_flag_slots(uint32_t op);
+
+// Returned by cdt_context_dig() instead of an error when the path is absent and
+// the context list asked for that to be tolerated (the CREATE no-fail mode, and
+// is_modify). Positive, so it collides with neither AS_OK nor an as_error code.
+// A caller seeing it must do nothing and report success.
+#define CDT_CTX_DIG_NO_OP 1
+
 int cdt_context_dig(cdt_context* ctx, msgpack_in_vec* mv, bool is_modify);
 
 // Nested leaf apply helpers.
@@ -676,7 +696,9 @@ int cdt_context_dig(cdt_context* ctx, msgpack_in_vec* mv, bool is_modify);
 //   the CDT modify framework is primed. Returns leaf bytes for caller
 //   to execute prepare+modify. Caller must call cdt_leaf_apply_modify_commit
 //   after transforming the bytes, or rollback on failure. Caller provides
-//   alloc_buf created via define_rollback_alloc.
+//   alloc_buf created via define_rollback_alloc. Unlike the read helper this
+//   can return CDT_CTX_DIG_NO_OP, which the caller must turn into a no-op
+//   success; the context is released either way.
 //
 // cdt_leaf_apply_modify_commit: writes the new bytes as a typed msgpack
 //   str/bin at the dug position, then unwinds parent CDT headers.

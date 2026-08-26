@@ -203,6 +203,7 @@ endif
 
 EXP_HEADERS += exp.h
 EXP_HEADERS += exp_rt.h
+EXP_HEADERS += exp_ael.h
 EXP_HEADERS += expop.h
 EXP_HEADERS += exp_wire.h
 EXP_HEADERS += ast.h
@@ -217,6 +218,7 @@ EXP_HEADERS += ael_context.h
 
 EXP_SOURCES += exp.c
 EXP_SOURCES += exp_rt.c
+EXP_SOURCES += exp_ael.c
 EXP_SOURCES += expop.c
 EXP_SOURCES += ast.c
 EXP_SOURCES += ael_codegen.c
@@ -385,11 +387,20 @@ $(GEN_DIR)/ael_parser.h: $(GEN_DIR)/.lemon_stamp ;
 
 # When re2c is available: regenerate and update the checked-in fallback copy.
 # When re2c is missing: use the fallback copy (ael_lexer.c.copy).
+#
+# Generated from inside GEN_DIR on a bare filename, as the lemon rule above is.
+# re2c writes the input and output paths it was handed into every #line
+# directive, so building from a different directory rewrote all 189 of them and
+# churned the checked-in copy by 378 lines with no change in code. Bare names
+# cannot vary, and the copied .re sits beside the generated .c so they still
+# resolve.
 $(GEN_DIR)/ael_lexer.c: exp/ael_lexer.re
 	@mkdir -p $(GEN_DIR)
 	@if command -v re2c >/dev/null 2>&1; then \
-		re2c -W --no-generation-date -o $@ $<; \
-		cp $@ $(dir $<)ael_lexer.c.copy; \
+		cp $< $(GEN_DIR)/ael_lexer.re \
+		&& cd $(GEN_DIR) \
+		&& re2c -W --no-generation-date -o ael_lexer.c ael_lexer.re \
+		&& cp ael_lexer.c $(CURDIR)/$(dir $<)ael_lexer.c.copy; \
 	else \
 		echo "  re2c not found -- using checked-in ael_lexer.c.copy"; \
 		cp $(dir $<)ael_lexer.c.copy $@; \

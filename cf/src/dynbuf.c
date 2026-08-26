@@ -525,13 +525,16 @@ dynmem_init(dynmem* dm, uint32_t obj_sz, uint32_t n_obj, void* stack_mem)
 	}
 }
 
+// The abnormal tail of the inline dynmem_at (dynbuf.h): out-of-bounds
+// returns NULL; internal-invariant violations assert here, where log.h is
+// available.
 void*
-dynmem_at(dynmem* dm, dynmem_obj_idx index)
+dynmem_at_slow(dynmem* dm, dynmem_obj_idx index)
 {
 	const dynmem* cdm =
 			(const dynmem*)dm; // ensure dm doesn't change for dynmem_get()
 	const uint8_t mem_i = dynmem_get_buf_idx(cdm, index);
-	const uint32_t sub = (mem_i == 0 ? 0 : (1U << (mem_i - 1)) << cdm->shift0);
+	const uint32_t sub = dynmem_get_buf_base(cdm, mem_i);
 	const uint32_t offset = index - sub;
 
 	cf_assert(index >= sub, CF_MISC, "index %u < sub %u", index, sub);
@@ -547,12 +550,6 @@ dynmem_at(dynmem* dm, dynmem_obj_idx index)
 	}
 
 	return (void*)(dm->mem[mem_i] + byte_offset);
-}
-
-const void*
-dynmem_get(const dynmem* dm, dynmem_obj_idx index)
-{
-	return (const void*)dynmem_at((dynmem*)dm, index);
 }
 
 void*

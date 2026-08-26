@@ -290,6 +290,31 @@ const cdt_op_table_entry cdt_op_table[] = {
 static const size_t cdt_op_table_size =
 		sizeof(cdt_op_table) / sizeof(cdt_op_table_entry);
 
+// How many trailing optional FLAGS args this op accepts -- the number of flag
+// words an emitter may append after the params. A leading mandatory FLAGS (the
+// return-type byte every REMOVE_BY* opens with) is a param, not a slot, so only
+// the optional tail counts. 0 for an unknown op or a table hole.
+uint32_t
+cdt_op_trailing_flag_slots(uint32_t op)
+{
+	if (op >= cdt_op_table_size) {
+		return 0;
+	}
+
+	const cdt_op_table_entry* entry = &cdt_op_table[op];
+	uint32_t n_slots = 0;
+
+	for (uint32_t i = 0; i < entry->opt_args; i++) {
+		if (entry->args[entry->count - 1 - i] != AS_CDT_PARAM_FLAGS) {
+			break;
+		}
+
+		n_slots++;
+	}
+
+	return n_slots;
+}
+
 typedef struct index_pack24_s {
 	uint32_t value : 24;
 } __attribute__((__packed__)) index_pack24;
@@ -1704,6 +1729,14 @@ cdt_process_state_init_from_vec(cdt_process_state* cdt_state, msgpack_in_vec* mv
 		return false;
 	}
 
+	if (t64 > UINT8_MAX) {
+		cf_warning(AS_PARTICLE, "cdt_parse_state_init() op type %lu too large",
+				t64);
+		as_error_details_set_fmt(AS_SUB_NONE, "cdt op type %lu is not valid",
+				t64);
+		return false;
+	}
+
 	cdt_state->type = (as_cdt_optype)t64;
 	cdt_state->ele_count = ele_count - 1; // does not include op type
 
@@ -1871,16 +1904,33 @@ select_apply_undo_entry(select_apply* a)
 	a->tail->idx--;
 }
 
+// pre:  every surviving entry has had its sz set -- overflow pages are
+//       cf_malloc'd rather than zeroed, so an unwritten sz reads garbage.
+//       sz == 0 is the hdr variant, whose union holds no result.
+// post: every surviving entry is destroyed. An AS_EXP_RESULT_BIN one owns the
+//       particle the modify produced, so the pack pass reading it is not its
+//       end.
 static void
-select_apply_free_mem(select_apply* a)
+select_apply_destroy(select_apply* a)
 {
-	apply_page* p = a->page0.next;
+	apply_page* p = &a->page0;
 
 	while (p != NULL) {
-		apply_page* pp = p;
+		for (uint32_t i = 0; i < p->idx; i++) {
+			apply_result_entry* e = &p->results[i];
 
-		p = p->next;
-		cf_free(pp);
+			if (e->sz != 0) {
+				as_exp_result_destroy(&e->res);
+			}
+		}
+
+		apply_page* next = p->next;
+
+		if (p != &a->page0) {
+			cf_free(p);
+		}
+
+		p = next;
 	}
 }
 
@@ -3136,9 +3186,9 @@ cdt_select_map(select_ctx* sel, uint32_t level)
 		[AS_EXP_BUILTIN_KEY] = &mp_key, [AS_EXP_BUILTIN_VALUE] = &mp_value
 	};
 
-	uint8_t cdt_type = entry->ctx_type & 0xf0;
+	uint8_t cdt_type = entry->ctx_type & AS_CDT_CTX_CDT_TYPE_MASK;
 
-	if (cdt_type != 0 && cdt_type != 0x20) {
+	if (cdt_type != 0 && cdt_type != AS_CDT_CTX_MAP) {
 		cf_warning(AS_PARTICLE, "cdt_select_map(%u) invalid ctx_type 0x%x",
 				level, entry->ctx_type);
 		as_error_details_set_fmt(AS_SUB_NONE,
@@ -3154,7 +3204,7 @@ cdt_select_map(select_ctx* sel, uint32_t level)
 		sel->out.offset++; // guess a header size of 1, adjust later if greater
 	}
 
-	uint8_t by_type = entry->ctx_type & 0x0f;
+	uint8_t by_type = entry->ctx_type & AS_CDT_CTX_BASE_MASK;
 
 	if (by_type == AS_CDT_CTX_INDEX || by_type == AS_CDT_CTX_RANK) {
 		uint32_t index32;
@@ -4078,6 +4128,7 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 {
 	uint32_t n_pairs = *n;
 	uint32_t i = 0;
+	uint32_t n_init = 0; // end point, since i can decrement
 	int ret = AS_OK;
 
 	for (uint32_t j = 0; j < n_pairs; j++, i++) {
@@ -4142,6 +4193,7 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 		}
 		else {
 			stack[i] = (select_stack_entry){ .ctx_type = (uint32_t)ctx_type };
+			n_init = i + 1;
 
 			if ((ctx_type & AS_CDT_CTX_INVERTED) != 0) {
 				uint8_t base = ctx_type & AS_CDT_CTX_BASE_MASK;
@@ -4290,7 +4342,7 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 	}
 
 	if (ret != AS_OK) {
-		select_stack_destroy(stack, i);
+		select_stack_destroy(stack, n_init);
 	}
 
 	*n = i;
@@ -4317,6 +4369,16 @@ cdt_select_destroy_stack(select_ctx* sel)
 	select_stack_destroy(sel->stack, sel->n_levels);
 }
 
+// The cursor is valid in [0, n_vecs] -- one past the end is the ordinary
+// exhausted state, which is exactly what a failed read leaves behind. Zero
+// reads as "nothing left", so a warning can report a size without the caller
+// having to bound the index itself.
+static uint32_t
+cur_vec_buf_sz(const msgpack_in_vec* mv)
+{
+	return mv->idx < mv->n_vecs ? mv->vecs[mv->idx].buf_sz : 0;
+}
+
 //==========================================================
 // cdt ops
 //
@@ -4339,13 +4401,17 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 
 	uint32_t ctx_param_count = ~(0U);
 
+	// Even and non-zero, same as everywhere else. Note that a select walk does
+	// not go through cdt_context_dig(), so the leading path-flags word that
+	// makes a dig context list odd is rejected here rather than honored -- a
+	// select can neither create nor tolerate an absent path.
 	if (! msgpack_get_list_ele_count_vec(state->mv, &ctx_param_count) ||
 			ctx_param_count == 0 || (ctx_param_count & 1) == 1) {
 		cf_warning(AS_PARTICLE,
 				"cdt_process_state_select() unpack parameters failed: size=%u ele_count=%u",
-				state->mv->vecs[state->mv->idx].buf_sz, ctx_param_count);
+				cur_vec_buf_sz(state->mv), ctx_param_count);
 		as_error_details_set_fmt(AS_SUB_NONE,
-				"cdt select context list invalid amount of elements: element count=%u",
+				"cdt select context list must hold an even, non-zero number of elements and take no path flags: element count=%u",
 				ctx_param_count);
 		com->ret_code = -AS_ERR_PARAMETER;
 		return false;
@@ -4381,6 +4447,17 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 				"cdt_process_state_select() unexpected flag(s) param");
 		as_error_details_set_fmt(AS_SUB_NONE,
 				"cdt select flags field is invalid");
+		select_stack_destroy(stack, n_levels);
+		com->ret_code = -AS_ERR_PARAMETER;
+		return false;
+	}
+
+	if (flags_i64 < 0 ||
+			(flags_i64 & ~(int64_t)(SELECT_RTYPE_MASK | SELECT_NO_FAIL)) != 0) {
+		cf_warning(AS_PARTICLE,
+				"cdt_process_state_select() invalid select flags %ld", flags_i64);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt select flags %ld is not valid", flags_i64);
 		select_stack_destroy(stack, n_levels);
 		com->ret_code = -AS_ERR_PARAMETER;
 		return false;
@@ -4537,7 +4614,7 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 		cdt_select_apply(&sel, exp, &com->ctx);
 
 		as_exp_destroy(exp);
-		select_apply_free_mem(&apply);
+		select_apply_destroy(&apply);
 	}
 	else if (type == SELECT_COUNT) {
 		// COUNT returns an integer-bin — no msgpack buffer needed. The
@@ -4626,23 +4703,62 @@ cdt_process_state_context_eval(cdt_process_state* state, cdt_op_mem* com)
 		return false;
 	}
 
-	if ((com->ret_code = cdt_context_dig(&com->ctx, state->mv,
-				 cdt_op_is_modify(com))) != AS_OK) {
+	// The walk stops where the path runs out, so on a no-op it leaves the reader
+	// inside the context param -- and the wire shape has to answer for itself
+	// whether or not the record has the path.
+	define_msgpack_vec_copy(mv_pre, state->mv);
+
+	int dig_rv = cdt_context_dig(&com->ctx, state->mv, cdt_op_is_modify(com));
+
+	if (dig_rv != AS_OK && dig_rv != CDT_CTX_DIG_NO_OP) {
+		com->ret_code = dig_rv;
 		return false;
 	}
 
-	uint32_t ele_count;
+	bool no_op = dig_rv == CDT_CTX_DIG_NO_OP;
+	msgpack_in_vec* op_mv = no_op ? &mv_pre : state->mv;
+	uint32_t ele_count = 0;
 	uint64_t type64;
 
-	if (! msgpack_get_list_ele_count_vec(state->mv, &ele_count) ||
-			ele_count == 0 || ! msgpack_get_uint64_vec(state->mv, &type64)) {
+	// Skipping the context param is how the no-op path reaches the inner op, so
+	// a header claiming more elements than follow fails with no inner op list
+	// read yet -- which is a different answer to the client than a bad one.
+	if (no_op && msgpack_sz_vec(op_mv) == 0) {
+		cf_warning(AS_PARTICLE,
+				"cdt_process_state_context_eval() context list shorter than its header claims");
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt context eval context list is shorter than its header claims");
+		com->ret_code = -AS_ERR_PARAMETER;
+		return false;
+	}
+
+	if (! msgpack_get_list_ele_count_vec(op_mv, &ele_count) || ele_count == 0 ||
+			! msgpack_get_uint64_vec(op_mv, &type64)) {
 		cf_warning(AS_PARTICLE,
 				"cdt_process_state_context_eval() unpack parameters failed: size=%u ele_count=%u",
-				state->mv->vecs[state->mv->idx].buf_sz, ele_count);
+				cur_vec_buf_sz(op_mv), ele_count);
 		as_error_details_set_fmt(AS_SUB_NONE,
 				"cdt context eval failed to read element count or inner op type: element count=%u",
 				ele_count);
 		com->ret_code = -AS_ERR_PARAMETER;
+		return false;
+	}
+
+	if (type64 > UINT8_MAX) {
+		cf_warning(AS_PARTICLE,
+				"cdt_process_state_context_eval() inner op type %lu too large",
+				type64);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt context eval inner op type %lu is not valid", type64);
+		com->ret_code = -AS_ERR_PARAMETER;
+		return false;
+	}
+
+	if (no_op) {
+		// Report failure so the modify epilogue restores the bin and releases the
+		// context -- that rollback IS the no-op. The status is what tells the
+		// epilogue this from a sub-op that set none.
+		com->ret_code = CDT_CTX_DIG_NO_OP;
 		return false;
 	}
 
@@ -4745,6 +4861,8 @@ bin_cdt_get_by_context_vec(const as_bin* b, msgpack_in_vec* ctx_mv, as_bin* resu
 	define_rollback_alloc(alloc_result, NULL, 1);
 
 	cdt_context ctx = { .b = (as_bin*)b, .alloc_buf = NULL };
+
+	cf_defer { cf_free(ctx.pstack); }
 
 	if (cdt_context_dig(&ctx, ctx_mv, false) != AS_OK) {
 		return false;
@@ -5664,21 +5782,72 @@ cdt_context_dig(cdt_context* ctx, msgpack_in_vec* mv, bool is_modify)
 
 	uint32_t ctx_param_count = 0;
 
-	msgpack_vec* vec = &mv->vecs[mv->idx];
-
 	if (! msgpack_get_list_ele_count_vec(mv, &ctx_param_count) ||
-			ctx_param_count == 0 || (ctx_param_count & 1) == 1) {
+			ctx_param_count == 0) {
 		cf_warning(AS_PARTICLE, "cdt_context_dig() bad context param count %u",
 				ctx_param_count);
 		as_error_details_set_fmt(AS_SUB_NONE,
-				"cdt context path invalid: param count %u must be even and non-zero",
+				"cdt context path invalid: param count %u must be non-zero",
 				ctx_param_count);
 		return -AS_ERR_PARAMETER;
+	}
+
+	// The [type, val] pairs make the count even, so an odd count means a leading
+	// path-flags word. Consume it and drop it from the count -- everything below
+	// then sees the same even list it always did, including the i / 2 level
+	// numbering and the create_ctx_count arithmetic.
+	bool tolerate_absent = false;
+
+	if ((ctx_param_count & 1) == 1) {
+		uint64_t path_flags;
+
+		if (! msgpack_get_uint64_vec(mv, &path_flags)) {
+			cf_warning(AS_PARTICLE,
+					"cdt_context_dig() unable to parse context path flags");
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt context path flags are not a valid integer");
+			return -AS_ERR_PARAMETER;
+		}
+
+		if ((path_flags & ~(uint64_t)AS_CDT_CTX_FLAGS_MASK) != 0) {
+			cf_warning(AS_PARTICLE,
+					"cdt_context_dig() invalid context path flags 0x%lx",
+					path_flags);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt context path flags 0x%lx are not valid", path_flags);
+			return -AS_ERR_PARAMETER;
+		}
+
+		if (--ctx_param_count == 0) {
+			cf_warning(AS_PARTICLE,
+					"cdt_context_dig() context path flags with no elements");
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt context path carries flags but no elements");
+			return -AS_ERR_PARAMETER;
+		}
+
+		// Per mode, so a future mode is a separate local guarding its own sites.
+		// Only a modify can no-op; a read's absent path is already its own
+		// answer, and tolerating it there would hide a type error.
+		tolerate_absent = (path_flags & AS_CDT_CTX_FLAG_NO_FAIL_CREATE) != 0 &&
+				is_modify;
 	}
 
 	for (uint32_t i = 0; i < ctx_param_count; i += 2) {
 		uint64_t ctx_type;
 		bool ret;
+
+		if (mv->idx >= mv->n_vecs) {
+			cf_warning(AS_PARTICLE,
+					"cdt_context_dig() context path ends before param %u", i);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt context path ends before level %u", i / 2);
+			return -AS_ERR_PARAMETER;
+		}
+
+		// Not hoisted: a read ending flush with a vec's end moves mv to the
+		// next one.
+		msgpack_vec* vec = &mv->vecs[mv->idx];
 		uint32_t start_off = vec->offset;
 
 		if (! msgpack_get_uint64_vec(mv, &ctx_type)) {
@@ -5707,6 +5876,10 @@ cdt_context_dig(cdt_context* ctx, msgpack_in_vec* mv, bool is_modify)
 
 		if (bin_was_empty) {
 			if (! ctx->create_flag_on) {
+				if (tolerate_absent) {
+					return CDT_CTX_DIG_NO_OP;
+				}
+
 				cf_detail(AS_PARTICLE,
 						"cdt_context_dig() bin is empty and op has no create flag(s)");
 				as_error_details_set_fmt(AS_SUB_NONE,
@@ -5787,6 +5960,10 @@ cdt_context_dig(cdt_context* ctx, msgpack_in_vec* mv, bool is_modify)
 		}
 
 		if (! ret) {
+			if (tolerate_absent && ctx->not_found) {
+				return CDT_CTX_DIG_NO_OP;
+			}
+
 			cf_detail(AS_PARTICLE,
 					"cdt_context_dig() invalid context at param %u", i);
 			as_error_details_set_fmt(AS_SUB_NONE,
@@ -5824,6 +6001,8 @@ cdt_context_read_check_peek(const msgpack_in_vec* ctx)
 		return false;
 	}
 
+	// Even only: sindex and query paths are pure reads, so the odd form's
+	// leading path-flags word has nothing to offer them and is rejected.
 	if (count == 0 || count % 2 != 0) {
 		return false;
 	}
@@ -5850,6 +6029,7 @@ static inline void
 cdt_context_destroy(cdt_context* ctx)
 {
 	cf_free(ctx->pstack);
+	ctx->pstack = NULL;
 }
 
 static void
@@ -5872,6 +6052,7 @@ cdt_context_unwind(cdt_context* ctx)
 	}
 
 	cf_free(ctx->pstack);
+	ctx->pstack = NULL;
 }
 
 static bool
@@ -5999,10 +6180,23 @@ cdt_packed_modify(cdt_process_state* state, as_bin* b, as_bin* result,
 	rollback_alloc_rollback(alloc_convert);
 
 	if (! success) {
-		cf_warning(AS_PARTICLE, "cdt_packed_modify() failed: ret_code=%d",
-				com.ret_code);
-		as_error_details_set_fmt(AS_SUB_NONE,
-				"cdt modify failed with status %d", -com.ret_code);
+		if (com.ret_code == CDT_CTX_DIG_NO_OP) {
+			// The rollback below is exactly the wanted no-op, and an empty
+			// result bin is the honest answer -- the inner op never ran, so it
+			// produced no value.
+			com.ret_code = AS_OK;
+		}
+		else if (com.ret_code == AS_OK) {
+			// Reported as succeeding, so this line is the only trace.
+			cf_warning(AS_PARTICLE, "cdt_packed_modify() failed with no status");
+		}
+		else {
+			cf_warning(AS_PARTICLE, "cdt_packed_modify() failed: ret_code=%d",
+					com.ret_code);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cdt modify failed with status %d", -com.ret_code);
+		}
+
 		*b = old_bin;
 		as_bin_set_empty(result);
 		rollback_alloc_rollback(alloc_buf);
@@ -6065,6 +6259,9 @@ cdt_packed_read(cdt_process_state* state, const as_bin* b, as_bin* result)
 	}
 
 	rollback_alloc_rollback(alloc_idx);
+
+	cf_assert(com.ret_code != CDT_CTX_DIG_NO_OP, AS_PARTICLE,
+			"cdt_packed_read() no-op status from op type %u", state->type);
 
 	if (! success) {
 		cf_info(AS_PARTICLE, "cdt_packed_read() failed: ret_code=%d",
@@ -8806,9 +9003,18 @@ cdt_msgpack_ctx_to_dynbuf(msgpack_in* mp, cf_dyn_buf* db, uint32_t max_sz)
 		return false;
 	}
 
+	// An odd count means a leading path-flags word ahead of the [type, val]
+	// pairs.
 	if ((ele_count & 1) != 0) {
-		cf_dyn_buf_append_format(db, "(ctx-error-list-ele-count %u)]", ele_count);
-		return false;
+		uint64_t path_flags;
+
+		if (! msgpack_get_uint64(mp, &path_flags)) {
+			cf_dyn_buf_append_string(db, "(ctx-error-path-flags)]");
+			return false;
+		}
+
+		cf_dyn_buf_append_format(db, "flags(0x%lx), ", path_flags);
+		ele_count--;
 	}
 
 	for (uint32_t i = 0; i < ele_count / 2; i++) {
@@ -9016,7 +9222,12 @@ cdt_leaf_apply_read(const as_bin* b, msgpack_in_vec* ctx_mv,
 
 	cdt_context ctx = { .b = (as_bin*)b, .alloc_buf = NULL };
 
+	cf_defer { cf_free(ctx.pstack); }
+
 	int rv = cdt_context_dig(&ctx, ctx_mv, false);
+
+	cf_assert(rv != CDT_CTX_DIG_NO_OP, AS_PARTICLE,
+			"cdt_leaf_apply_read() no-op status");
 
 	if (rv != AS_OK) {
 		return rv;
@@ -9073,6 +9284,8 @@ cdt_leaf_apply_modify_begin(cdt_context* ctx, as_bin* b,
 	int rv = cdt_context_dig(ctx, ctx_mv, true);
 
 	if (rv != AS_OK) {
+		cf_free(ctx->pstack);
+		ctx->pstack = NULL;
 		return rv;
 	}
 
@@ -9090,6 +9303,7 @@ cdt_leaf_apply_modify_begin(cdt_context* ctx, as_bin* b,
 				"nested element type does not match expected %s",
 				as_particle_type_str(expected_leaf_type));
 		cf_free(ctx->pstack);
+		ctx->pstack = NULL;
 		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
@@ -9097,6 +9311,7 @@ cdt_leaf_apply_modify_begin(cdt_context* ctx, as_bin* b,
 
 	if (bin_data == NULL) {
 		cf_free(ctx->pstack);
+		ctx->pstack = NULL;
 		return -AS_ERR_UNKNOWN;
 	}
 
