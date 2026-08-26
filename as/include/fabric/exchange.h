@@ -140,6 +140,10 @@ uint64_t as_exchange_cluster_key();
  */
 uint32_t as_exchange_cluster_size();
 
+// Indicates if the exchange state machine is settled at rest (no round in
+// flight and not orphaned).
+bool as_exchange_is_at_rest();
+
 /**
  * Copy over the committed succession list.
  * Ensure the input vector has enough capacity.
