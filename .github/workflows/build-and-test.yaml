@@ -4,7 +4,17 @@ permissions:
   contents: read
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      client_versions:
+        # Deliberately no default:. The matrix's `||` fallback below already
+        # supplies the pinned set when this is empty, and a default here would
+        # be a second copy of that list authoritative on a disjoint event --
+        # this one on workflow_dispatch, the fallback on pull_request -- so a
+        # one-sided edit would be undetectable.
+        description: 'C client refs to test, as a JSON array. Leave empty for the full pinned set; narrow to iterate faster, e.g. ["stage"].'
+        required: false
+        type: string
   pull_request:
     branches: [master]
 
@@ -13,8 +23,18 @@ defaults:
     shell: bash
 
 jobs:
+  # Builds and gates. One job per distro -- nothing here depends on a C client
+  # version, so building once per distro instead of once per (distro, client)
+  # keeps 'Build and package' (~13 min) and 'Run unit tests' (~3.6 min) from
+  # running four extra times per PR. Just as importantly, it stops the blocking
+  # unit-test step from getting four extra chances to flake.
   build:
     if: ${{ github.repository_owner == 'citrusleaf' }}
+
+    name: build (${{ matrix.distro }})
+
+    # Measured ~22 min end to end; 60 bounds a hang well clear of that.
+    timeout-minutes: 60
 
     strategy:
       fail-fast: false
@@ -130,10 +150,222 @@ jobs:
           set -euo pipefail
           make EEREPO="$GITHUB_WORKSPACE/aerospike-server-enterprise" run-tests
 
+      # Hand the package to client-test rather than rebuilding it there.
+      - name: Upload the server package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: server-pkg-${{ matrix.distro }}
+          path: aerospike-server/pkg/packages/
+          # Long enough to cover a review cycle. At 1 day, 'Re-run failed jobs'
+          # on a day-old PR could not re-run a client-test leg at all: the
+          # download would 404 and the only way back was to re-run 'build' too.
+          retention-days: 7
+          if-no-files-found: error
+
+  # Exercises the C client suite against the package built above, one job per
+  # (distro, client version). A client test failure fails this job -- red in
+  # the jobs list is the only way that surface can say a leg is broken, since
+  # a job conclusion has no third colour. It is not a merge gate: nothing on
+  # master requires these checks. Everything else in this job gates too,
+  # including the client checkout, so an unresolvable ref does fail the job.
+  client-test:
+    # !cancelled() rather than the implicit success() a bare `needs` gives.
+    # 'build' is a 2-leg matrix, and its conclusion is `failure` if either leg
+    # fails -- which would skip all six legs here, including the three whose
+    # distro built cleanly and whose package is already in the artifact store.
+    # Keeping `needs: build` preserves the ordering and the unit-test gate; the
+    # legs with no package simply die at 'Download the server package', and the
+    # reporter publishes the grey 'did not run' check for them. Do not drop
+    # `needs` to get the same effect -- that would dissolve the gate.
+    if: ${{ !cancelled() && github.repository_owner == 'citrusleaf' }}
+    needs: build
+
+    name: client-test (${{ matrix.distro }}, C client ${{ matrix.client }})
+
+    # Broader than the workflow default by exactly one scope: checks:write,
+    # which 'Report client test outcome' needs to publish this leg's result as
+    # its own check run. A job-level block replaces the workflow default
+    # outright, so contents:read is restated rather than inherited.
+    permissions:
+      contents: read
+      checks: write
+
+    # No server build here, so this is short; 30 bounds a hang generously.
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [ubuntu24.04, el9]
+        # C client refs to test against — release tags plus the pre-release
+        # branch. The literal below is the only copy of the list: on a
+        # pull_request the `inputs` context is empty, and a dispatch that
+        # leaves client_versions blank falls through to it too.
+        #
+        # It does NOT follow that the input can only narrow. fromJSON consumes
+        # it verbatim, so a dispatch naming a ref that is not in the list gets
+        # a leg for it -- which is what the 'Reject a client ref' step below is
+        # for, and why it exists at all. That step is twelfth of seventeen, so
+        # the leg has already spawned, installed the package and cold-started
+        # asd by the time the ref is refused. Making the claim true rather than
+        # correcting it means validating the array ahead of the matrix, in a
+        # setup job that emits it as an output.
+        #
+        # A new entry can turn this workflow's run red on its own: any failing
+        # test in any leg fails that leg's job. Nothing requires these checks,
+        # so that costs attention rather than merges -- but add a version
+        # knowing its failures become everyone's red.
+        client: ${{ fromJSON(inputs.client_versions || '["7.4.0", "7.5.0", "stage"]') }}
+        include:
+          - distro: ubuntu24.04
+            os: ubuntu-24.04
+          - distro: el9
+            os: ubuntu-24.04
+            container: registry.access.redhat.com/ubi9/ubi-minimal
+
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+
+    # The four files this job hands between steps, and the interface
+    # report_client_test.bash grades from. Defined once here so the workflow --
+    # not the script -- is the authority: the script keeps the same names only
+    # as ${:-} fallbacks for a local run. Three literals in two files with
+    # nothing binding them is how ASD_PID_FILE quietly diverges, after which
+    # asd_alive() takes its "nothing recorded; do not claim a death" path
+    # forever and every server death is misreported as a client disagreement,
+    # with the reporter's own suite still green.
+    #
+    # Names, not paths, and deliberately so: only the runner knows where the
+    # workspace is. `${{ github.workspace }}` is interpolated on the HOST, and
+    # the three el9 legs run in a container where the workspace is bind-mounted
+    # somewhere else entirely (`--workdir /__w/...` over `-v /home/runner/work:
+    # /__w`), so a host-rooted absolute path names a directory that does not
+    # exist in the container -- and every el9 leg then dies at 'Start Aerospike
+    # server' on a redirect it cannot open, with the grade blaming an earlier
+    # step. Each use below joins with $GITHUB_WORKSPACE, which the runner sets
+    # container-side; upload-artifact resolves a relative path against the
+    # workspace on its own.
+    env:
+      ASD_LOG: asd.log
+      ASD_PID_FILE: asd.pid
+      TEST_LOG: client-tests.log
+      TEST_SENTINEL: client-tests-finished
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Fetch app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Install prereqs
+        run: |
+          set -euo pipefail
+
+          case "${{ matrix.distro }}" in
+            ubuntu*)
+              if ! command -v git >/dev/null; then
+                sudo apt-get update
+                sudo apt-get install -y git ca-certificates
+              fi
+              ;;
+            el9)
+              # UBI minimal may only have microdnf
+              command -v dnf >/dev/null || microdnf install -y dnf
+              dnf -y install git ca-certificates libyaml-devel
+              ;;
+          esac
+
+          git --version
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      # Shallow and submodule-free: this job only needs as/etc/gh-action.conf
+      # and .github/bin/report_client_test.bash, not the source tree or tags.
+      # persist-credentials: false because nothing here runs authenticated git
+      # afterwards, and the C client's own make runs in this same workspace.
+      - name: Checkout aerospike-server (shallow)
+        id: server-checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: citrusleaf/aerospike-server
+          path: aerospike-server
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
+
+      # The client's own documented dependency set (its README, identical at
+      # 7.4.0 and at stage) plus the toolchain basics ubi9-minimal omits.
+      #
+      # Deliberately NOT install_deps.bash: that is the server's list, and on
+      # el9 it ends in build_gtest(), whose cache probe cannot hit in a fresh
+      # ubi9-minimal -- so every el9 leg cloned and compiled googletest from
+      # source for a library only 'make run-tests' uses, which this job never
+      # invokes. That put github.com/google/googletest on the critical path of
+      # three legs, where an upstream blip reports as 'client failed to build'.
+      - name: Install client build deps
+        run: |
+          set -euo pipefail
+
+          case "${{ matrix.distro }}" in
+            ubuntu*)
+              sudo apt-get update
+              sudo apt-get install -y --no-install-recommends \
+                autoconf automake g++ gcc libc6-dev libssl-dev libtool make \
+                libyaml-dev zlib1g-dev
+              ;;
+            el9)
+              # --enablerepo as install_deps.bash does: autoconf, automake and
+              # libtool live in appstream, not in the ubi9 base repo.
+              dnf -y install --enablerepo=ubi-9-appstream-rpms \
+                autoconf automake gcc gcc-c++ glibc-devel libtool make \
+                libyaml-devel openssl-devel zlib-devel
+              ;;
+            *)
+              echo "::error::no client dep list for distro '${{ matrix.distro }}'"
+              exit 1
+              ;;
+          esac
+
+      # Only etc/features.conf is needed here (the feature key asd reads), so
+      # skip submodules -- the build job does the full clone.
+      - name: Checkout aerospike-server-enterprise (feature key only)
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token }}
+          REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+
+          repo="citrusleaf/aerospike-server-enterprise"
+          path="aerospike-server-enterprise"
+
+          git clone "https://x-access-token:${TOKEN}@github.com/${repo}.git" "${path}"
+          cd "${path}"
+
+          git fetch --prune origin +refs/heads/*:refs/remotes/origin/*
+
+          if [[ -n "${REF:-}" ]] && git show-ref --verify --quiet "refs/remotes/origin/${REF}"; then
+            git checkout "${REF}"
+            echo "Checked out branch '${REF}'"
+          else
+            echo "Using default branch 'master'"
+          fi
+
+      - name: Download the server package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: server-pkg-${{ matrix.distro }}
+          path: server-pkg
+
       - name: Install Aerospike
         run: |
           set -euo pipefail
-          pkg_dir="$GITHUB_WORKSPACE/aerospike-server/pkg/packages"
+          pkg_dir="$GITHUB_WORKSPACE/server-pkg"
 
           case "${{ matrix.distro }}" in
             ubuntu*)
@@ -144,31 +376,296 @@ jobs:
               ;;
           esac
 
-      - name: Set the feature key env var
-        run: |
-          set -euo pipefail
-          FEATUREKEY_ENCODED="$(base64 < aerospike-server-enterprise/etc/features.conf | tr -d '\n')"
-          echo "FEATUREKEY=$FEATUREKEY_ENCODED" >> "$GITHUB_ENV"
-
+      # FEATUREKEY is exported inside this step rather than written to
+      # $GITHUB_ENV, so the key is not in the *environment* of the third-party
+      # client build below, and the enterprise checkout is deleted before the
+      # client appears so the plaintext file and the tokenised remote URL are
+      # not on disk beside it either. Both narrow the surface; neither closes
+      # it, and it is worth being exact about what is left:
+      #
+      # gh-action.conf reads the key as `feature-key-file env-b64:FEATUREKEY`,
+      # so asd holds the blob in ITS OWN environment for its whole lifetime --
+      # which spans the client build and tests by design, because the tests
+      # need a live server. asd runs under the same uid as the client's make
+      # (no user/group stanza in gh-action.conf, so no privilege drop; root
+      # throughout on el9), and this step publishes its pid to the workspace.
+      # /proc/<pid>/environ is therefore a one-line read for anything running
+      # during make. Closing that needs a separate uid or a CI-only key, not a
+      # comment -- see .github/ci/README.md.
+      #
+      # ::add-mask:: is worth doing and is narrower than it looks. The value
+      # never passed through secrets.*, so without it nothing redacts it from
+      # the job log at all. But the masker runs on the runner's LOG-WRITE path
+      # and has no hook into file writes, so it redacts only what the runner
+      # prints: `make test 2>&1 | tee "$GITHUB_WORKSPACE/$TEST_LOG"` writes raw
+      # bytes to the file and the runner only ever sees tee's stdout copy, so
+      # client-tests.log -- and asd.log, and $GITHUB_STEP_SUMMARY, all files --
+      # carry the value unmasked into the uploaded artifact. So the artifact
+      # route is open, not closed, and shares its root cause with the /proc
+      # read above: a CI-only feature key is what closes both.
       - name: Start Aerospike server
         run: |
           set -euo pipefail
+          FEATUREKEY="$(base64 < aerospike-server-enterprise/etc/features.conf | tr -d '\n')"
+          echo "::add-mask::$FEATUREKEY"
+          export FEATUREKEY
           sudo chown -R "$(id -u)":"$(id -g)" /opt/aerospike/usr/udf/lua || true
+          # gh-action.conf logs to console, and --foreground keeps that console
+          # on our stderr: without it asd daemonizes (cf_process_daemonize()),
+          # which re-points stdout/stderr at /tmp/aerospike-console.<pid>, so
+          # the redirect below would capture only the handful of lines logged
+          # before the fork and never the "service ready" marker. The file
+          # feeds the readiness probe, is uploaded as an artifact when a leg
+          # goes red (see 'Upload the server and client test logs'), and keeps
+          # asd off the step's stdout pipe, which a backgrounded process must
+          # not hold.
           /usr/bin/asd \
             --config-file aerospike-server/as/etc/gh-action.conf \
-            --cold-start &
+            --foreground \
+            --cold-start > "$GITHUB_WORKSPACE/$ASD_LOG" 2>&1 &
+          echo "$!" > "$GITHUB_WORKSPACE/$ASD_PID_FILE"
+
+      # The step above backgrounds asd, so its exit status says nothing about
+      # whether the server survived cold start. This probe is what makes the
+      # "server must start" gate real: without it, an asd that dies is only
+      # observable as a client test failure, which names the wrong component
+      # and depends on a client suite that may itself be red for its own
+      # reasons. Deliberately gating: no continue-on-error.
+      - name: Wait for the server to be ready
+        run: |
+          set -euo pipefail
+          # Gate on asd's own marker (as/src/base/as.c, "service ready") and
+          # then on the port. The value of doing it in that order is the
+          # liveness check below, not extra settling time: cold-start storage
+          # work finishes before the listener is created, and the marker
+          # follows the bind by a few synchronous statements on the same
+          # thread, so this returns within a second or two of the port opening.
+          # What it buys is that an asd which dies during cold start is
+          # reported here, as a server failure, with its log -- rather than
+          # surfacing later as a client test failure that names the wrong
+          # component. Note it does NOT wait for partition balance, which
+          # as_clustering_start() hands to other threads with no
+          # synchronisation against the marker.
+          log="$GITHUB_WORKSPACE/$ASD_LOG"
+          # asd runs in the foreground, so the recorded pid is asd itself and
+          # not a parent that exits at daemonization -- an asd that dies during
+          # cold start is reported in seconds with its log, instead of as a
+          # 180s timeout whose message blames a slow start.
+          pid="$(cat "$GITHUB_WORKSPACE/$ASD_PID_FILE")"
+
+          # Deliberately not `kill -0`: that succeeds on a zombie, and on the
+          # el9 legs a dead asd is guaranteed to become one. GitHub creates the
+          # job container with `--entrypoint tail <image> -f /dev/null` and no
+          # `--init`, so PID 1 is tail and never wait()s. The fast path above
+          # would then be dead on half the matrix -- exactly the 180s timeout
+          # blaming a slow start that it exists to avoid. Same reasoning, same
+          # test, as asd_alive() in .github/bin/report_client_test.bash.
+          asd_dead() {
+            local state
+            [[ -r "/proc/$1/stat" ]] || return 0
+            # Field 3, after a parenthesised comm that may itself hold spaces
+            # and parens -- so anchor on the last ')'.
+            state="$(sed -nE 's/^.*\) ([A-Za-z]).*/\1/p' "/proc/$1/stat")"
+            [[ "$state" == "Z" ]]
+          }
+
+          for _ in $(seq 1 90); do
+            if asd_dead "$pid"; then
+              echo "::error title=Aerospike server died during start::asd (pid $pid) exited before logging 'service ready'."
+              echo "--- last 100 lines of asd.log ---"
+              tail -n 100 "$log" 2>/dev/null || echo "(no asd.log)"
+              exit 1
+            fi
+            if grep -q 'service ready' "$log" 2>/dev/null; then
+              echo "asd reports service ready."
+              # Port and bind address come from as/etc/gh-action.conf
+              # (network service: address local, port 3000).
+              for _ in $(seq 1 15); do
+                if (exec 3<>/dev/tcp/127.0.0.1/3000) 2>/dev/null; then
+                  echo "asd is accepting connections on 127.0.0.1:3000."
+                  exit 0
+                fi
+                sleep 2
+              done
+              echo "::error title=Aerospike server not reachable::asd logged 'service ready' but is not accepting connections on 127.0.0.1:3000."
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "::error title=Aerospike server did not become ready::asd did not log 'service ready' within 180s."
+          echo "--- last 100 lines of asd.log ---"
+          tail -n 100 "$log" 2>/dev/null || echo "(no asd.log)"
+          exit 1
+
+      # Everything the enterprise repo was needed for is done: asd already read
+      # the feature key from its inherited environment, and nothing later in
+      # this job references the directory. Deleting it removes both the
+      # plaintext features.conf and the app-installation token that `git clone
+      # https://x-access-token:...@` left in .git/config from the reach of the
+      # third-party make that starts one step below.
+      - name: Drop the enterprise checkout before third-party code runs
+        run: rm -rf "$GITHUB_WORKSPACE/aerospike-server-enterprise"
+
+      # client_versions is free text on workflow_dispatch, and actions/checkout
+      # resolves any ref the remote advertises -- including refs/pull/N/head.
+      # aerospike-client-c is public, so that names a branch belonging to any
+      # account that has ever opened a PR against it, with no write access to
+      # anything. The dispatcher can already run code in this job, so this is
+      # not an escalation for them; it is a confused-deputy step. "Dispatch
+      # build-and-test with ["refs/pull/412/head"] so we can check my client
+      # fix against your server" reads as an ordinary request, and nothing
+      # otherwise warns that saying yes runs a stranger's make in the step that
+      # holds checks:write.
+      #
+      # Placed immediately before the checkout so the implicit success() gates
+      # it too: a rejected ref never reaches third-party code, and the leg
+      # fails loudly rather than testing something nobody enumerated. Widen the
+      # pattern deliberately if stage-like branches multiply -- the point is
+      # that the set lives in the repository, not in a dispatch box.
+      - name: Reject a client ref that is not a pinned release or 'stage'
+        env:
+          CLIENT_REF: ${{ matrix.client }}
+        run: |
+          set -euo pipefail
+          [[ "$CLIENT_REF" =~ ^(v?[0-9]+\.[0-9]+\.[0-9]+|stage)$ ]] || {
+            echo "::error title=Unsupported C client ref::refusing to check out C client ref '${CLIENT_REF}'; expected vN.N.N, N.N.N or 'stage'."
+            exit 1
+          }
 
       - name: Checkout C client repo
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: aerospike/aerospike-client-c
+          # Pinned per matrix entry — '7.4.0'/'7.5.0' resolve to release tags,
+          # 'stage' to the pre-release branch. Never the default branch, so the
+          # tag rows are reproducible; 'stage' is deliberately a moving target
+          # and its resolved SHA is recorded below instead.
+          ref: ${{ matrix.client }}
           submodules: recursive
           path: aerospike-client-c
+          # This job's token carries checks:write, and the only step that runs
+          # afterwards is upstream-controlled make. Nothing here needs an
+          # authenticated git against the client ('git rev-parse HEAD' does
+          # not), so keep the credential out of .git/config and, because of
+          # submodules: recursive, out of every submodule's config too.
+          persist-credentials: false
 
-      - name: Build and run the client tests
+      # Build and test are separate steps so the report can distinguish "the
+      # client would not compile in our CI image" (usually a dependency gap on
+      # our side) from "the client's tests disagree with this server" (the
+      # signal this job exists to produce). Both steps swallow their own
+      # failure so the report always runs; the report then decides which of
+      # the two fails the job -- the disagreement does, the dependency gap
+      # does not.
+      - name: Build the C client
+        id: client-build
+        continue-on-error: true
+        timeout-minutes: 20
         working-directory: aerospike-client-c
+        env:
+          CLIENT_REF: ${{ matrix.client }}
         run: |
           set -euo pipefail
+          # Record the resolved SHA for the report. Assigned in an `if` so a
+          # failure cannot end the step, and git's stderr is left visible so an
+          # unresolvable ref is diagnosable.
+          if ! sha="$(git rev-parse HEAD)"; then
+            echo "::warning::could not resolve the C client SHA for '${CLIENT_REF}'"
+            sha="unknown"
+          fi
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "Building C client ref '${CLIENT_REF}' (${sha})"
           make
-          make test
 
+      - name: Run the C client tests
+        id: client-tests
+        if: ${{ steps.client-build.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 20
+        working-directory: aerospike-client-c
+        run: |
+          # errexit has to go, and `set -uo pipefail` does NOT clear it:
+          # GitHub invokes `shell: bash` as `bash --noprofile --norc -e -o
+          # pipefail {0}`, so -e is already on before this script starts. Without
+          # `set +e` a failing suite ends the step at the pipeline below, the
+          # sentinel is never written, and the reporter reads that absence as
+          # the step having been killed -- grading a clean 1-case failure as an
+          # unbounded one.
+          set +e
+          set -uo pipefail
+          make test 2>&1 | tee "$GITHUB_WORKSPACE/$TEST_LOG"
+          rc=$?
+          # Written whether make passed or failed, so its ABSENCE means this
+          # step was killed mid-run -- a timeout-minutes kill, or the runner
+          # going away. Without it a hang that had already logged a couple of
+          # failures was filed as a tidy '2 failed test cases', because
+          # continue-on-error swallows the kill and truncates the log.
+          echo "$rc" > "$GITHUB_WORKSPACE/$TEST_SENTINEL"
+          exit "$rc"
+
+      # !cancelled() rather than always(): this must still run when an earlier
+      # step failed (to record that the client tests never ran), but reporting
+      # on a cancelled run is noise -- there is no result to report.
+      #
+      # The grading program itself lives in .github/bin so that shfmt and the
+      # pre-commit shellcheck hook reach it (both target shell *files*, so an
+      # embedded run: block is exempt), and so its branches can be exercised by
+      # .github/bin/test_report_client_test.bash instead of only ever running
+      # on a pushed six-leg matrix. Its interface is the env: map below.
+      #
+      # Gated on the server checkout because that is where the script comes
+      # from. Everything downstream of it -- a missing package artifact, a
+      # server that would not start, a client that would not build -- still
+      # reaches the reporter and still publishes a grey check.
+      - name: Report client test outcome
+        id: report
+        if: ${{ !cancelled() && steps.server-checkout.outcome == 'success' }}
+        env:
+          REF: ${{ matrix.client }}
+          DISTRO: ${{ matrix.distro }}
+          SHA: ${{ steps.client-build.outputs.sha }}
+          BUILD_OUTCOME: ${{ steps.client-build.outcome }}
+          TEST_OUTCOME: ${{ steps.client-tests.outcome }}
+          # The check run must hang off the PR's head commit, not the
+          # pull_request merge commit this job actually ran, or it lands on a
+          # commit no one is looking at and never appears in the PR's list.
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CHECKS_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash "$GITHUB_WORKSPACE/aerospike-server/.github/bin/report_client_test.bash"
+
+      # The only artifact that distinguishes "the client and the server
+      # disagree" from "the server was not there" is asd's own log, and the
+      # workspace is discarded when the job ends. The name carries both matrix
+      # dimensions or the six legs collide.
+      #
+      # Ordered AFTER the reporter and gated on the grade it publishes. Gating
+      # on the test step's own outcome made this a second, weaker predicate
+      # over different inputs, and the two disagreed: three states the reporter
+      # grades red -- asd gone, nothing parseable, counted failures under a
+      # passing exit status -- leave client-tests.outcome == 'success', so the
+      # upload was skipped on exactly the legs whose check-run body says "See
+      # asd.log in this leg's log artifact". asd.log is the one diagnostic that
+      # is NOT recoverable from the job log, because 'Start Aerospike server'
+      # redirects it to a file.
+      #
+      # The grade, and NOT steps.report.outcome. The reporter's exit status
+      # collapses success and neutral onto 0 by design, and every leg that
+      # failed before the client build grades neutral -- a package that would
+      # not download, an install that failed, a rejected ref, and above all an
+      # asd that died during cold start. Reading the outcome skipped the upload
+      # across that whole region, which is precisely where asd.log exists and
+      # is the only evidence. An empty output (the reporter skipped, or dead
+      # before it wrote one) is also not 'success', so it uploads.
+      - name: Upload the server and client test logs
+        if: ${{ !cancelled() && steps.report.outputs.conclusion != 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: logs-${{ matrix.distro }}-client-${{ matrix.client }}
+          path: |
+            ${{ env.ASD_LOG }}
+            ${{ env.TEST_LOG }}
+          retention-days: 7
+          # warn, not error: a leg that died before asd started must not turn a
+          # diagnostic step into a second failure.
+          if-no-files-found: warn
