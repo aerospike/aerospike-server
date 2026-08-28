@@ -215,7 +215,8 @@ sys_mem_info(uint64_t* free_mem_kbytes, uint32_t* free_mem_pct,
 	}
 
 	*free_mem_kbytes = mem_available;
-	*free_mem_pct = mem_total == 0 ? 0 : (mem_available * 100) / mem_total;
+	*free_mem_pct =
+			mem_total == 0 ? 0 : (uint32_t)((mem_available * 100) / mem_total);
 	*thp_mem_kbytes = anon_huge_pages;
 }
 
@@ -468,6 +469,24 @@ find_cgroup_path_v2(char* pth_buf, size_t buf_len, const char* mount_root)
 	return false;
 }
 
+// gcc 8 (RHEL 8) reports -Wformat-truncation for the cgroup path builds in
+// this function and in cgroup_mem_info() below; gcc 13 does not. The
+// truncation it describes is harmless, and the code is left as it is:
+//
+//  - snprintf() is bounded, so there is no overflow - at most size - 1 bytes
+//    are written, always NUL-terminated;
+//  - a path longer than PATH_MAX cannot be opened anyway, so clamping to
+//    PATH_MAX is the wanted behaviour, not a defect;
+//  - a truncated path either does not exist (the read fails and we move on)
+//    or names an ancestor cgroup - and this walk already visits every
+//    ancestor, keeping the smallest limit, so re-reading one changes nothing.
+//
+// Reaching it at all would need a cgroup path near 4 KB. The exception is
+// pushed/popped so it covers only these functions, not the rest of the file
+// or anything added to it later.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic warning "-Wformat-truncation"
+
 static bool
 find_smallest_cgroup_limit_v2(const char* mount_path,
 		const char* leaf_cgroup_path, uint64_t* limit_bytes,
@@ -550,6 +569,8 @@ find_smallest_cgroup_limit_v2(const char* mount_path,
 	return true;
 }
 
+#pragma GCC diagnostic pop
+
 static bool
 cgroup_stat_value(const char* stat_path, const char* key, uint64_t* value)
 {
@@ -591,6 +612,11 @@ cgroup_stat_value(const char* stat_path, const char* key, uint64_t* value)
 	cf_dyn_buf_free(&db);
 	return false;
 }
+
+// Same cgroup path builds, same reasoning as find_smallest_cgroup_limit_v2()
+// above - scoped to this function only.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic warning "-Wformat-truncation"
 
 static bool
 cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
@@ -791,6 +817,8 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 
 	return true;
 }
+
+#pragma GCC diagnostic pop
 
 //==========================================================
 // Public API - get memory info
