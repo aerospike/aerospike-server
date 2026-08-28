@@ -528,6 +528,25 @@ find_cgroup_path_v2(char* pth_buf, size_t buf_len, const char* mount_root)
 	return false;
 }
 
+// gcc 8 (RHEL 8) reports -Wformat-truncation for the cgroup path builds in
+// the two functions below; gcc 13 does not. The truncation it describes is
+// harmless, and the code is deliberately left as it is:
+//
+//  - snprintf() is bounded, so there is no overflow - at most size - 1 bytes
+//    are written, always NUL-terminated;
+//  - a path longer than PATH_MAX cannot be opened anyway, so clamping to
+//    PATH_MAX is the wanted behaviour, not a defect;
+//  - a truncated path either does not exist (the read fails and we move on)
+//    or names an ancestor cgroup - and find_smallest_cgroup_limit_v2()
+//    already visits every ancestor, keeping the smallest limit, so
+//    re-reading one changes nothing.
+//
+// Reaching it at all would need a cgroup path near 4 KB. The exception is
+// pushed/popped so it covers only these functions, not the rest of the file
+// or anything added to it later.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic warning "-Wformat-truncation"
+
 static bool
 find_smallest_cgroup_limit_v2(const char* mount_path,
 		const char* leaf_cgroup_path, uint64_t* limit_bytes,
@@ -645,6 +664,8 @@ resolve_cgroup_base_path(char* base_path, size_t base_path_sz)
 	return version;
 }
 
+#pragma GCC diagnostic pop
+
 static bool
 cgroup_parse_uint64(const char* str, uint64_t* value)
 {
@@ -711,6 +732,11 @@ cgroup_stat_value(const char* stat_path, const char* key, uint64_t* value)
 	cf_dyn_buf_free(&db);
 	return false;
 }
+
+// Same cgroup path builds, same reasoning as find_smallest_cgroup_limit_v2()
+// above - scoped to this function only.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic warning "-Wformat-truncation"
 
 static bool
 read_cgroup_memory_stats(cgroup_memory_stats* stats)
@@ -814,6 +840,8 @@ read_cgroup_memory_stats(cgroup_memory_stats* stats)
 
 	return false;
 }
+
+#pragma GCC diagnostic pop
 
 static bool
 cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
