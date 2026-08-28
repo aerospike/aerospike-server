@@ -850,14 +850,15 @@ as_bin_bits_read_exp(const as_bin* b, msgpack_in_vec* mv, as_bin* rb)
 	return bits_read(&state, b, rb);
 }
 
+COMPILER_ASSERT(AS_BITS_MODIFY_OP_START == 0);
+
 const char*
 as_bits_op_name(uint32_t op_code, bool is_modify)
 {
 	const char* name = "INVALID_BITS_OP";
 
 	if (is_modify) {
-		if (op_code >= AS_BITS_MODIFY_OP_START &&
-				op_code < AS_BITS_MODIFY_OP_END) {
+		if (op_code < AS_BITS_MODIFY_OP_END) {
 			name = bits_modify_op_table[op_code].name;
 		}
 	}
