@@ -1397,10 +1397,30 @@ compute_delta_for_replication(rw_request* rw, as_storage_rd* rd,
 		return;
 	}
 
+	// The flat span from storage is rounded up to rblocks - past the record's
+	// true end it may hold padding bytes the record never wrote. (mem/ssd have
+	// already excluded their deterministic end mark; pmem has none.) Engines
+	// that don't zero their write buffers leave stale buffer content there,
+	// which is node-local: the replica's copy of the same record generally
+	// holds different bytes at those offsets, and a patch whose dictionary
+	// references them fails the content checksum on apply. Trim the base to the
+	// exact record so both sides feed byte-identical dictionaries to zstd_wire.
+	// If the flat doesn't parse (not expected - the read path already parsed
+	// it), keep the full span to preserve today's fail-closed behavior. Mixed
+	// engine spans may then differ, but patch application rejects and triggers
+	// the full-pickle fallback.
+	uint32_t exact_sz =
+			as_flat_exact_size((const as_flat_record*)base_flat, flat_sz);
+
+	if (exact_sz != 0) {
+		flat_sz = exact_sz;
+	}
+
 	as_incr_uint64(&rd->ns->repl_wire_comp_stat.delta_attempts);
 
-	// Strip master's tree_id from the source flat so the replica's apply,
-	// running against its own (different) tree_id, sees byte-identical input.
+	// Strip master's tree_id and pmem dirty magic from the source flat so the
+	// replica's apply, running against its own local copy, sees byte-identical
+	// input.
 	// When we own a private pre-write snapshot (rw->delta_base), canonicalize it
 	// in place - no second record-sized copy. Only when falling back to
 	// rd->flat (the stored record, which must not be mutated) do we copy.
@@ -1408,7 +1428,7 @@ compute_delta_for_replication(rw_request* rw, as_storage_rd* rd,
 	uint8_t* canonical_owned = NULL;
 
 	if (rw->delta_base != NULL) {
-		as_flat_canonicalize_delta_inplace(rw->delta_base);
+		as_flat_canonicalize_delta_inplace(rw->delta_base, flat_sz);
 		canonical_base = rw->delta_base;
 	}
 	else {

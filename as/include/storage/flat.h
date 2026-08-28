@@ -58,17 +58,28 @@ struct as_storage_rd_s;
 // Per-record mandatory metadata on device.
 //
 // WARNING: delta-zstd replication relies on master and replica producing
-// byte-identical flats for the same (gen, lut) record. Today the only
-// per-node-local field is `tree_id`, and as_flat_make_delta_canonical()
-// zeros exactly that. If you add ANY new field whose value differs across
-// nodes for the same record (a node id, a per-storage-device sequence
-// number, anything stamped from local state at flatten time), you MUST
-// extend as_flat_make_delta_canonical() to neutralise it. Otherwise
+// byte-identical flats for the same (gen, lut) record. Today the fields whose
+// stored values can vary by node are `tree_id`, `magic` (pmem stamps
+// AS_FLAT_MAGIC_DIRTY on the first record written into a write buffer since
+// its last flush), and `n_rblocks` (pmem rounds the flat size, while mem/ssd
+// first include their end-mark size). as_flat_make_delta_canonical()
+// neutralises all three. If you add ANY new field whose value differs across
+// nodes for the same record (a node id, a per-storage-device sequence number,
+// anything stamped from local state at flatten time), you MUST extend
+// as_flat_make_delta_canonical() to neutralise it. Otherwise
 // delta-zstd will silently corrupt: receivers will apply patches against
 // a divergent dictionary, get unexpected bytes, and the resulting failures
 // will surface only as delta_reject_apply stat increments with no warning.
 // The COMPILER_ASSERT below pins the struct size as of this design so any
 // such change forces a recompile and a re-examination of canonicalization.
+//
+// The rounding padding PAST a flat record's true end is node-local too:
+// storage reads span an rblock-rounded allocation, and engines that don't zero
+// their write buffers can expose stale content there. The mem/ssd read span
+// already excludes its deterministic end mark, and pmem has no end mark. The
+// delta paths trim the base to as_flat_exact_size() before canonicalising, so
+// that hazard is contained there - but it is why the base must never be
+// widened back to the rounded span.
 typedef struct as_flat_record_s {
 	uint32_t magic;
 
@@ -199,19 +210,30 @@ const uint8_t* as_flat_unpack_record_meta(const as_flat_record* flat,
 bool as_flat_pickle_is_storage_compressed(const uint8_t* pickle,
 		uint32_t pickle_sz);
 
-// Copy `size` bytes from `src` to `dst`, then zero the `tree_id` field in
-// dst's flat header. Used by the wire-compression delta path so that master
-// and replica produce byte-identical zstd_wire input for the same record at
-// the same (gen, lut), regardless of their per-partition tree_id values
-// (which are node-local and stamped on the on-disk flat).
+// Copy `size` bytes from `src` to `dst`, then canonicalise the fields whose
+// stored values may be node-local: zero `tree_id`, normalise `magic` (pmem's
+// dirty marker), and derive `n_rblocks` from `size`. Used by the
+// wire-compression delta path so that master and replica produce byte-identical
+// zstd_wire input for the same record at the same (gen, lut), regardless of
+// node-local state stamped on the on-disk flat.
 //
 // `size` must be >= sizeof(as_flat_record). `dst` and `src` must not overlap.
 void as_flat_make_delta_canonical(void* dst, const void* src, uint32_t size);
 
-// Same tree_id neutralisation as as_flat_make_delta_canonical(), but applied in
-// place to a buffer the caller already owns - no copy. Use when the source is a
-// private buffer (e.g. rw->delta_base) rather than the stored record.
-void as_flat_canonicalize_delta_inplace(void* flat);
+// Same header canonicalisation as as_flat_make_delta_canonical(), but applied
+// in place to a buffer the caller already owns - no copy. Use when the source
+// is a private buffer (e.g. rw->delta_base) rather than the stored record.
+void as_flat_canonicalize_delta_inplace(void* flat, uint32_t size);
+
+// The exact size of a flat record - the bytes the record actually wrote,
+// excluding rblock-rounding padding that may follow it in storage (up to
+// max_sz, the span the caller holds - at most one rblock of slack). The
+// mem/ssd read span has already excluded its end mark. Those trailing bytes
+// are stale write-buffer content on engines that don't zero their buffers,
+// i.e. node-local garbage - anything that must be byte-identical across nodes
+// (the delta-zstd base) must trim to this size first. A pure function of the
+// record bytes. Returns 0 if the flat doesn't parse.
+uint32_t as_flat_exact_size(const as_flat_record* flat, uint32_t max_sz);
 bool as_flat_fix_padded_rr(struct as_remote_record_s* rr); // TODO - remove in "six months"
 int as_flat_unpack_remote_bins(struct as_remote_record_s* rr,
 		struct as_bin_s* bins);

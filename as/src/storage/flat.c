@@ -147,25 +147,66 @@ as_flat_pickle_is_storage_compressed(const uint8_t* pickle, uint32_t pickle_sz)
 			opt_meta.cm.method != AS_COMPRESSION_NONE;
 }
 
+static inline void
+canonicalize_delta_header(as_flat_record* flat, uint32_t size)
+{
+	// tree_id is per-partition-per-node. pmem's dirty marker is also
+	// node-local. n_rblocks depends on whether an engine includes END_MARK_SZ
+	// before rounding its allocation. The delta dictionary needs the pickle
+	// representation of all three, independent of local storage layout.
+	flat->tree_id = 0;
+	flat->magic = AS_FLAT_MAGIC;
+	flat->n_rblocks = SIZE_TO_N_RBLOCKS(size);
+}
+
 void
 as_flat_make_delta_canonical(void* dst, const void* src, uint32_t size)
 {
 	memcpy(dst, src, size);
 
-	// tree_id is per-partition-per-node — master and replica generally have
-	// different values for the same partition. zstd_wire would see the byte
-	// differ and the patch would fail to apply. Zero it before computing /
-	// applying the patch; the receiver's storage path stamps the local
-	// tree_id when the pickle is written back to disk.
-	((as_flat_record*)dst)->tree_id = 0;
+	canonicalize_delta_header((as_flat_record*)dst, size);
 }
 
 void
-as_flat_canonicalize_delta_inplace(void* flat)
+as_flat_canonicalize_delta_inplace(void* flat, uint32_t size)
 {
-	// In-place tree_id neutralisation - see as_flat_make_delta_canonical() for
-	// why. The caller owns this buffer, so no copy is needed.
-	((as_flat_record*)flat)->tree_id = 0;
+	canonicalize_delta_header((as_flat_record*)flat, size);
+}
+
+uint32_t
+as_flat_exact_size(const as_flat_record* flat, uint32_t max_sz)
+{
+	if (max_sz < sizeof(as_flat_record)) {
+		return 0;
+	}
+
+	const uint8_t* end = (const uint8_t*)flat + max_sz;
+	as_flat_opt_meta opt_meta = { { 0 } };
+
+	const uint8_t* flat_bins = as_flat_unpack_record_meta(flat, end, &opt_meta);
+
+	if (flat_bins == NULL) {
+		return 0;
+	}
+
+	const uint8_t* exact_end;
+
+	if (opt_meta.cm.method == AS_COMPRESSION_NONE) {
+		exact_end = as_flat_check_packed_bins(flat_bins, end, opt_meta.n_bins);
+
+		if (exact_end == NULL) {
+			return 0;
+		}
+	}
+	else {
+		exact_end = flat_bins + opt_meta.cm.comp_sz;
+
+		if (exact_end > end) {
+			return 0;
+		}
+	}
+
+	return (uint32_t)(exact_end - (const uint8_t*)flat);
 }
 
 // Caller has already checked that end is within read buffer.
@@ -271,22 +312,14 @@ as_flat_fix_padded_rr(as_remote_record* rr)
 		return true; // new node sent this - already exact
 	}
 
-	if (rr->cm.method == AS_COMPRESSION_NONE) {
-		const uint8_t* flat_bins = rr->pickle + rr->meta_sz;
-		const uint8_t* end = rr->pickle + rr->pickle_sz;
+	uint32_t exact_sz = as_flat_exact_size((const as_flat_record*)rr->pickle,
+			(uint32_t)rr->pickle_sz);
 
-		const uint8_t* exact_end =
-				as_flat_check_packed_bins(flat_bins, end, rr->n_bins);
-
-		if (exact_end == NULL) {
-			return false;
-		}
-
-		rr->pickle_sz = exact_end - rr->pickle;
+	if (exact_sz == 0) {
+		return false;
 	}
-	else {
-		rr->pickle_sz = rr->meta_sz + rr->cm.comp_sz;
-	}
+
+	rr->pickle_sz = exact_sz;
 
 	return true;
 }

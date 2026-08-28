@@ -302,9 +302,22 @@ apply_delta_replication(as_partition_reservation* rsv, cf_digest* keyd,
 		return AS_ERR_RECORD_VERSION_MISMATCH;
 	}
 
-	// Strip our local tree_id from the source flat so it matches the master's
-	// canonicalised dictionary input (see compute_delta_for_replication +
-	// as_flat_make_delta_canonical).
+	// Same trim as the master's compute_delta_for_replication() - the rounded
+	// flat span may hold stale node-local padding past the record's true end,
+	// and the master diffed against its exact record. (mem/ssd have already
+	// excluded their deterministic end mark; pmem has none.) Mirror the
+	// master's parse-failure fallback to preserve today's fail-closed behavior;
+	// mixed engine spans may then differ, but patch application rejects and
+	// triggers the full-pickle fallback.
+	uint32_t exact_sz = as_flat_exact_size(rd.flat, old_flat_sz);
+
+	if (exact_sz != 0) {
+		old_flat_sz = exact_sz;
+	}
+
+	// Canonicalise our local tree_id, pmem dirty magic and engine-dependent
+	// n_rblocks so the source flat matches the master's dictionary input (see
+	// compute_delta_for_replication + as_flat_make_delta_canonical).
 	uint8_t* canonical_flat = cf_malloc(old_flat_sz);
 	as_flat_make_delta_canonical(canonical_flat, rd.flat, old_flat_sz);
 
