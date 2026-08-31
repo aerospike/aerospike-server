@@ -457,9 +457,7 @@ read_touch_master(rw_request* rw, as_transaction* tr)
 		return TRANS_DONE;
 	}
 
-	uint64_t old_last_update_time = r->last_update_time;
-	uint16_t old_generation = r->generation; // includes regime!
-	uint32_t old_void_time = r->void_time;
+	as_record old_r = *r;
 
 	uint64_t now = as_transaction_epoch_ms(tr);
 
@@ -468,21 +466,34 @@ read_touch_master(rw_request* rw, as_transaction* tr)
 	// Don't increment generation - causes extraneous gen-check failures.
 
 	// If a write extended the void-time we don't need to touch.
-	if (old_void_time >= r->void_time) {
-		r->last_update_time = old_last_update_time;
-		r->generation = old_generation;
-		r->void_time = old_void_time;
+	if (old_r.void_time >= r->void_time) {
+		unwind_index_metadata(&old_r, r);
 		read_touch_master_done(tr, &r_ref, &rd, AS_ERR_KEY_BUSY);
 		return TRANS_DONE;
 	}
 
+	repl_compression_ctx repl_comp;
+
+	// Both compression helpers run under the record's olock - which is sprig-
+	// granular - exactly as they do on the write and UDF paths. In delta-zstd
+	// mode the patch build's CPU (and so the lock hold) scales with record
+	// size. Accepted rather than bounded here: a record is touched at most
+	// once per TTL-extension window (the threshold check in as_read_touch()
+	// and the void-time check above both go quiet after a touch lands), and
+	// concurrent touches of the same key collapse in rw_request_hash_insert()
+	// - so per-sprig, the hold recurs no faster than the namespace's touch
+	// cadence, and a write to the same record would pay the identical hold.
+
+	// Capture a delta base before the storage write may free the old flat.
+	repl_compression_pre_write(rw, &rd, tr, &repl_comp);
+
 	if ((result = as_storage_record_write(&rd)) < 0) {
-		r->last_update_time = old_last_update_time;
-		r->generation = old_generation;
-		r->void_time = old_void_time;
+		unwind_index_metadata(&old_r, r);
 		read_touch_master_done(tr, &r_ref, &rd, -result);
 		return TRANS_DONE;
 	}
+
+	repl_compression_post_write(rw, &rd, &old_r, &repl_comp);
 
 	pickle_all(&rd, rw);
 
@@ -494,7 +505,7 @@ read_touch_master(rw_request* rw, as_transaction* tr)
 	// Save for XDR submit outside record lock.
 	as_xdr_submit_info submit_info;
 
-	as_xdr_get_submit_info(r, old_last_update_time, &submit_info);
+	as_xdr_get_submit_info(r, old_r.last_update_time, &submit_info);
 
 	as_storage_record_close(&rd);
 	as_record_done(&r_ref, ns);
