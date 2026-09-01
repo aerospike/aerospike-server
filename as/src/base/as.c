@@ -39,6 +39,7 @@
 #include <syscall.h>
 #include <unistd.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
 
 #include "cf_thread.h"
@@ -56,6 +57,7 @@
 #include "base/datamodel.h"
 #include "base/health.h"
 #include "base/index.h"
+#include "base/index_checkpoint.h"
 #include "base/json_init.h"
 #include "base/masking.h"
 #include "base/mrt_monitor.h"
@@ -93,10 +95,9 @@
 #define AS_SCHEMA_HASH "unknown"
 #endif
 
-// Preview features that can be enabled by name via the --preview command-line
-// option. Each bit must be nonzero: parse_preview_features() uses 0 as its
-// "invalid list" sentinel.
-#define AS_PREVIEW_FEAT_YAML_CONFIG (1u << 0)
+// The AS_PREVIEW_FEAT_* bit flags for --preview live in cfg.h (single source, so
+// the config layer can gate a preview feature by name). Each bit must be nonzero:
+// as_preview_features_parse() uses 0 as its "invalid list" sentinel.
 
 // getopt_long value for --preview. It has no short form, so use a sentinel
 // above the printable-char range instead of a letter.
@@ -110,7 +111,13 @@ static const struct {
 	uint32_t flag;
 } PREVIEW_FEATS[] = {
 	{ "yaml-config", AS_PREVIEW_FEAT_YAML_CONFIG },
+	{ "index-checkpoint", AS_PREVIEW_FEAT_INDEX_CHECKPOINT },
 };
+
+// The preview features enabled at startup (parsed from the command line). Stored
+// so the config layer can gate a preview feature by name; see
+// as_preview_feature_enabled().
+static uint32_t g_enabled_preview_features = 0;
 
 // Command line options for the Aerospike server.
 static const struct option CMD_OPTS[] = {
@@ -212,8 +219,20 @@ static const char SMD_DIR_NAME[] = "/smd";
 // Not cf_mutex, which won't tolerate unlock if already unlocked.
 pthread_mutex_t g_main_deadlock = PTHREAD_MUTEX_INITIALIZER;
 
-bool g_startup_complete = false;
-bool g_shutdown_started = false;
+// Set to 1 by the main thread once startup is complete. Read by the signal
+// handlers and the checkpoint-save info command (which must refuse to touch
+// g_main_deadlock before it exists), so accessed via as_*_uint32 atomics.
+uint32_t g_startup_complete = 0;
+// Claimed exactly once (0 -> 1, via as_cas_uint32) by whichever thread first
+// initiates shutdown - a signal handler or the checkpoint-save info thread -
+// so only that thread unlocks g_main_deadlock. A non-atomic bool would let two
+// threads both pass the check and both unlock the about-to-be-destroyed mutex.
+uint32_t g_shutdown_started = 0;
+// Set (0 -> 1) if as_storage_shutdown() reported a failure, so the SIGTERM/SIGINT reap
+// handlers - which cannot see as_run()'s stack-local storage_ok - fold it into the process
+// exit status exactly as the normal exit does. Stored before the park's release-store of
+// s_parked, so the reaper's acquire-load of s_parked already makes it visible.
+uint32_t g_storage_shutdown_failed = 0;
 
 //==========================================================
 // Forward declarations.
@@ -222,7 +241,6 @@ bool g_shutdown_started = false;
 // signal.c doesn't have header file.
 extern void as_signal_setup(void);
 
-static uint32_t parse_preview_features(const char* arg);
 static void preview_features_str(char* buf, size_t cap);
 static void write_pidfile(char* pidfile);
 static void validate_directory(const char* path, const char* log_tag);
@@ -289,13 +307,29 @@ as_run(int argc, char** argv)
 		case 'c':
 			cold_start_cmd = true;
 			break;
-		case 'n':
-			instance = (uint32_t)strtol(optarg, NULL, 0);
+		case 'n': {
+			// The instance id occupies a 4-bit field in every xmem key (0-15); a
+			// larger value overflows into the key's magic byte and mis-routes every
+			// segment. Parse strictly (cf_log isn't initialized yet): reject an empty
+			// arg, non-numeric or trailing junk ("abc" must NOT read as 0), a negative
+			// (strtoul silently wraps it), an out-of-range magnitude, or > 15.
+			char* end = NULL;
+			errno = 0;
+			unsigned long v = strtoul(optarg, &end, 0);
+			if (optarg[0] == '\0' || end == optarg || *end != '\0' ||
+					errno != 0 || strchr(optarg, '-') != NULL || v > 15) {
+				fprintf(stderr,
+						"invalid --instance '%s'; valid range is 0-15\n%s\n",
+						optarg, USAGE);
+				return 1;
+			}
+			instance = (uint32_t)v;
 			break;
+		}
 		case OPT_PREVIEW: {
 			// A valid list always sets at least one bit, so 0 means failure
 			// (unknown feature name or effectively empty list).
-			uint32_t features = parse_preview_features(optarg);
+			uint32_t features = as_preview_features_parse(optarg);
 			if (features == 0) {
 				char valid[256];
 				preview_features_str(valid, sizeof(valid));
@@ -328,6 +362,10 @@ as_run(int argc, char** argv)
 	// the configuration file, and creates as_namespace objects. (Return value
 	// is a shortcut pointer to the global runtime configuration instance.)
 	as_config* c = NULL;
+
+	// Publish the enabled set before as_config_init() (which runs config
+	// post-processing) so the config layer can gate a preview feature by name.
+	as_preview_features_set(preview_features);
 
 	if ((preview_features & AS_PREVIEW_FEAT_YAML_CONFIG) != 0) {
 		// Verify that the schema file hasn't been modified since installation.
@@ -404,6 +442,10 @@ as_run(int argc, char** argv)
 	validate_directory(c->mod_lua.user_path, "Lua user");
 	validate_smd_directory();
 
+	// The euid-dependent index-checkpoint-path checks (writable by / owned by the service
+	// uid) must run here, after privsep - not in cfg_post_process, which is still root.
+	as_index_checkpoint_validate_path_writable();
+
 	// Initialize subsystems. At this point we're allocating local resources,
 	// starting worker threads, etc. (But no communication with other server
 	// nodes or clients yet.)
@@ -478,6 +520,17 @@ as_run(int argc, char** argv)
 	as_udf_init(); // user-defined functions
 	as_batch_init(); // batch transaction handling
 
+	// Delete every namespace's on-disk checkpoint NOW, durably - AFTER as_namespaces_setup()
+	// hydrated from it and storage is up, but BEFORE the node joins the cluster or serves any
+	// transaction (that begins in the *_start block just below: as_fabric_start /
+	// as_service_start). Defrag may already be relocating records at this point, but it never
+	// drops them and the node is not yet reachable, so nothing has diverged from the checkpoint.
+	// Once the node can take writes it diverges and must never re-adopt the checkpoint; deleting
+	// here - as late as possible, but before any divergence - closes the silent-rollback window
+	// (single-copy model). A boot that dies before this point re-hydrates the still-present
+	// checkpoint, which is correct: nothing was served, so nothing diverged.
+	as_index_checkpoint_delete_on_startup();
+
 	// Start subsystems. At this point we may begin communicating with other
 	// cluster nodes, and ultimately with clients.
 
@@ -510,16 +563,21 @@ as_run(int argc, char** argv)
 	// Stop this thread from finishing. Intentionally deadlocking on a mutex is
 	// a remarkably efficient way to do this.
 	pthread_mutex_lock(&g_main_deadlock);
-	g_startup_complete = true;
+	as_store_uint32(&g_startup_complete, 1);
 	pthread_mutex_lock(&g_main_deadlock);
 
 	// When the service is running, you are here (deadlocked) - the signals that
 	// stop the service (yes, these signals always occur in this thread) will
 	// unlock the mutex, allowing us to continue.
 
-	g_shutdown_started = true;
+	// A claimant (signal handler / info thread) already won the claim and unlocked
+	// us; store is idempotent, kept for clarity.
+	as_store_uint32(&g_shutdown_started, 1);
 	pthread_mutex_unlock(&g_main_deadlock);
-	pthread_mutex_destroy(&g_main_deadlock);
+	// Do NOT pthread_mutex_destroy(&g_main_deadlock): the claimant may be an info
+	// thread still returning from its cross-thread unlock, and destroying a mutex
+	// referenced by another thread is undefined. The process _exit()s just below,
+	// so destroying it bought nothing.
 
 	//--------------------------------------------
 	// Received a shutdown signal.
@@ -538,22 +596,55 @@ as_run(int argc, char** argv)
 	// Make sure committed SMD files are in sync with SMD callback activity.
 	as_smd_shutdown();
 
-	if (! as_storage_shutdown(instance)) {
-		cf_warning(AS_AS, "failed clean shutdown - exiting");
-		_exit(1);
+	bool storage_ok = as_storage_shutdown(instance);
+
+	if (! storage_ok) {
+		// Publish for the reap handlers (signal.c) - see g_storage_shutdown_failed.
+		as_store_uint32(&g_storage_shutdown_failed, 1);
+		cf_warning(AS_AS, "failed clean shutdown");
+	}
+	else {
+		cf_info(AS_AS, "finished clean shutdown - exiting");
 	}
 
-	cf_info(AS_AS, "finished clean shutdown - exiting");
+	// Index checkpoint (enterprise): if a 'checkpoint-save' was issued, the
+	// index (and memory-ns data) was copied during as_storage_shutdown(). Park
+	// here serving the info/service listener for 'checkpoint-status' until SIGTERM
+	// reaps us (sig_handle_term -> _exit once g_shutdown_started) - even if storage
+	// shutdown reported a failure, so an operator polling checkpoint-status sees
+	// the per-namespace result instead of the process simply vanishing. Returns
+	// immediately (and is a no-op in CE) when no checkpoint was requested.
+	as_index_checkpoint_park_on_shutdown();
 
 	// If shutdown was totally clean (all threads joined) we could just return,
-	// but for now we exit to make sure all threads die.
+	// but for now we exit to make sure all threads die. A FAILED checkpoint must exit
+	// non-zero too: as_storage_shutdown returns true even when a per-namespace
+	// checkpoint failed, so without this an orchestrator scripting on $? is told the
+	// save succeeded and replaces the pod, which then cold-starts with no warning.
+	bool clean_exit = storage_ok && ! as_index_checkpoint_any_failed();
 #ifdef DOPROFILE
-	exit(0); // exit(0) so profile build actually dumps gmon.out
+	exit(clean_exit ? 0 : 1); // exit() so profile build dumps gmon.out
 #else
-	_exit(0);
+	_exit(clean_exit ? 0 : 1);
 #endif
 
 	return 0;
+}
+
+//==========================================================
+// Public API.
+//
+
+bool
+as_preview_feature_enabled(uint32_t flag)
+{
+	return (g_enabled_preview_features & flag) != 0;
+}
+
+void
+as_preview_features_set(uint32_t features)
+{
+	g_enabled_preview_features = features;
 }
 
 //==========================================================
@@ -588,8 +679,8 @@ preview_features_str(char* buf, size_t cap)
 // Returns 0 if any token is not a known feature or if the list is effectively
 // empty; a valid list always sets at least one bit, so the caller treats 0 as a
 // startup failure.
-static uint32_t
-parse_preview_features(const char* arg)
+uint32_t
+as_preview_features_parse(const char* arg)
 {
 	uint32_t features = 0;
 	char* dup = cf_strdup(arg); // strtok_r mutates - don't touch optarg/argv

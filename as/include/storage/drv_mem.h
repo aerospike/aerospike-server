@@ -28,6 +28,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <sys/types.h> // key_t
 
 #include "aerospike/as_arch.h"
 #include "aerospike/as_atomic.h"
@@ -158,6 +159,8 @@ typedef struct drv_mem_s {
 
 	uint64_t file_size;
 	int file_id;
+	key_t xmem_key; // SysV key of this stripe's segment (0 for a device/file backing);
+			// the authoritative key for the data checkpoint, set beside mem->name
 
 	uint32_t open_flag;
 
@@ -207,8 +210,11 @@ void clear_encryption_keys(struct as_namespace_s* ns);
 void adjust_versions(const struct as_namespace_s* ns, struct drv_pmeta_s* pmeta);
 void flush_final_cfg(struct as_namespace_s* ns);
 
+void as_storage_mem_stripe_geometry(uint64_t data_size, uint32_t* p_n_stripes,
+		size_t* p_stripe_sz);
+
 void cold_start_sweep_device(drv_mems* mems, drv_mem* mem);
-void cold_start_sweep(drv_mems* mems, drv_mem* mem);
+void cold_start_sweep(drv_mems* mems, drv_mem* mem, bool load_index);
 void cold_start_fill_orig(const drv_cold_start_dev* dev,
 		const struct as_flat_record_s* flat, uint64_t rblock_id,
 		const struct as_flat_opt_meta_s* opt_meta, struct as_index_tree_s* tree,

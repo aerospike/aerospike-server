@@ -74,6 +74,7 @@
 #include "base/features.h"
 #include "base/health.h"
 #include "base/index.h"
+#include "base/index_checkpoint.h"
 #include "base/masking.h"
 #include "base/mrt_monitor.h"
 #include "base/nsup.h"
@@ -387,6 +388,8 @@ static const as_info_cmd SPECS[] = {
 	{ .name="alumni-tls-alt",          .fn=as_service_list_dynamic,     .client_only=true,  .ee_only=true,  .perm=PERM_NONE           },
 	{ .name="alumni-tls-std",          .fn=as_service_list_dynamic,     .client_only=true,  .ee_only=true,  .perm=PERM_NONE           },
 	{ .name="best-practices",          .fn=cmd_best_practices,          .client_only=false, .ee_only=false, .perm=PERM_NONE           },
+	{ .name="checkpoint-save",         .fn=as_index_checkpoint_save_cmd,     .client_only=false, .ee_only=true,  .perm=PERM_SERVICE_CTRL   },
+	{ .name="checkpoint-status",       .fn=as_index_checkpoint_status_cmd,   .client_only=false, .ee_only=true,  .perm=PERM_SERVICE_CTRL   },
 	{ .name="cluster-name",            .fn=cmd_cluster_name,            .client_only=false, .ee_only=false, .perm=PERM_NONE           },
 	{ .name="cluster-stable",          .fn=cmd_cluster_stable,          .client_only=false, .ee_only=false, .perm=PERM_NONE           },
 	{ .name="config-get",              .fn=as_cfg_info_cmd_get_config,  .client_only=true,  .ee_only=false, .perm=PERM_NONE           },
@@ -932,7 +935,16 @@ run_info(void* arg)
 			cf_dyn_buf_append_char(&db, EOL);
 		}
 		else if (authenticate(fd_h, &db)) {
-			if (proto->sz == 0) {
+			if (as_index_checkpoint_in_shutdown() && proto->sz == 0) {
+				// During the checkpoint-save park the namespaces are half-dismantled;
+				// the empty-info summary reads their state and would bypass handle_cmd's
+				// admit gate. Reject it here so only checkpoint-status / checkpoint-save
+				// (which carry a command and are gated in handle_cmd) are served.
+				as_info_respond_error(&db, AS_ERR_FORBIDDEN,
+						"checkpoint-save in progress - only checkpoint-status and "
+						"checkpoint-save are available");
+			}
+			else if (proto->sz == 0) {
 				info_summary(&db); // no commands specified
 			}
 			else {
@@ -1117,6 +1129,31 @@ handle_cmd(const as_info_cmd* cmd, const char* params, as_file_handle* fd_h,
 			append_security_error(db, result, perm);
 			return;
 		}
+	}
+
+	// Once 'checkpoint-save' fires, the node parks the info port while namespaces are
+	// torn down and copied, so running an arbitrary admin command against that
+	// half-dismantled state is a memory-safety hazard. Only the two checkpoint commands
+	// are allowed through: 'checkpoint-status' (read-only) and a re-issued
+	// 'checkpoint-save' (idempotent - it only reads ckpt_state and reports it, never
+	// re-runs the save). Scoped to the checkpoint feature (not any graceful shutdown),
+	// and checked after authentication so an unauthenticated client can't probe
+	// shutdown state via a perm'd command.
+	//
+	// This deliberately also blocks the PERM_NONE discovery commands (partitions/
+	// replicas/peers/statistics) an SDK or LB might poll: some of them read storage that
+	// as_storage_shutdown has already torn down (e.g. 'statistics'), and by this point the
+	// node has left the cluster (heartbeat/exchange are down), so answering "forbidden"
+	// is the honest "this node is leaving" signal. index-checkpoint is a preview feature;
+	// if operators need a health probe to stay live through the park, narrow the allowlist
+	// to the commands proven safe post-shutdown then (do NOT just open it to PERM_NONE).
+	if (as_index_checkpoint_in_shutdown() &&
+			strcmp(cmd->name, "checkpoint-status") != 0 &&
+			strcmp(cmd->name, "checkpoint-save") != 0) {
+		as_info_respond_error(db, AS_ERR_FORBIDDEN,
+				"checkpoint-save in progress - only checkpoint-status and "
+				"checkpoint-save are available");
+		return;
 	}
 
 	as_info_cmd_args args = {

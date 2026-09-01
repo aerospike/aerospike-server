@@ -36,6 +36,8 @@
 #include <ucontext.h>
 #include <unistd.h>
 
+#include "aerospike/as_atomic.h"
+
 #include "cf_thread.h"
 #include "enhanced_alloc.h"
 #include "log.h"
@@ -65,7 +67,13 @@ static const char* const signal_str[] = { [SIGINT] = "INT",
 
 // The mutex that the main function deadlocks on after starting the service.
 extern pthread_mutex_t g_main_deadlock;
-extern bool g_startup_complete;
+extern uint32_t g_startup_complete;
+extern uint32_t g_shutdown_started;
+extern uint32_t g_storage_shutdown_failed;
+
+extern bool as_index_checkpoint_is_parked(void);
+extern bool as_index_checkpoint_any_failed(void);
+extern void as_index_checkpoint_note_reap_signal(void);
 
 //==========================================================
 // Forward declarations.
@@ -192,6 +200,19 @@ sig_handle_hup(int sig_num, siginfo_t* info, void* ctx)
 	cf_log_rotate();
 }
 
+// Exit status when this handler reaps a parked (checkpoint-save) node: non-zero if the
+// checkpoint failed OR storage shutdown failed - matching as.c's normal exit, and the same
+// for either signal, so an orchestrator scripting on $? is never told a clean outcome for a
+// failed save/shutdown depending on which signal reaped or whether the park timed out.
+static int
+reap_exit_code(void)
+{
+	return (as_load_uint32(&g_storage_shutdown_failed) != 0 ||
+				   as_index_checkpoint_any_failed())
+			? 1
+			: 0;
+}
+
 // We get here on cf_crash_nostack(), cf_assert_nostack(), or Ctrl-C when
 // running in foreground.
 static void
@@ -202,9 +223,24 @@ sig_handle_int(int sig_num, siginfo_t* info, void* ctx)
 	log_abort(sig_num);
 	log_siginfo(info);
 
-	if (! g_startup_complete) {
+	if (as_load_uint32(&g_startup_complete) == 0) {
 		cf_warning(AS_AS, "startup was not complete, exiting immediately");
 		_exit(1);
+	}
+
+	// Atomically claim the shutdown. Exactly one caller wins the 0 -> 1 CAS and unlocks
+	// g_main_deadlock. A loser must not unlock again; it exits only when reaping the parked
+	// node, not when a first signal's ordinary shutdown is still in progress (see
+	// sig_handle_term for the full rationale).
+	if (! as_cas_uint32(&g_shutdown_started, 0, 1)) {
+		if (as_index_checkpoint_is_parked()) {
+			_exit(reap_exit_code()); // reap the parked node
+		}
+
+		// A checkpoint shutdown heading into its park (not parked yet) would otherwise
+		// drop this reap and hold the full timeout - record it so the park exits at once.
+		as_index_checkpoint_note_reap_signal();
+		return; // second signal during an in-flight shutdown - let it complete
 	}
 
 	pthread_mutex_unlock(&g_main_deadlock);
@@ -227,9 +263,31 @@ sig_handle_term(int sig_num, siginfo_t* info, void* ctx)
 				"SIGTERM received from kernel or unknown source, shutting down");
 	}
 
-	if (! g_startup_complete) {
+	if (as_load_uint32(&g_startup_complete) == 0) {
 		cf_warning(AS_AS, "startup was not complete, exiting immediately");
 		_exit(0);
+	}
+
+	// Atomically claim the shutdown. Exactly one caller wins the 0 -> 1 CAS and unlocks
+	// g_main_deadlock. A racing claimant that LOSES must not unlock the about-to-be-
+	// destroyed mutex again - but whether it should EXIT depends on why it lost:
+	//  - It lost to the checkpoint-save info thread and the node is now PARKED: this
+	//    handler is the reaper, so _exit(0).
+	//  - It lost to a first SIGTERM whose ordinary clean shutdown is still in progress
+	//    (e.g. mid as_storage_shutdown): exiting here would abort that shutdown before the
+	//    headers are stamped TRUSTED, forcing a needless cold rebuild. Return (no-op) and
+	//    let the winner finish.
+	if (! as_cas_uint32(&g_shutdown_started, 0, 1)) {
+		if (as_index_checkpoint_is_parked()) {
+			// Reap the parked node - see reap_exit_code (folds in both the failed
+			// checkpoint and a failed storage shutdown, matching as.c's normal exit).
+			_exit(reap_exit_code());
+		}
+
+		// A checkpoint shutdown heading into its park (not parked yet) would otherwise
+		// drop this reap and hold the full timeout - record it so the park exits at once.
+		as_index_checkpoint_note_reap_signal();
+		return; // second signal during an in-flight shutdown - let it complete
 	}
 
 	pthread_mutex_unlock(&g_main_deadlock);

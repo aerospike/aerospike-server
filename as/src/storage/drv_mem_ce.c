@@ -122,7 +122,7 @@ flush_final_cfg(as_namespace* ns)
 void
 cold_start_sweep_device(drv_mems* mems, drv_mem* mem)
 {
-	cold_start_sweep(mems, mem);
+	cold_start_sweep(mems, mem, true); // load_index
 }
 
 void

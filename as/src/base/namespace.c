@@ -108,6 +108,13 @@ as_namespace_create(const char* name)
 	ns->evict_hist_buckets =
 			10000; // for 30 day TTL, bucket width is 4 minutes 20 seconds
 	ns->evict_tenths_pct = 5; // default eviction amount is 0.5%
+	ns->index_checkpoint_compression =
+			true; // gzip checkpoint blocks unless disabled
+	// Parallel checkpoint-copy workers; the default here plus the [1,16] range are
+	// enforced by both config parsers (cfg.c cfg_u32(&line,1,16) and the YAML
+	// handle_index_checkpoint_threads). EE reads this value directly (ckpt_threads());
+	// there is no sentinel.
+	ns->n_index_checkpoint_threads = 16;
 	ns->index_stage_size = 1024L * 1024L * 1024L; // 1G
 	ns->max_record_size = 1024 * 1024; // 1M
 	ns->migrate_order = 5;

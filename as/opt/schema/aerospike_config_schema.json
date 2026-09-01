@@ -457,6 +457,13 @@
           "dynamic": false,
           "enterpriseOnly": false
         },
+        "index-checkpoint-path": {
+          "type": "string",
+          "default": "",
+          "description": "",
+          "dynamic": false,
+          "enterpriseOnly": true
+        },
         "info-max-ms": {
           "oneOf": [
             { "type": "integer", "minimum": 500, "maximum": 10000 },
@@ -2067,6 +2074,22 @@
               "dynamic": true,
               "enterpriseOnly": true
             },
+            "index-checkpoint-compression": {
+              "type": "boolean",
+              "default": true,
+              "description": "",
+              "dynamic": false,
+              "enterpriseOnly": true
+            },
+            "index-checkpoint-threads": {
+              "type": "integer",
+              "default": 16,
+              "minimum": 1,
+              "maximum": 16,
+              "description": "",
+              "dynamic": false,
+              "enterpriseOnly": true
+            },
             "index-stage-size": {
               "oneOf": [
                 { "type": "integer", "minimum": 134217728, "maximum": 17179869184 },
@@ -2357,6 +2380,13 @@
               "description": "",
               "dynamic": true,
               "enterpriseOnly": false
+            },
+            "skip-checkpoint": {
+              "type": "boolean",
+              "default": false,
+              "description": "",
+              "dynamic": true,
+              "enterpriseOnly": true
             },
             "stop-writes-sys-memory-pct": {
               "type": "integer",

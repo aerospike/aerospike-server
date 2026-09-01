@@ -41,6 +41,7 @@
 #include "base/batch.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/index_checkpoint.h"
 #include "base/proto.h"
 #include "base/security.h"
 #include "base/stats.h"
@@ -123,6 +124,12 @@ as_tsvc_process_transaction(as_transaction* tr)
 	// inside that pointer. This path builds no client reply, so it wants no
 	// details either: skip arming and run unarmed (verbosity is off between
 	// transactions), so the ship filter's own eval stages nothing.
+	//
+	// The index-checkpoint park gate for this path lives inside as_xdr_read (EE
+	// xdr/reader.c): it can't share the gate below because a ship_request must be
+	// disposed through the DC's own retry path (as_dc_client_cb), not answered with a
+	// client/proxy reply. reader.c requeues the read as retryable before reserving a
+	// partition, so it never blocks on the lock as_storage_shutdown holds.
 	if (tr->msgp->proto.type == PROTO_TYPE_INTERNAL_XDR) {
 		as_xdr_read(tr);
 		return;
@@ -171,6 +178,35 @@ as_tsvc_process_transaction(as_transaction* tr)
 		as_error_details_set_fmt(AS_SUB_NONE, "unknown namespace %.*s",
 				(int)ns_sz, nf->data);
 		as_transaction_error(tr, NULL, AS_ERR_NAMESPACE);
+		goto Cleanup;
+	}
+
+	// Index-checkpoint (EE): a 'checkpoint-save' has begun the clean shutdown - storage
+	// is being (or has been) torn down and the node is parking to be reaped by the
+	// orchestrator. Reject transactions here, at the dispatch funnel and before any
+	// partition/storage access, so a client (or proxied) request arriving during the
+	// bounded park fast-fails with a retryable UNAVAILABLE instead of running against
+	// half-shut-down state (where it would hang for the whole park). Mirrors the
+	// admin-port gate in thr_info. CE: in_shutdown is always false (no feature).
+	if (as_index_checkpoint_in_shutdown()) {
+		cf_debug(AS_TSVC,
+				"rejecting transaction - node shutting down for an index checkpoint");
+		// One lock-free reply path for every origin. as_transaction_error handles
+		// FROM_PROXY completely - as_proxy_send_response (a fabric send, no partition
+		// lock) then proxy_origin_destroy - so the proxied sender gets the same
+		// actionable UNAVAILABLE and fails over, rather than blocking. Do NOT special-
+		// case FROM_PROXY with as_proxy_return_to_sender: that calls
+		// as_partition_proxyee_redirect, which takes a partition lock as_storage_shutdown
+		// holds for the whole park. Passing NULL for ns forfeits namespace info as the
+		// init-balance block's non-proxy branch below does - but unlike that block we must
+		// route FROM_PROXY through this same lock-free path, NOT its as_proxy_return_to_sender
+		// (do not "unify" the two). AS_SUB_UNAVAIL (not AS_SUB_NONE): AS_ERR_UNAVAILABLE carries a subcode
+		// family and an SC client needs the fail-over-vs-backoff bit - this node is
+		// leaving, so fail over.
+		as_error_details_set_fmt(AS_SUB_UNAVAIL_NODE_SHUTTING_DOWN,
+				"node is shutting down for an index checkpoint");
+		as_transaction_error(tr, NULL, AS_ERR_UNAVAILABLE);
+
 		goto Cleanup;
 	}
 

@@ -82,6 +82,7 @@ typedef struct mem_load_records_info_s {
 	drv_mem* mem;
 	cf_queue* complete_q;
 	void* complete_rc;
+	bool build_index; // true: cold start (rebuild index); false: data-only reload
 } mem_load_records_info;
 
 //==========================================================
@@ -100,7 +101,6 @@ static drv_header* init_header(as_namespace* ns, drv_mem* mem);
 static void wblock_init(drv_mem* mem);
 static void flush_header(drv_mems* mems, drv_header** headers);
 static void init_pristine_wblock_id(drv_mem* mem, uint64_t offset);
-static void start_loading_records(drv_mems* mems, cf_queue* complete_q);
 static void load_wblock_queues(drv_mems* mems);
 static void* run_load_queues(void* pv_data);
 static void defrag_pen_transfer(defrag_pen* pen, drv_mem* mem);
@@ -110,8 +110,11 @@ static void start_maintenance_threads(drv_mems* mems);
 static void start_write_threads(drv_mems* mems);
 static void start_defrag_threads(drv_mems* mems);
 
-// Cold start.
-static void* run_mem_cold_start(void* udata);
+// Record loading fan-out: cold start (build_index=true, rebuild the index) or the
+// index-checkpoint warm-from-shadow data-only reload (build_index=false).
+static void start_mem_load(drv_mems* mems, cf_queue* complete_q,
+		bool build_index);
+static void* run_mem_load(void* udata);
 static void mem_cold_start_record_update_cb(drv_devs devs,
 		const as_flat_record* flat, const as_flat_opt_meta* opt_meta,
 		as_index_tree* tree, as_index_ref* r_ref);
@@ -313,11 +316,25 @@ as_storage_load_mem(as_namespace* ns, cf_queue* complete_q)
 {
 	drv_mems* mems = (drv_mems*)ns->storage_private;
 
-	// If devices have data, and it's cold start, scan devices.
+	// If devices have data, and it's cold start, scan devices to build the index
+	// (and load record data into memory) - signals completion when threads are done.
 	if (! mems->common.all_fresh && ns->cold_start) {
-		// Fire off threads to scan devices to build index and/or load record
-		// data into memory - will signal completion when threads are all done.
-		start_loading_records(mems, complete_q);
+		start_mem_load(mems, complete_q, true); // build_index
+		return;
+	}
+
+	// Index-checkpoint fast path: warm restart already reattached the index from the
+	// checkpoint (and resume_devices rebuilt the accounting from it); now reload the
+	// shadow's data bytes into the stripes without a cold-start index rebuild.
+	if (ns->ckpt_warm_from_shadow && ! mems->common.all_fresh) {
+		// This path skips the cold-start index rebuild and relies on the per-stripe
+		// shadow reload to refill the data. With no shadow, that reload is a silent
+		// no-op and the reattached index would point at empty stripes. EE only sets
+		// ckpt_warm_from_shadow when the ns has a shadow (namespace_ee.c); enforce it.
+		cf_assert(ns->n_storage_shadows != 0, AS_DRV_MEM,
+				"{%s} ckpt_warm_from_shadow set with no storage shadow",
+				ns->name);
+		start_mem_load(mems, complete_q, false); // build_index = false
 		return;
 	}
 	// else - fresh devices or warm restart, this namespace is ready to roll.
@@ -956,24 +973,48 @@ init_shadow_files(as_namespace* ns)
 	ns->drives_size = rounded_file_size * ns->n_storage_shadows;
 }
 
-static void
-init_memory_only(as_namespace* ns)
+// Derive the memory-stripe geometry (count + per-stripe size) from a namespace's
+// configured data-size. Pure - the single source of truth for init_memory_only and for
+// the index-checkpoint hydrate geometry guard (ckpt_restore_stripes), so a
+// 'data-size' change is caught before it can recreate mismatched stripes and cf_crash.
+void
+as_storage_mem_stripe_geometry(uint64_t data_size, uint32_t* p_n_stripes,
+		size_t* p_stripe_sz)
 {
-	uint32_t n_stripes = (uint32_t)((ns->storage_data_size + MAX_STRIPE_SZ - 1) /
-			MAX_STRIPE_SZ);
+	uint32_t n_stripes =
+			(uint32_t)((data_size + MAX_STRIPE_SZ - 1) / MAX_STRIPE_SZ);
 
 	if (n_stripes < MIN_N_STRIPES) {
 		n_stripes = MIN_N_STRIPES;
 	}
 
-	size_t stripe_sz = ns->storage_data_size / n_stripes;
+	size_t stripe_sz = data_size / n_stripes;
 	size_t unusable_size = (stripe_sz - DRV_HEADER_SIZE) % WBLOCK_SZ;
 
-	if (unusable_size != 0) {
+	stripe_sz -= unusable_size; // header size + a whole number of wblocks
+
+	*p_n_stripes = n_stripes;
+	*p_stripe_sz = stripe_sz;
+}
+
+static void
+init_memory_only(as_namespace* ns)
+{
+	uint32_t n_stripes;
+	size_t stripe_sz;
+
+	as_storage_mem_stripe_geometry(ns->storage_data_size, &n_stripes, &stripe_sz);
+
+	// The helper rounds each stripe down to header + a whole number of wblocks. Warn
+	// once here at startup if that lost space (data-size was not header + n*wblock per
+	// stripe), so an operator sees they got a smaller stripe than configured. The log
+	// lives at this call site, not in the shared helper - it also runs per hydrate,
+	// where the message would be noise. (data_size / n_stripes is the helper's
+	// pre-rounding stripe size, so this fires exactly when it rounded.)
+	if (stripe_sz != ns->storage_data_size / n_stripes) {
 		cf_info(AS_DRV_MEM,
 				"memory stripe size must be header size %u + multiple of %u, rounding down",
 				DRV_HEADER_SIZE, WBLOCK_SZ);
-		stripe_sz -= unusable_size;
 	}
 
 	if (ns->stripes != NULL && stripe_sz != ns->stripe_sz) {
@@ -1268,9 +1309,15 @@ read_header(drv_mem* mem)
 	ns->storage_devices[ns->n_storage_stripes++] = mem->name;
 
 	bool cold_start_shadow = ns->cold_start && mem->shadow_name != NULL;
+
+	// Warm-from-checkpoint fast path: the stripe was just created fresh (empty), so its
+	// header must come from the shadow, exactly as in cold start. (The cold_start_local
+	// optimization below stays gated on a real cold start - a fresh stripe never matches.)
+	bool hdr_from_shadow = cold_start_shadow ||
+			(ns->ckpt_warm_from_shadow && mem->shadow_name != NULL);
 	const char* drv_name;
 
-	if (cold_start_shadow) {
+	if (hdr_from_shadow) {
 		drv_name = mem->shadow_name;
 		memcpy(header, shadow_header, sizeof(drv_header));
 	}
@@ -1434,12 +1481,20 @@ init_pristine_wblock_id(drv_mem* mem, uint64_t offset)
 	mem->pristine_wblock_id = (offset + (WBLOCK_SZ - 1)) / WBLOCK_SZ;
 }
 
+// Fan out one loader thread per stripe. build_index=true is a cold start: build the
+// index from a device/shadow scan (needs the MRT cold-start hash). build_index=false is
+// the index-checkpoint warm-from-shadow reload: the index is already reattached from the
+// checkpoint, so we only reload the shadow's data bytes - no MRT hash, no index rebuild.
+// The per-stripe work + completion signalling is identical; run_mem_load branches on the
+// lri->build_index flag.
 static void
-start_loading_records(drv_mems* mems, cf_queue* complete_q)
+start_mem_load(drv_mems* mems, cf_queue* complete_q, bool build_index)
 {
 	as_namespace* ns = mems->common.ns;
 
-	drv_mrt_create_cold_start_hash(ns);
+	if (build_index) {
+		drv_mrt_create_cold_start_hash(ns);
+	}
 
 	ns->loading_records = true;
 
@@ -1457,8 +1512,9 @@ start_loading_records(drv_mems* mems, cf_queue* complete_q)
 		lri->mem = mem;
 		lri->complete_q = complete_q;
 		lri->complete_rc = p;
+		lri->build_index = build_index;
 
-		cf_thread_create_transient(run_mem_cold_start, (void*)lri);
+		cf_thread_create_transient(run_mem_load, (void*)lri);
 	}
 }
 
@@ -1622,24 +1678,36 @@ start_defrag_threads(drv_mems* mems)
 //
 
 static void*
-run_mem_cold_start(void* udata)
+run_mem_load(void* udata)
 {
 	mem_load_records_info* lri = (mem_load_records_info*)udata;
 	drv_mem* mem = lri->mem;
 	drv_mems* mems = lri->mems;
 	cf_queue* complete_q = lri->complete_q;
 	void* complete_rc = lri->complete_rc;
+	bool build_index = lri->build_index;
 
 	cf_free(lri);
 
-	cold_start_sweep_device(mems, mem);
+	if (build_index) {
+		cold_start_sweep_device(mems,
+				mem); // scan: build the index (+ any MRT 2nd pass)
+	}
+	else {
+		cold_start_sweep(mems, mem,
+				false); // load_index = false: reload data bytes only
+	}
 
 	if (cf_rc_release(complete_rc) == 0) {
-		// All drives are done reading.
-
+		// All stripes are done.
 		as_namespace* ns = mems->common.ns;
 
-		if (drv_cold_start_sweeps_done(ns)) {
+		if (! build_index) {
+			// Data-only reload: no cold-start finalization - the index came from the
+			// checkpoint and resume_devices already did the startup housekeeping.
+			ns->loading_records = false;
+		}
+		else if (drv_cold_start_sweeps_done(ns)) {
 			ns->loading_records = false;
 			cold_start_drop_cenotaphs(ns);
 
@@ -1661,15 +1729,33 @@ run_mem_cold_start(void* udata)
 }
 
 // Not static - called by split function.
+//
+// load_index == true (cold start): parse every record and add it to the index. false
+// (shadow-backed memory ns warm-from-checkpoint fast path): stream the shadow bytes into
+// the shmem stripe only - the index was already reattached from the checkpoint and the
+// per-wblock accounting is rebuilt from it by resume_devices, so skip drv_cold_start_add_record.
 void
-cold_start_sweep(drv_mems* mems, drv_mem* mem)
+cold_start_sweep(drv_mems* mems, drv_mem* mem, bool load_index)
 {
+	// Full literal per case so a log line stays greppable back to a single source string.
 	if (mem->shadow_name != NULL && ! mem->cold_start_local) {
-		cf_info(AS_DRV_MEM, "device %s: reading backing device %s to load index",
-				mem->name, mem->shadow_name);
+		if (load_index) {
+			cf_info(AS_DRV_MEM,
+					"device %s: reading backing device %s to load index",
+					mem->name, mem->shadow_name);
+		}
+		else {
+			cf_info(AS_DRV_MEM,
+					"device %s: reading backing device %s to reload data",
+					mem->name, mem->shadow_name);
+		}
+	}
+	else if (load_index) {
+		cf_info(AS_DRV_MEM, "device %s: reading device to load index", mem->name);
 	}
 	else {
-		cf_info(AS_DRV_MEM, "device %s: reading device to load index", mem->name);
+		cf_info(AS_DRV_MEM, "device %s: reading device to reload data",
+				mem->name);
 	}
 
 	bool read_shadow = mem->shadow_name != NULL && ! mem->cold_start_local;
@@ -1696,7 +1782,20 @@ cold_start_sweep(drv_mems* mems, drv_mem* mem)
 	uint64_t file_offset = DRV_HEADER_SIZE;
 	uint32_t n_unused_wblocks = 0;
 
-	while (file_offset < mem->file_size && n_unused_wblocks < 10) {
+	// Cold start scans the whole device to locate the end of data (10 contiguous
+	// unused wblocks) and derives pristine_wblock_id as it goes. The warm-from-shadow
+	// reload (load_index == false) already knows the end - init_synchronous set
+	// pristine_wblock_id from the persisted header (init_pristine_wblock_id) - so it
+	// copies the full used range
+	// [first data wblock, pristine) verbatim: NO magic-scan early-exit (a freed/zeroed
+	// interior wblock must not truncate the copy and strand index-referenced data), and it
+	// must NOT re-derive pristine_wblock_id (authoritative, set from the header). (sweep_
+	// wblock_id is only a transient scan cursor here - it is reset either way, below.)
+	uint64_t end_offset = load_index
+			? mem->file_size
+			: (uint64_t)mem->pristine_wblock_id * WBLOCK_SZ;
+
+	while (file_offset < end_offset && (! load_index || n_unused_wblocks < 10)) {
 		uint8_t* buf = mem->mem_base_addr + file_offset;
 
 		if (read_shadow) {
@@ -1734,9 +1833,14 @@ cold_start_sweep(drv_mems* mems, drv_mem* mem)
 			}
 
 			if (n_unused_wblocks != 0) {
-				cf_warning(AS_DRV_MEM,
-						"%s: found used wblock after skipping %u unused",
-						mem->name, n_unused_wblocks);
+				// On the reload path (load_index == false) a freed/zeroed interior
+				// wblock between live ones is normal (we copy the whole [.., pristine)
+				// range), so don't warn - only the cold-start scan flags a gap.
+				if (load_index) {
+					cf_warning(AS_DRV_MEM,
+							"%s: found used wblock after skipping %u unused",
+							mem->name, n_unused_wblocks);
+				}
 
 				n_unused_wblocks = 0; // restart contiguous count
 			}
@@ -1751,9 +1855,13 @@ cold_start_sweep(drv_mems* mems, drv_mem* mem)
 				continue; // try next rblock
 			}
 
-			// Found a record - try to add it to the index.
-			drv_cold_start_add_record(&cs_add_ops, flat,
-					OFFSET_TO_RBLOCK_ID(file_offset + indent), record_size);
+			// Found a record. Add it to the index, unless we're only reloading the
+			// shadow's data bytes into the stripe (index already reattached from the
+			// checkpoint) - then just skip past it.
+			if (load_index) {
+				drv_cold_start_add_record(&cs_add_ops, flat,
+						OFFSET_TO_RBLOCK_ID(file_offset + indent), record_size);
+			}
 
 			indent = next_indent;
 		}
@@ -1766,12 +1874,22 @@ cold_start_sweep(drv_mems* mems, drv_mem* mem)
 		}
 	}
 
-	mem->pristine_wblock_id = mem->sweep_wblock_id - n_unused_wblocks;
+	if (load_index) {
+		mem->pristine_wblock_id = mem->sweep_wblock_id - n_unused_wblocks;
+	}
+	// else: pristine_wblock_id stays as init_synchronous set it from the header.
 
 	mem->sweep_wblock_id = (uint32_t)(mem->file_size / WBLOCK_SZ);
 
 	if (read_shadow) {
 		shadow_fd_put(mem, fd);
+	}
+
+	if (! load_index) {
+		cf_info(AS_DRV_MEM,
+				"device %s: data reload complete (index reattached from checkpoint)",
+				mem->name);
+		return;
 	}
 
 	cf_info(AS_DRV_MEM,

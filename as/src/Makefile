@@ -21,6 +21,7 @@ BASE_HEADERS += masking.h
 BASE_HEADERS += features.h
 BASE_HEADERS += health.h
 BASE_HEADERS += index.h
+BASE_HEADERS += index_checkpoint.h
 BASE_HEADERS += json_init.h
 BASE_HEADERS += mrt_monitor.h
 BASE_HEADERS += nsup.h
@@ -96,6 +97,7 @@ ifneq ($(USE_EE),1)
   BASE_SOURCES += cfg_ce.c
   BASE_SOURCES += features_ce.c
   BASE_SOURCES += index_ce.c
+  BASE_SOURCES += index_checkpoint_ce.c
   BASE_SOURCES += masking_ce.c
   BASE_SOURCES += mrt_monitor_ce.c
   BASE_SOURCES += namespace_ce.c

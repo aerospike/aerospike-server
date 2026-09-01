@@ -281,6 +281,7 @@ typedef enum {
 	CASE_SERVICE_FEATURE_KEY_FILE,
 	CASE_SERVICE_GROUP,
 	CASE_SERVICE_INDENT_ALLOCATIONS,
+	CASE_SERVICE_INDEX_CHECKPOINT_PATH,
 	CASE_SERVICE_INFO_MAX_MS,
 	CASE_SERVICE_INFO_THREADS,
 	CASE_SERVICE_KEEP_CAPS_SSD_HEALTH,
@@ -495,6 +496,8 @@ typedef enum {
 	CASE_NAMESPACE_EVICT_INDEXES_MEMORY_PCT,
 	CASE_NAMESPACE_EVICT_TENTHS_PCT,
 	CASE_NAMESPACE_IGNORE_MIGRATE_FILL_DELAY,
+	CASE_NAMESPACE_INDEX_CHECKPOINT_COMPRESSION,
+	CASE_NAMESPACE_INDEX_CHECKPOINT_THREADS,
 	CASE_NAMESPACE_INDEX_STAGE_SIZE,
 	CASE_NAMESPACE_INDEXES_MEMORY_BUDGET,
 	CASE_NAMESPACE_INLINE_SHORT_QUERIES,
@@ -516,6 +519,7 @@ typedef enum {
 	CASE_NAMESPACE_REPLICATION_FACTOR,
 	CASE_NAMESPACE_SINDEX_STAGE_SIZE,
 	CASE_NAMESPACE_SINGLE_QUERY_THREADS,
+	CASE_NAMESPACE_SKIP_CHECKPOINT,
 	CASE_NAMESPACE_STOP_WRITES_SYS_MEMORY_PCT,
 	CASE_NAMESPACE_STRONG_CONSISTENCY,
 	CASE_NAMESPACE_STRONG_CONSISTENCY_ALLOW_EXPUNGE,
@@ -899,6 +903,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "feature-key-file",				CASE_SERVICE_FEATURE_KEY_FILE },
 		{ "group",							CASE_SERVICE_GROUP },
 		{ "indent-allocations",				CASE_SERVICE_INDENT_ALLOCATIONS },
+		{ "index-checkpoint-path",			CASE_SERVICE_INDEX_CHECKPOINT_PATH },
 		{ "info-max-ms",					CASE_SERVICE_INFO_MAX_MS },
 		{ "info-threads",					CASE_SERVICE_INFO_THREADS },
 		{ "keep-caps-ssd-health",			CASE_SERVICE_KEEP_CAPS_SSD_HEALTH },
@@ -1142,6 +1147,8 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "evict-indexes-memory-pct",		CASE_NAMESPACE_EVICT_INDEXES_MEMORY_PCT },
 		{ "evict-tenths-pct",				CASE_NAMESPACE_EVICT_TENTHS_PCT },
 		{ "ignore-migrate-fill-delay",		CASE_NAMESPACE_IGNORE_MIGRATE_FILL_DELAY },
+		{ "index-checkpoint-compression",	CASE_NAMESPACE_INDEX_CHECKPOINT_COMPRESSION },
+		{ "index-checkpoint-threads",		CASE_NAMESPACE_INDEX_CHECKPOINT_THREADS },
 		{ "index-stage-size",				CASE_NAMESPACE_INDEX_STAGE_SIZE },
 		{ "indexes-memory-budget",			CASE_NAMESPACE_INDEXES_MEMORY_BUDGET },
 		{ "inline-short-queries",			CASE_NAMESPACE_INLINE_SHORT_QUERIES },
@@ -1163,6 +1170,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "replication-factor",				CASE_NAMESPACE_REPLICATION_FACTOR },
 		{ "sindex-stage-size",				CASE_NAMESPACE_SINDEX_STAGE_SIZE },
 		{ "single-query-threads",			CASE_NAMESPACE_SINGLE_QUERY_THREADS },
+		{ "skip-checkpoint",				CASE_NAMESPACE_SKIP_CHECKPOINT },
 		{ "stop-writes-sys-memory-pct",		CASE_NAMESPACE_STOP_WRITES_SYS_MEMORY_PCT },
 		{ "strong-consistency",				CASE_NAMESPACE_STRONG_CONSISTENCY },
 		{ "strong-consistency-allow-expunge", CASE_NAMESPACE_STRONG_CONSISTENCY_ALLOW_EXPUNGE },
@@ -1781,6 +1789,19 @@ static char*
 cfg_strdup_no_checks(const cfg_line* p_line)
 {
 	return cfg_strdup_anyval(p_line, p_line->val_tok_1, MAX_LINE_SIZE, true);
+}
+
+// Reject a config key that belongs to a preview feature unless that feature was enabled
+// with --preview. g_enabled_preview_features is published before config parsing, so this
+// is checkable at parse time. Companion to cfg_enterprise_only (which gates EE-only keys).
+static void
+cfg_preview_only(const cfg_line* p_line, uint32_t feat, const char* preview_name)
+{
+	if (! as_preview_feature_enabled(feat)) {
+		cf_crash_nostack(AS_CFG,
+				"line %d :: '%s' is a preview feature; enable it with --preview %s",
+				p_line->num, p_line->name_tok, preview_name);
+	}
 }
 
 static char*
@@ -2663,6 +2684,13 @@ as_config_init(const char* config_file)
 				cfg_enterprise_only(&line);
 				g_vault_cfg.url = cfg_strdup_no_checks(&line);
 				break;
+			case CASE_SERVICE_INDEX_CHECKPOINT_PATH:
+				cfg_enterprise_only(&line);
+				cfg_preview_only(&line, AS_PREVIEW_FEAT_INDEX_CHECKPOINT,
+						"index-checkpoint");
+				cf_free(c->index_checkpoint_path); // free prior on a duplicate key
+				c->index_checkpoint_path = cfg_strdup_no_checks(&line);
+				break;
 			case CASE_SERVICE_WORK_DIRECTORY:
 				cf_free(c->work_directory);
 				c->work_directory = cfg_strdup_no_checks(&line);
@@ -3381,6 +3409,24 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_IGNORE_MIGRATE_FILL_DELAY:
 				cfg_enterprise_only(&line);
 				ns->ignore_migrate_fill_delay = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_INDEX_CHECKPOINT_COMPRESSION:
+				cfg_enterprise_only(&line);
+				cfg_preview_only(&line, AS_PREVIEW_FEAT_INDEX_CHECKPOINT,
+						"index-checkpoint");
+				ns->index_checkpoint_compression = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_INDEX_CHECKPOINT_THREADS:
+				cfg_enterprise_only(&line);
+				cfg_preview_only(&line, AS_PREVIEW_FEAT_INDEX_CHECKPOINT,
+						"index-checkpoint");
+				ns->n_index_checkpoint_threads = cfg_u32(&line, 1, 16);
+				break;
+			case CASE_NAMESPACE_SKIP_CHECKPOINT:
+				cfg_enterprise_only(&line);
+				cfg_preview_only(&line, AS_PREVIEW_FEAT_INDEX_CHECKPOINT,
+						"index-checkpoint");
+				ns->skip_checkpoint = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_INDEX_STAGE_SIZE:
 				ns->index_stage_size = cfg_u64_power_of_2(&line,

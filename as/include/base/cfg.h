@@ -141,6 +141,7 @@ typedef struct as_config_s {
 	uid_t uid;
 	// Note - vault config is a cf global, so can't be here.
 	char* work_directory;
+	char* index_checkpoint_path; // global; resolved per-namespace at EE cfg post-process
 	bool cgroup_mem_tracking;
 	//--------------------------------------------
 	// network::service context.
@@ -233,6 +234,32 @@ typedef struct as_config_s {
 	uint32_t n_namespaces_not_inlined;
 
 } as_config;
+
+//==========================================================
+// Preview features.
+//
+
+// Features gated by the --preview startup option, one bit each (0 is the "invalid
+// list" sentinel in the parser, so every flag must be nonzero). Centralized here -
+// not in as.c - so the bit assignments have a single source and the config layer
+// can gate a preview feature by name.
+#define AS_PREVIEW_FEAT_YAML_CONFIG (1u << 0)
+#define AS_PREVIEW_FEAT_INDEX_CHECKPOINT (1u << 1)
+
+// True if the given preview feature bit was enabled at startup. Available as soon
+// as the command line is parsed (before config post-processing).
+bool as_preview_feature_enabled(uint32_t flag);
+
+// Set the enabled preview-feature bit mask - the single writer, called once at
+// startup with the parsed command-line set. Also used by unit tests to exercise
+// preview-gated config.
+void as_preview_features_set(uint32_t features);
+
+// Parse a comma-separated feature-name list (e.g. "yaml-config,index-checkpoint")
+// into an AS_PREVIEW_FEAT_* bit mask. Returns 0 if any token is unknown or the
+// list is effectively empty (a valid list always sets at least one bit), so the
+// caller treats 0 as a failure. Exposed for unit testing.
+uint32_t as_preview_features_parse(const char* arg);
 
 //==========================================================
 // Public API.

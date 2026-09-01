@@ -564,6 +564,10 @@ typedef enum {
 	// App use: an SC reader may downgrade to read-mode=any if safe, or
 	// back off longer than for transient unavailability.
 	AS_SUB_UNAVAIL_REPLICA_UNAVAILABLE = 2,
+	// This node is shutting down (e.g. an index-checkpoint save/park) and is
+	// leaving the cluster. App use: fail over to another node - backing off and
+	// retrying this same node is pointless, it is going away.
+	AS_SUB_UNAVAIL_NODE_SHUTTING_DOWN = 3,
 } as_sub_unavail_t;
 
 // Subcodes paired with AS_ERR_UNSUPPORTED_FEATURE.

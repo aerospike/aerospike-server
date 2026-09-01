@@ -47,6 +47,7 @@
 #include "base/batch.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/index_checkpoint.h"
 #include "base/mrt_monitor.h"
 #include "base/proto.h"
 #include "base/security.h"
@@ -252,6 +253,13 @@ cfg_get_service(cf_dyn_buf* db)
 	}
 
 	info_append_bool(db, "indent-allocations", g_config.indent_allocations);
+	// Emitted unconditionally, like every other optional path (pidfile, vault-*, node-id-interface):
+	// get-config is a full config dump, so an unset path shows as "index-checkpoint-path=null". The
+	// preview flag gates only the INPUT paths (cfg_preview_only / validate_index_checkpoint_path);
+	// get-config does not hide the preview surface. A consumer re-applying a dump to a non-preview
+	// node must strip preview/unknown keys, exactly as it must across server versions.
+	info_append_string_safe(db, "index-checkpoint-path",
+			g_config.index_checkpoint_path);
 	info_append_uint64(db, "info-max-ms", g_config.info_max_ns / 1000000);
 	info_append_uint32(db, "info-threads", g_config.n_info_threads);
 	info_append_bool(db, "keep-caps-ssd-health", g_config.keep_caps_ssd_health);
@@ -533,6 +541,12 @@ cfg_get_namespace(const as_namespace* ns, cf_dyn_buf* db)
 	info_append_bool(db, "force-long-queries", ns->force_long_queries);
 	info_append_bool(db, "ignore-migrate-fill-delay",
 			ns->ignore_migrate_fill_delay);
+	// Emitted unconditionally - get-config is a full config dump (see the service-context note on
+	// index-checkpoint-path); the preview flag gates the input paths only, not this readback.
+	info_append_bool(db, "index-checkpoint-compression",
+			ns->index_checkpoint_compression);
+	info_append_uint32(db, "index-checkpoint-threads",
+			ns->n_index_checkpoint_threads);
 	info_append_uint64(db, "index-stage-size", ns->index_stage_size);
 	info_append_uint64(db, "indexes-memory-budget", ns->indexes_memory_budget);
 	info_append_bool(db, "inline-short-queries", ns->inline_short_queries);
@@ -556,6 +570,8 @@ cfg_get_namespace(const as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint32(db, "replication-factor", ns->cfg_replication_factor);
 	info_append_uint64(db, "sindex-stage-size", ns->sindex_stage_size);
 	info_append_uint32(db, "single-query-threads", ns->n_single_query_threads);
+	// Emitted unconditionally (full config dump; see the index-checkpoint-path note above).
+	info_append_bool(db, "skip-checkpoint", ns->skip_checkpoint);
 	info_append_uint32(db, "stop-writes-sys-memory-pct",
 			ns->stop_writes_sys_memory_pct);
 	info_append_bool(db, "strong-consistency", ns->cp);
@@ -2456,6 +2472,41 @@ cfg_set_namespace(const char* cmd, as_namespace* ns)
 				"Changing value of single-query-threads of ns %s from %u to %d ",
 				ns->name, ns->n_single_query_threads, val);
 		ns->n_single_query_threads = (uint32_t)val;
+	}
+	else if (as_info_parameter_get(cmd, "skip-checkpoint", v, &v_len) == 0) {
+		if (as_error_enterprise_only()) {
+			cf_warning(AS_INFO, "skip-checkpoint is enterprise-only");
+			return false;
+		}
+		if (! as_preview_feature_enabled(AS_PREVIEW_FEAT_INDEX_CHECKPOINT)) {
+			cf_warning(AS_INFO,
+					"skip-checkpoint requires the index-checkpoint preview feature (enable "
+					"it with --preview index-checkpoint)");
+			return false;
+		}
+
+		bool skip;
+
+		if (strcmp(v, "true") == 0) {
+			skip = true;
+		}
+		else if (strcmp(v, "false") == 0) {
+			skip = false;
+		}
+		else {
+			cf_warning(AS_INFO,
+					"skip-checkpoint of ns %s must be true or false, got '%s'",
+					ns->name, v);
+			return false;
+		}
+
+		cf_info(AS_INFO,
+				"Changing value of skip-checkpoint of ns %s from %s to %s",
+				ns->name, bool_val[ns->skip_checkpoint], v);
+		ns->skip_checkpoint = skip;
+		// skip-checkpoint feeds ns->index_checkpoint_path (the single gate every checkpoint
+		// decision reads) - re-derive it so the change takes effect on the next save.
+		as_index_checkpoint_apply_skip(ns);
 	}
 	else if (as_info_parameter_get(cmd, "stop-writes-sys-memory-pct", v,
 					 &v_len) == 0) {

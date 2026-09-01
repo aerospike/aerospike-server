@@ -70,7 +70,7 @@
 // Forward declarations.
 //
 
-extern bool g_shutdown_started;
+extern uint32_t g_shutdown_started;
 
 void* run_ticker(void* arg);
 void log_ticker_frame(uint64_t delta_time);
@@ -151,7 +151,7 @@ run_ticker(void* arg)
 		last_time = curr_time;
 
 		// Reduce likelihood of ticker frames showing after shutdown signal.
-		if (g_shutdown_started) {
+		if (as_load_uint32(&g_shutdown_started) != 0) {
 			break;
 		}
 

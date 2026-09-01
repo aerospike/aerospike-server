@@ -789,6 +789,15 @@ typedef struct as_treex_s {
 	as_sprigx sprigxs[0];
 } as_treex;
 
+// Index-checkpoint progress state (ns->ckpt_state). Enterprise only; published
+// by the checkpoint save and read by the 'checkpoint-status' info command.
+typedef enum {
+	AS_CKPT_STATE_NONE = 0, // no checkpoint run for this namespace
+	AS_CKPT_STATE_COPYING = 1,
+	AS_CKPT_STATE_DONE = 2,
+	AS_CKPT_STATE_FAILED = 3
+} as_ckpt_state;
+
 typedef struct as_namespace_s {
 	//--------------------------------------------
 	// Data partitions - first, to 64-byte align.
@@ -1015,6 +1024,10 @@ typedef struct as_namespace_s {
 	uint32_t evict_tenths_pct;
 	bool force_long_queries; // for debugging only
 	bool ignore_migrate_fill_delay;
+	const char* index_checkpoint_path; // resolved from the global 'index-checkpoint-path' (EE cfg post-process); NULL = not checkpointed for this ns
+	bool skip_checkpoint; // opt this ns out of the global 'index-checkpoint-path'
+	uint32_t n_index_checkpoint_threads;
+	bool index_checkpoint_compression; // gzip checkpoint blocks (default true)
 	uint64_t index_stage_size;
 	uint64_t indexes_memory_budget;
 	bool inline_short_queries;
@@ -1647,6 +1660,30 @@ typedef struct as_namespace_s {
 	bool is_quiesced;
 	bool quiesced[AS_CLUSTER_SZ];
 
+	// Index checkpoint - relevant only for enterprise edition.
+	// Set to 1 by the 'checkpoint-save' info command; consumed by pi_shutdown
+	// to copy the post-TRUSTED index (and memory-ns data stripes) to the
+	// configured 'index-checkpoint-path'. A plain SIGTERM leaves it 0 and produces
+	// a normal shutdown with no checkpoint. Written on the info thread and read on
+	// the main (shutdown) thread, so accessed via the as_*_uint32 atomics (a plain
+	// bool would be a data race on the shutdown-claim-lost path).
+	uint32_t do_checkpoint_on_shutdown;
+
+	// Index-checkpoint progress, published by the checkpoint save while the
+	// process is mid-shutdown / parked, and read by the 'checkpoint-status' info
+	// command. ckpt_state holds an as_ckpt_state; ckpt_files_done is atomically
+	// incremented by the copy workers. (uint32_t, not the enum type, so the
+	// as_*_uint32 atomics apply.)
+	uint32_t ckpt_state;
+	uint32_t ckpt_files_total;
+	uint32_t ckpt_files_done;
+
+	// Startup-transient: set during hydrate when a shadow-backed memory namespace
+	// reattached a current index checkpoint (index from checkpoint, data still on the
+	// shadow). Routes drv_mem to a warm restart plus a data-only reload of the shadow
+	// stripes (no cold-start index rebuild). Cleared/ignored after startup.
+	bool ckpt_warm_from_shadow;
+
 	// Observed nodes - relevant only for enterprise edition.
 	uint32_t observed_cluster_size;
 	cf_node observed_succession[AS_CLUSTER_SZ];
@@ -1801,3 +1838,7 @@ as_namespace_sindex_persisted(const as_namespace* ns)
 
 // Persistent Memory Management
 bool as_namespace_xmem_shutdown(as_namespace* ns, uint32_t instance);
+
+// Namespace name embedded in a live PI base block (checkpoint hydrate ownership check), or
+// NULL if the block isn't a recognizable base block. Enterprise-only; no CE caller.
+const char* as_namespace_xmem_base_block_name(const void* base_block);

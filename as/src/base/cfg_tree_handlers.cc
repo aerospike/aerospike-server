@@ -75,6 +75,9 @@ using FieldHandler = std::function<void(void* target,
 // Tag types to disambiguate constructors
 struct EnterpriseOnly {
 };
+struct PreviewOnly {
+	uint32_t feat; // AS_PREVIEW_FEAT_* bit this field requires
+};
 struct Deprecated {
 	std::string msg;
 };
@@ -86,6 +89,7 @@ struct FieldDescriptor {
 	bool enterprise_only;
 	std::string deprecation_warning;
 	UnitType unit_type; // Unit type for this field (NONE if not applicable)
+	uint32_t preview_feat = 0; // AS_PREVIEW_FEAT_* bit gating this field (0 = none)
 
 	// Basic constructor (no units)
 	FieldDescriptor(const std::string& path, size_t off, FieldHandler h)
@@ -107,6 +111,15 @@ struct FieldDescriptor {
 			EnterpriseOnly)
 		: json_path(path), offset(off), handler(h), enterprise_only(true),
 		  deprecation_warning(""), unit_type(UnitType::NONE)
+	{
+	}
+
+	// Enterprise-only AND preview-gated (no units)
+	FieldDescriptor(const std::string& path, size_t off, FieldHandler h,
+			EnterpriseOnly, PreviewOnly pv)
+		: json_path(path), offset(off), handler(h), enterprise_only(true),
+		  deprecation_warning(""), unit_type(UnitType::NONE),
+		  preview_feat(pv.feat)
 	{
 	}
 
@@ -165,6 +178,8 @@ static void apply_cstring_field(void* target, const FieldDescriptor& desc,
 		const nlohmann::json& value);
 static void apply_pct_w_minus_1_field(void* target, const FieldDescriptor& desc,
 		const nlohmann::json& value);
+static void handle_index_checkpoint_threads(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
 
 // Service context handlers
 static void handle_service(void* target, const FieldDescriptor& desc,
@@ -410,6 +425,7 @@ static void apply_namespace_set(const std::string& name,
 		{"/feature-key-files", NO_OFFSET, handle_feature_key_files, EnterpriseOnly{}}, // enterprise-only
 		{"/group", NO_OFFSET, handle_group, Deprecated{"service/group is deprecated."}},
 		{"/indent-allocations", offsetof(as_config, indent_allocations), apply_bool_field},
+		{"/index-checkpoint-path", offsetof(as_config, index_checkpoint_path), apply_cstring_field, EnterpriseOnly{}, PreviewOnly{AS_PREVIEW_FEAT_INDEX_CHECKPOINT}}, // enterprise-only, preview
 		{"/info-max-ms", NO_OFFSET, handle_info_max_ms, UnitType::SIZE_U64},
 		{"/info-threads", offsetof(as_config, n_info_threads), apply_uint32_field},
 		{"/keep-caps-ssd-health", offsetof(as_config, keep_caps_ssd_health), apply_bool_field},
@@ -585,6 +601,8 @@ static void apply_namespace_set(const std::string& name,
 		{"/evict-indexes-memory-pct", offsetof(as_namespace, evict_indexes_memory_pct), apply_uint32_field},
 		{"/evict-tenths-pct", offsetof(as_namespace, evict_tenths_pct), apply_uint32_field},
 		{"/ignore-migrate-fill-delay", offsetof(as_namespace, ignore_migrate_fill_delay), apply_bool_field, EnterpriseOnly{}}, // enterprise-only
+		{"/index-checkpoint-compression", offsetof(as_namespace, index_checkpoint_compression), apply_bool_field, EnterpriseOnly{}, PreviewOnly{AS_PREVIEW_FEAT_INDEX_CHECKPOINT}}, // enterprise-only, preview
+		{"/index-checkpoint-threads", offsetof(as_namespace, n_index_checkpoint_threads), handle_index_checkpoint_threads, EnterpriseOnly{}, PreviewOnly{AS_PREVIEW_FEAT_INDEX_CHECKPOINT}}, // enterprise-only, preview, [1,16]
 		{"/index-stage-size", offsetof(as_namespace, index_stage_size), apply_uint64_field, UnitType::SIZE_U64},
 		{"/indexes-memory-budget", offsetof(as_namespace, indexes_memory_budget), apply_uint64_field, UnitType::SIZE_U64},
 		{"/inline-short-queries", offsetof(as_namespace, inline_short_queries), apply_bool_field},
@@ -606,6 +624,7 @@ static void apply_namespace_set(const std::string& name,
 		{"/replication-factor", offsetof(as_namespace, cfg_replication_factor), apply_uint32_field},
 		{"/sindex-stage-size", offsetof(as_namespace, sindex_stage_size), apply_uint64_field, UnitType::SIZE_U64},
 		{"/single-query-threads", offsetof(as_namespace, n_single_query_threads), apply_uint32_field},
+		{"/skip-checkpoint", offsetof(as_namespace, skip_checkpoint), apply_bool_field, EnterpriseOnly{}, PreviewOnly{AS_PREVIEW_FEAT_INDEX_CHECKPOINT}}, // enterprise-only, preview
 		{"/stop-writes-sys-memory-pct", offsetof(as_namespace, stop_writes_sys_memory_pct), apply_uint32_field},
 		{"/strong-consistency", offsetof(as_namespace, cp), apply_bool_field, EnterpriseOnly{}}, // enterprise-only
 		{"/strong-consistency-allow-expunge", offsetof(as_namespace, cp_allow_drops), apply_bool_field, EnterpriseOnly{}}, // enterprise-only
@@ -890,6 +909,14 @@ apply_field(void* target, const nlohmann::json& source,
 		throw config_error(desc.json_path, "is enterprise-only");
 	}
 
+	// Preview-gated field: reject unless the required --preview feature is enabled
+	// (parity with the .conf parser's cfg_preview_only gate).
+	if (desc.preview_feat != 0 &&
+			! as_preview_feature_enabled(desc.preview_feat)) {
+		throw config_error(desc.json_path,
+				"is a preview feature - enable it with --preview index-checkpoint");
+	}
+
 	if (! desc.deprecation_warning.empty()) {
 		as_info_warn_deprecated(desc.deprecation_warning.c_str());
 	}
@@ -1061,6 +1088,30 @@ apply_uint32_field(void* target, const FieldDescriptor& desc,
 
 	if (val > std::numeric_limits<uint32_t>::max()) {
 		throw config_error(desc.json_path, "value too large for uint32_t");
+	}
+
+	uint32_t* field_ptr =
+			reinterpret_cast<uint32_t*>(static_cast<char*>(target) + desc.offset);
+	*field_ptr = static_cast<uint32_t>(val);
+}
+
+// index-checkpoint-threads: a bounded uint32. The classic parser clamps with
+// cfg_u32(&line, 1, 16); the YAML path must enforce the same [1, 16] range rather
+// than writing a raw value (apply_uint32_field does no range check).
+static void
+handle_index_checkpoint_threads(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	uint64_t val;
+	if (value.is_number_unsigned() || value.is_number_integer()) {
+		val = value.get<uint64_t>();
+	}
+	else {
+		throw config_error(desc.json_path, "must be a positive integer");
+	}
+
+	if (val < 1 || val > 16) {
+		throw config_error(desc.json_path, "must be in the range [1, 16]");
 	}
 
 	uint32_t* field_ptr =
