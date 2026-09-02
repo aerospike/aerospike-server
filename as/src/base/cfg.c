@@ -2051,15 +2051,15 @@ cfg_i32(const cfg_line* p_line, int32_t min, int32_t max)
 				p_line->num, p_line->name_tok);
 	}
 
-	int value;
+	int32_t value;
 
-	if (cf_str_atoi(p_line->val_tok_1, &value) != 0 || value < min ||
+	if (cf_strtol_i32(p_line->val_tok_1, &value) != 0 || value < min ||
 			value > max) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s must be >= %d and <= %d, not %s",
 				p_line->num, p_line->name_tok, min, max, p_line->val_tok_1);
 	}
 
-	return (int32_t)value;
+	return value;
 }
 
 static uint16_t

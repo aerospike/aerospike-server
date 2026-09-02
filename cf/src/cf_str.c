@@ -83,27 +83,40 @@ cf_str_atoi(const char* s, int* value)
 int
 cf_str_atoi_u32(const char* s, unsigned int* value)
 {
-	unsigned int i = 0;
+	if (! (*s >= '0' && *s <= '9')) {
+		return -1; // require at least one digit - bare suffix or empty is not 0
+	}
+
+	uint64_t i = 0;
 
 	while (*s >= '0' && *s <= '9') {
+		uint32_t digit = (uint32_t)(*s - '0');
+
+		if (i > (UINT32_MAX - digit) / 10) {
+			return -1;
+		}
+
 		i *= 10;
-		i += *s - '0';
+		i += digit;
 		s++;
 	}
+
+	uint64_t multiplier = 1;
+
 	switch (*s) {
 	case 'k':
 	case 'K':
-		i *= 1024L;
+		multiplier = 1024;
 		s++;
 		break;
 	case 'M':
 	case 'm':
-		i *= (1024L * 1024L);
+		multiplier = 1024 * 1024;
 		s++;
 		break;
 	case 'G':
 	case 'g':
-		i *= (1024L * 1024L * 1024L);
+		multiplier = 1024 * 1024 * 1024;
 		s++;
 		break;
 	default:
@@ -112,7 +125,12 @@ cf_str_atoi_u32(const char* s, unsigned int* value)
 	if (*s != 0) {
 		return (-1); // reached a non-num before EOL
 	}
-	*value = i;
+
+	if (i > UINT32_MAX / multiplier) {
+		return -1;
+	}
+
+	*value = (uint32_t)(i * multiplier);
 	return (0);
 }
 
@@ -135,37 +153,50 @@ cf_str_atoi_size(const char* s, uint64_t* value)
 int
 cf_str_atoi_u64(const char* s, uint64_t* value)
 {
+	if (! (*s >= '0' && *s <= '9')) {
+		return -1; // require at least one digit - bare suffix or empty is not 0
+	}
+
 	uint64_t i = 0;
 
 	while (*s >= '0' && *s <= '9') {
+		uint64_t digit = (uint64_t)(*s - '0');
+
+		if (i > (UINT64_MAX - digit) / 10) {
+			return -1;
+		}
+
 		i *= 10;
-		i += *s - '0';
+		i += digit;
 		s++;
 	}
+
+	uint64_t multiplier = 1;
+
 	switch (*s) {
 	case 'k':
 	case 'K':
-		i *= 1024L;
+		multiplier = 1024UL;
 		s++;
 		break;
 	case 'M':
 	case 'm':
-		i *= (1024L * 1024L);
+		multiplier = 1024UL * 1024UL;
 		s++;
 		break;
 	case 'G':
 	case 'g':
-		i *= (1024L * 1024L * 1024L);
+		multiplier = 1024UL * 1024UL * 1024UL;
 		s++;
 		break;
 	case 'T':
 	case 't':
-		i *= (1024L * 1024L * 1024L * 1024L);
+		multiplier = 1024UL * 1024UL * 1024UL * 1024UL;
 		s++;
 		break;
 	case 'P':
 	case 'p':
-		i *= (1024L * 1024L * 1024L * 1024L * 1024L);
+		multiplier = 1024UL * 1024UL * 1024UL * 1024UL * 1024UL;
 		s++;
 		break;
 	default:
@@ -174,44 +205,62 @@ cf_str_atoi_u64(const char* s, uint64_t* value)
 	if (*s != 0) {
 		return (-1); // reached a non-num before EOL
 	}
-	*value = i;
+
+	if (i > UINT64_MAX / multiplier) {
+		return -1;
+	}
+
+	*value = i * multiplier;
 	return (0);
 }
 
 int
 cf_str_atoi_iec(const char* s, uint64_t* value)
 {
+	if (! (*s >= '0' && *s <= '9')) {
+		return -1; // require at least one digit - bare suffix or empty is not 0
+	}
+
 	uint64_t i = 0;
 
 	while (*s >= '0' && *s <= '9') {
+		uint64_t digit = (uint64_t)(*s - '0');
+
+		if (i > (UINT64_MAX - digit) / 10) {
+			return -1;
+		}
+
 		i *= 10;
-		i += *s - '0';
+		i += digit;
 		s++;
 	}
+
+	uint64_t multiplier = 1;
+
 	switch (*s) {
 	case 'k':
 	case 'K':
-		i *= 1024L;
+		multiplier = 1024UL;
 		s++;
 		break;
 	case 'M':
 	case 'm':
-		i *= (1024L * 1024L);
+		multiplier = 1024UL * 1024UL;
 		s++;
 		break;
 	case 'G':
 	case 'g':
-		i *= (1024L * 1024L * 1024L);
+		multiplier = 1024UL * 1024UL * 1024UL;
 		s++;
 		break;
 	case 'T':
 	case 't':
-		i *= (1024L * 1024L * 1024L * 1024L);
+		multiplier = 1024UL * 1024UL * 1024UL * 1024UL;
 		s++;
 		break;
 	case 'P':
 	case 'p':
-		i *= (1024L * 1024L * 1024L * 1024L * 1024L);
+		multiplier = 1024UL * 1024UL * 1024UL * 1024UL * 1024UL;
 		s++;
 		break;
 	default:
@@ -226,44 +275,61 @@ cf_str_atoi_iec(const char* s, uint64_t* value)
 		return (-1); // reached a non-num before EOL
 	}
 
-	*value = i;
+	if (i > UINT64_MAX / multiplier) {
+		return -1;
+	}
+
+	*value = i * multiplier;
 	return (0);
 }
 
 int
 cf_str_atoi_si(const char* s, uint64_t* value)
 {
+	if (! (*s >= '0' && *s <= '9')) {
+		return -1; // require at least one digit - bare suffix or empty is not 0
+	}
+
 	uint64_t i = 0;
 
 	while (*s >= '0' && *s <= '9') {
+		uint64_t digit = (uint64_t)(*s - '0');
+
+		if (i > (UINT64_MAX - digit) / 10) {
+			return -1;
+		}
+
 		i *= 10;
-		i += *s - '0';
+		i += digit;
 		s++;
 	}
+
+	uint64_t multiplier = 1;
+
 	switch (*s) {
 	case 'k':
 	case 'K':
-		i *= 1000L;
+		multiplier = 1000UL;
 		s++;
 		break;
 	case 'M':
 	case 'm':
-		i *= (1000L * 1000L);
+		multiplier = 1000UL * 1000UL;
 		s++;
 		break;
 	case 'G':
 	case 'g':
-		i *= (1000L * 1000L * 1000L);
+		multiplier = 1000UL * 1000UL * 1000UL;
 		s++;
 		break;
 	case 'T':
 	case 't':
-		i *= (1000L * 1000L * 1000L * 1000L);
+		multiplier = 1000UL * 1000UL * 1000UL * 1000UL;
 		s++;
 		break;
 	case 'P':
 	case 'p':
-		i *= (1000L * 1000L * 1000L * 1000L * 1000L);
+		multiplier = 1000UL * 1000UL * 1000UL * 1000UL * 1000UL;
 		s++;
 		break;
 	default:
@@ -272,7 +338,12 @@ cf_str_atoi_si(const char* s, uint64_t* value)
 	if (*s != 0) {
 		return (-1); // reached a non-num before EOL
 	}
-	*value = i;
+
+	if (i > UINT64_MAX / multiplier) {
+		return -1;
+	}
+
+	*value = i * multiplier;
 	return (0);
 }
 
@@ -285,13 +356,26 @@ cf_str_atoi_seconds(const char* s, uint32_t* value)
 		return 0;
 	}
 
+	if (! (*s >= '0' && *s <= '9')) {
+		return -1; // require at least one digit - bare suffix or empty is not 0
+	}
+
 	uint64_t i = 0;
 
 	while (*s >= '0' && *s <= '9') {
+		uint64_t digit = (uint64_t)(*s - '0');
+
+		if (i > (UINT64_MAX - digit) / 10) {
+			return -1;
+		}
+
 		i *= 10;
-		i += *s - '0';
+		i += digit;
 		s++;
 	}
+
+	uint64_t multiplier = 1;
+
 	switch (*s) {
 	case 'S':
 	case 's':
@@ -299,17 +383,17 @@ cf_str_atoi_seconds(const char* s, uint32_t* value)
 		break;
 	case 'M':
 	case 'm':
-		i *= 60;
+		multiplier = 60;
 		s++;
 		break;
 	case 'H':
 	case 'h':
-		i *= (60 * 60);
+		multiplier = 60 * 60;
 		s++;
 		break;
 	case 'D':
 	case 'd':
-		i *= (60 * 60 * 24);
+		multiplier = 60 * 60 * 24;
 		s++;
 		break;
 	default:
@@ -318,10 +402,12 @@ cf_str_atoi_seconds(const char* s, uint32_t* value)
 	if (*s != 0) {
 		return (-1); // reached a non-num before EOL
 	}
-	if (i > UINT32_MAX) {
-		return (-1); // overflows a uint32_t
+
+	if (i > UINT32_MAX / multiplier) {
+		return -1; // overflows a uint32_t
 	}
-	*value = (uint32_t)i;
+
+	*value = (uint32_t)(i * multiplier);
 	return (0);
 }
 

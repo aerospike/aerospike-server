@@ -1284,7 +1284,7 @@ cfg_set_service(const char* cmd)
 		uint32_t val; // this can be any value up to INT32_MAX
 		if (cf_str_atoi_u32(v, &val) != 0 || val < MIN_PROTO_FD_MAX ||
 				val > MAX_PROTO_FD_MAX) {
-			cf_warning(AS_INFO, "invalid proto-fd-max %u", val);
+			cf_warning(AS_INFO, "invalid proto-fd-max %s", v);
 			return false;
 		}
 		uint32_t prev_val = g_config.n_proto_fd_max;
@@ -1383,7 +1383,7 @@ cfg_set_service(const char* cmd)
 			cf_warning(AS_INFO, "smd-compression-level is enterprise-only");
 			return false;
 		}
-		if (cf_str_atoi(v, &val) != 0 || val < -10 || val > 22) {
+		if (cf_strtol_i32(v, &val) != 0 || val < -10 || val > 22) {
 			return false;
 		}
 		cf_info(AS_INFO, "Changing value of smd-compression-level from %d to %d",
@@ -1605,6 +1605,7 @@ cfg_set_namespace(const char* cmd, as_namespace* ns)
 	char v[1024];
 	int v_len = sizeof(v);
 	int val;
+	uint32_t val_u32;
 	char bool_val[2][6] = { "false", "true" };
 
 	v_len = sizeof(v);
@@ -2075,7 +2076,7 @@ cfg_set_namespace(const char* cmd, as_namespace* ns)
 					"replication-compression-level is enterprise-only");
 			return false;
 		}
-		if (cf_str_atoi(v, &val) != 0 || val < -10 || val > 22) {
+		if (cf_strtol_i32(v, &val) != 0 || val < -10 || val > 22) {
 			return false;
 		}
 		cf_info(AS_INFO,
@@ -2119,7 +2120,7 @@ cfg_set_namespace(const char* cmd, as_namespace* ns)
 			cf_warning(AS_INFO, "migrate-compression-level is enterprise-only");
 			return false;
 		}
-		if (cf_str_atoi(v, &val) != 0 || val < -10 || val > 22) {
+		if (cf_strtol_i32(v, &val) != 0 || val < -10 || val > 22) {
 			return false;
 		}
 		cf_info(AS_INFO,
@@ -2848,20 +2849,20 @@ cfg_set_namespace(const char* cmd, as_namespace* ns)
 			cf_warning(AS_INFO, "compression-acceleration is enterprise-only");
 			return false;
 		}
-		if (cf_str_atoi(v, &val) != 0 || val < 1 || val > 65537) {
+		if (cf_str_atoi_u32(v, &val_u32) != 0 || val_u32 < 1 || val_u32 > 65537) {
 			return false;
 		}
 		cf_info(AS_INFO,
-				"Changing value of compression-acceleration of ns %s from %u to %d",
-				ns->name, ns->storage_compression_acceleration, val);
-		ns->storage_compression_acceleration = (uint32_t)val;
+				"Changing value of compression-acceleration of ns %s from %u to %u",
+				ns->name, ns->storage_compression_acceleration, val_u32);
+		ns->storage_compression_acceleration = val_u32;
 	}
 	else if (as_info_parameter_get(cmd, "compression-level", v, &v_len) == 0) {
 		if (as_error_enterprise_only()) {
 			cf_warning(AS_INFO, "compression-level is enterprise-only");
 			return false;
 		}
-		if (cf_str_atoi(v, &val) != 0 || val < 1 || val > 9) {
+		if (cf_strtol_i32(v, &val) != 0 || val < 1 || val > 9) {
 			return false;
 		}
 		cf_info(AS_INFO,
