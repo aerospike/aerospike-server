@@ -4693,6 +4693,7 @@ cdt_untrusted_get_size(const uint8_t* buf, uint32_t buf_sz, msgpack_type* ptype,
 	uint8_t top_flags = 0;
 	uint32_t ret_sz = 0;
 	uint32_t top_ele_count = 0; // set to 0 to shut the compiler up
+	uint32_t top_content_raw_sz = 0;
 	msgpack_type dummy_type;
 
 	if (ptype == NULL) {
@@ -4791,22 +4792,27 @@ cdt_untrusted_get_size(const uint8_t* buf, uint32_t buf_sz, msgpack_type* ptype,
 				ret_sz += as_pack_ext_header_get_size(0);
 			}
 		}
+
+		// The persisted offset-index width is chosen from the top-level content
+		// size. cdt_stack_untrusted_rewrite sizes it from the raw
+		// (un-compacted) content (est_content_sz = end - next_b); size it here
+		// from the same raw span so the allocation can never be smaller than
+		// the layout.
+		if (i == 0) {
+			top_content_raw_sz = (uint32_t)(end - next_b);
+		}
 	}
 
 	if (flags_is_persist(top_flags)) {
-		uint32_t content_sz = ret_sz - as_pack_ext_header_get_size(0);
 		uint32_t ext_content_sz;
 
 		if (*ptype == MSGPACK_TYPE_MAP) {
-			content_sz -= as_pack_map_header_get_size(top_ele_count);
-			content_sz -= as_pack_nil_size();
 			ext_content_sz = map_calc_ext_content_sz(top_flags,
-					top_ele_count - 1, content_sz);
+					top_ele_count - 1, top_content_raw_sz);
 		}
 		else { // LIST
-			content_sz -= as_pack_list_header_get_size(top_ele_count);
 			ext_content_sz = list_calc_ext_content_sz(top_flags,
-					top_ele_count - 1, content_sz);
+					top_ele_count - 1, top_content_raw_sz);
 		}
 
 		ret_sz -= as_pack_ext_header_get_size(0);
