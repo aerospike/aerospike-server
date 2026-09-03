@@ -99,8 +99,8 @@ void get_mem_info(bool cgroup_mode, uint64_t* free_mem_kbytes,
 
 void get_mem_info_with_cgroup_stats(bool cgroup_mode, uint64_t* free_mem_kbytes,
 		uint32_t* free_mem_pct, uint64_t* host_free_mem_kbytes,
-		uint32_t* host_free_mem_pct, uint64_t* thp_mem_kbytes,
-		cf_os_cgroup_mem_stats* cg_stats);
+		uint32_t* host_free_mem_pct, uint64_t* host_total_mem_kbytes,
+		uint64_t* thp_mem_kbytes, cf_os_cgroup_mem_stats* cg_stats);
 
 uint64_t cf_os_process_rss_bytes(void);
 

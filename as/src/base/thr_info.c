@@ -4179,17 +4179,20 @@ append_system_memory_statistics(cf_dyn_buf* db)
 
 	uint64_t host_free_mem_kbytes;
 	uint32_t host_free_mem_pct;
+	uint64_t host_total_mem_kbytes;
 
 	cf_os_cgroup_mem_stats cg_stats = { 0 };
 
 	get_mem_info_with_cgroup_stats(g_config.cgroup_mem_tracking,
 			&free_mem_kbytes, &free_mem_pct, &host_free_mem_kbytes,
-			&host_free_mem_pct, &thp_mem_kbytes, &cg_stats);
+			&host_free_mem_pct, &host_total_mem_kbytes, &thp_mem_kbytes,
+			&cg_stats);
 
 	info_append_uint64(db, "system_free_mem_kbytes", free_mem_kbytes);
 	info_append_int(db, "system_free_mem_pct", free_mem_pct);
 	info_append_uint64(db, "host_free_mem_kbytes", host_free_mem_kbytes);
 	info_append_int(db, "host_free_mem_pct", host_free_mem_pct);
+	info_append_uint64(db, "host_total_mem_kbytes", host_total_mem_kbytes);
 	info_append_uint64(db, "system_thp_mem_kbytes", thp_mem_kbytes);
 
 	if (cg_stats.usable) {

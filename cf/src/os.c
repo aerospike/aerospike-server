@@ -149,10 +149,11 @@ close_fd_deferred(int32_t* fd)
 
 static void
 sys_mem_info(uint64_t* free_mem_kbytes, uint32_t* free_mem_pct,
-		uint64_t* thp_mem_kbytes)
+		uint64_t* total_mem_kbytes, uint64_t* thp_mem_kbytes)
 {
 	*free_mem_kbytes = 0;
 	*free_mem_pct = 0;
+	*total_mem_kbytes = 0;
 	*thp_mem_kbytes = 0;
 
 	char buf[4096] = { 0 };
@@ -242,6 +243,7 @@ sys_mem_info(uint64_t* free_mem_kbytes, uint32_t* free_mem_pct,
 	*free_mem_kbytes = mem_available;
 	*free_mem_pct =
 			mem_total == 0 ? 0 : (uint32_t)((mem_available * 100) / mem_total);
+	*total_mem_kbytes = mem_total;
 	*thp_mem_kbytes = anon_huge_pages;
 }
 
@@ -949,12 +951,13 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 void
 get_mem_info_with_cgroup_stats(bool cgroup_mode, uint64_t* free_mem_kbytes,
 		uint32_t* free_mem_pct, uint64_t* host_free_mem_kbytes,
-		uint32_t* host_free_mem_pct, uint64_t* thp_mem_kbytes,
-		cf_os_cgroup_mem_stats* cg_stats)
+		uint32_t* host_free_mem_pct, uint64_t* host_total_mem_kbytes,
+		uint64_t* thp_mem_kbytes, cf_os_cgroup_mem_stats* cg_stats)
 {
 	uint64_t host_thp_kbytes = 0;
 
-	sys_mem_info(host_free_mem_kbytes, host_free_mem_pct, &host_thp_kbytes);
+	sys_mem_info(host_free_mem_kbytes, host_free_mem_pct,
+			host_total_mem_kbytes, &host_thp_kbytes);
 
 	uint64_t cgroup_free_mem_kbytes = 0;
 	uint32_t cgroup_free_mem_pct = 0;
@@ -983,8 +986,11 @@ get_mem_info(bool cgroup_mode, uint64_t* free_mem_kbytes,
 		uint32_t* free_mem_pct, uint64_t* host_free_mem_kbytes,
 		uint32_t* host_free_mem_pct, uint64_t* thp_mem_kbytes)
 {
+	uint64_t host_total_mem_kbytes;
+
 	get_mem_info_with_cgroup_stats(cgroup_mode, free_mem_kbytes, free_mem_pct,
-			host_free_mem_kbytes, host_free_mem_pct, thp_mem_kbytes, NULL);
+			host_free_mem_kbytes, host_free_mem_pct, &host_total_mem_kbytes,
+			thp_mem_kbytes, NULL);
 }
 
 uint64_t
