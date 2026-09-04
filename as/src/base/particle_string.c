@@ -440,6 +440,11 @@ static int string_modify_op_prepend(const string_op* op, uint8_t* to,
 static int string_modify_op_repeat(const string_op* op, uint8_t* to,
 		const uint8_t* from, uint32_t old_sz, uint32_t* new_sz);
 
+// Normalization predicates - defined below, but the modify size estimate needs
+// them to know whether needle_sz can stand in for a matched span.
+static bool is_ascii(const uint8_t* data, uint32_t sz);
+static bool is_nfc_utf8(const uint8_t* data, uint32_t sz);
+
 // Read ops
 static int string_read_op_strlen(const string_op* op, const uint8_t* from,
 		uint32_t sz, as_bin* rb);
@@ -2007,11 +2012,13 @@ string_prepare_read_op(string_state* state, string_op* op)
 }
 
 // Parse the [needle, replacement] msgpack list from op->buf.
-// Returns AS_OK and sets *needle_sz_r / *replacement_sz_r (both without the
-// Aerospike type byte) on success, or a negative error code on failure.
+// Returns AS_OK and sets *needle_r / *needle_sz_r / *replacement_sz_r (all
+// without the Aerospike type byte) on success, or a negative error code on
+// failure.
 static int
 string_parse_needle_replacement(const string_op* op, const string_state* state,
-		uint32_t* needle_sz_r, uint32_t* replacement_sz_r)
+		const uint8_t** needle_r, uint32_t* needle_sz_r,
+		uint32_t* replacement_sz_r)
 {
 	msgpack_in mp = { .buf = op->buf, .buf_sz = op->buf_sz };
 
@@ -2052,6 +2059,7 @@ string_parse_needle_replacement(const string_op* op, const string_state* state,
 				"needle")) {
 		return -AS_ERR_PARAMETER;
 	}
+	*needle_r = needle + 1; // past the Aerospike string type byte
 	*needle_sz_r = needle_sz - 1;
 
 	uint32_t replacement_sz;
@@ -2150,29 +2158,43 @@ string_prepare_modify_op(string_state* state, string_op* op)
 	case AS_STRING_OP_REPLACE:
 	case AS_STRING_OP_REPLACE_ALL: {
 		uint32_t needle_sz, replacement_sz;
-		int rc = string_parse_needle_replacement(op, state, &needle_sz,
+		const uint8_t* needle;
+		int rc = string_parse_needle_replacement(op, state, &needle, &needle_sz,
 				&replacement_sz);
 
 		if (rc != AS_OK) {
 			return rc;
 		}
 
-		// Multiply by 3 for worst-case UTF-16->UTF-8 re-encoding expansion.
-		// REPLACE: k=1, at most one substitution.
-		// REPLACE_ALL: at most (old_size / needle_sz) non-overlapping substitutions.
-		uint64_t k = (state->op_type == AS_STRING_OP_REPLACE)
-				? 1ULL
-				: (uint64_t)(state->old_size / needle_sz);
-		uint64_t removed;
-
-		if (__builtin_mul_overflow(k, (uint64_t)needle_sz, &removed)) {
-			return string_modify_estimated_size_overflow(state);
-		}
-
 		uint64_t base = (uint64_t)state->old_size;
 
-		if (removed > base) {
-			return string_modify_estimated_size_overflow(state);
+		// needle_sz bounds a matched span only while the needle is already its
+		// own shortest canonical form. The collator normalizes, so a decomposed
+		// needle matches a shorter composed span: more matches fit than
+		// base / needle_sz, and each removes less than needle_sz. Both
+		// directions understate the result, so neither term survives.
+		bool needle_is_shortest_form = is_ascii(needle, needle_sz) ||
+				is_nfc_utf8(needle, needle_sz);
+
+		// REPLACE substitutes once. REPLACE_ALL substitutes at every match -
+		// one per needle_sz bytes while a span cannot be shorter than the
+		// needle, otherwise one per byte, since a match consumes at least one.
+		uint64_t k = state->op_type == AS_STRING_OP_REPLACE
+				? 1ULL
+				: (needle_is_shortest_form ? base / (uint64_t)needle_sz : base);
+
+		uint64_t removed = 0;
+
+		if (needle_is_shortest_form) {
+			if (__builtin_mul_overflow(k, (uint64_t)needle_sz, &removed)) {
+				return string_modify_estimated_size_overflow(state);
+			}
+
+			if (removed > base) {
+				// REPLACE sizes for a substitution before checking whether one
+				// fits. A needle longer than the value has no match.
+				removed = 0;
+			}
 		}
 
 		uint64_t added;
@@ -2187,8 +2209,19 @@ string_prepare_modify_op(string_state* state, string_op* op)
 			return string_modify_estimated_size_overflow(state);
 		}
 
+		// Removal is only charged when the match happens. Fewer matches than k
+		// leave more of the value in place, so the value itself is a floor -
+		// with no match at all the op answers it unchanged.
+		if (inner < base) {
+			inner = base;
+		}
+
 		uint64_t est;
 
+		// The write-out gives ICU result_len * 3 as capacity, so the
+		// allocation must cover UChars, not bytes. UChars <= bytes for
+		// valid UTF-8, and charging removal in bytes is covered by the
+		// surplus bytes of the multi-byte characters the matches consume.
 		if (__builtin_mul_overflow(inner, 3ULL, &est)) {
 			return string_modify_estimated_size_overflow(state);
 		}
@@ -3547,6 +3580,12 @@ string_modify_op_replace_K(const string_op* op, uint8_t* to,
 	replacement++; // Advance past Aerospike string type byte (0x03)
 	replacement_sz--;
 
+	// ICU errors on a zero-length operand rather than reporting no match.
+	if (old_sz == 0) {
+		*new_sz = 0;
+		return AS_OK;
+	}
+
 	if (needle_sz > 0 &&
 			((is_ascii(from, old_sz) && is_ascii(needle, needle_sz)) ||
 					(is_nfc_utf8(from, old_sz) &&
@@ -3853,7 +3892,8 @@ string_read_op_find(const string_op* op, const uint8_t* from, uint32_t sz,
 		return AS_OK;
 	}
 
-	if (op->buf_sz > sz) {
+	// ICU errors on a zero-length operand rather than reporting no match.
+	if (sz == 0) {
 		rb->particle = (as_particle*)(uint64_t)-1;
 		as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_INTEGER);
 		return AS_OK;
@@ -3967,6 +4007,19 @@ static int
 string_read_op_starts_with(const string_op* op, const uint8_t* from,
 		uint32_t sz, as_bin* rb)
 {
+	// ICU errors on a zero-length operand rather than reporting no match.
+	if (op->buf_sz == 0) {
+		rb->particle = (as_particle*)(uint64_t)true;
+		as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_BOOL);
+		return AS_OK;
+	}
+
+	if (sz == 0) {
+		rb->particle = (as_particle*)(uint64_t)false;
+		as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_BOOL);
+		return AS_OK;
+	}
+
 	if ((is_ascii(from, sz) && is_ascii(op->buf, op->buf_sz)) ||
 			(is_nfc_utf8(from, sz) && is_nfc_utf8(op->buf, op->buf_sz))) {
 		rb->particle = (as_particle*)(uint64_t)(op->buf_sz <= sz &&
@@ -4027,6 +4080,19 @@ static int
 string_read_op_ends_with(const string_op* op, const uint8_t* from, uint32_t sz,
 		as_bin* rb)
 {
+	// ICU errors on a zero-length operand rather than reporting no match.
+	if (op->buf_sz == 0) {
+		rb->particle = (as_particle*)(uint64_t)true;
+		as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_BOOL);
+		return AS_OK;
+	}
+
+	if (sz == 0) {
+		rb->particle = (as_particle*)(uint64_t)false;
+		as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_BOOL);
+		return AS_OK;
+	}
+
 	if ((is_ascii(from, sz) && is_ascii(op->buf, op->buf_sz)) ||
 			(is_nfc_utf8(from, sz) && is_nfc_utf8(op->buf, op->buf_sz))) {
 		rb->particle = (as_particle*)(uint64_t)(op->buf_sz <= sz &&
