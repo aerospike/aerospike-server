@@ -77,7 +77,7 @@ static as_particle_type ktype_from_smd_char(char c);
 static char itype_to_smd_char(as_sindex_type itype);
 static char ktype_to_smd_char(as_particle_type ktype);
 static inline bool is_set_index_smd_key(const char* smd_key);
-static void sindex_list(as_info_cmd_args* args);
+static bool sindex_list(as_info_cmd_args* args);
 static void set_index_list(as_info_cmd_args* args);
 static bool sindex_exists(const as_namespace* ns, const char* iname);
 
@@ -736,7 +736,10 @@ as_sindex_manager_stats_str(as_namespace* ns, char* iname, cf_dyn_buf* db)
 	return as_set_index_stats_str(ns, p_set, db);
 }
 
-static void
+// Returns false iff a parameter error was already replied into db (the caller
+// must stop, not emit the set-index list); true otherwise (SI output may be
+// empty).
+static bool
 sindex_list(as_info_cmd_args* args)
 {
 	const char* params = args->params;
@@ -751,7 +754,7 @@ sindex_list(as_info_cmd_args* args)
 	rv = info_param_optional_local_namespace_is_ok(db, ns_str, &ns, rv);
 
 	if (rv == INFO_PARAM_FAIL_REPLIED) {
-		return;
+		return false;
 	}
 
 	char b64_str[6];
@@ -762,7 +765,7 @@ sindex_list(as_info_cmd_args* args)
 	rv = as_info_optional_param_is_ok(db, "b64", b64_str, rv);
 
 	if (rv == INFO_PARAM_FAIL_REPLIED) {
-		return;
+		return false;
 	}
 
 	if (rv == INFO_PARAM_OK) {
@@ -775,7 +778,7 @@ sindex_list(as_info_cmd_args* args)
 		else {
 			cf_warning(AS_INFO, "b64 value invalid");
 			as_info_respond_error(db, AS_ERR_PARAMETER, "bad b64");
-			return;
+			return false;
 		}
 	}
 
@@ -790,6 +793,8 @@ sindex_list(as_info_cmd_args* args)
 		as_sindex_list_str(ns, b64, db);
 		cf_dyn_buf_chomp_char(db, ';');
 	}
+
+	return true;
 }
 
 static int
@@ -860,10 +865,22 @@ set_index_list(as_info_cmd_args* args)
 void
 as_sindex_manager_list_str(struct as_info_cmd_args_s* args)
 {
-	sindex_list(args);
-	cf_dyn_buf_append_char(args->db, ';');
+	size_t used_sz_before = args->db->used_sz;
+
+	if (! sindex_list(args)) {
+		return;
+	}
+
+	// Emit the SI/set-index separator only if sindex_list() grew the buffer;
+	// otherwise a set-only namespace gets a stray leading ';' (AER-6891). Use
+	// '>' not '!=' so a shrink (a trailing ';' chomped when the SI list is
+	// empty) can never fire it. A trailing separator (empty set list) is
+	// chomped by set_index_list().
+	if (args->db->used_sz > used_sz_before) {
+		cf_dyn_buf_append_char(args->db, ';');
+	}
+
 	set_index_list(args);
-	cf_dyn_buf_chomp_char(args->db, ';');
 }
 
 void
