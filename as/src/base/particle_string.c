@@ -2000,9 +2000,12 @@ string_prepare_read_op(string_state* state, string_op* op)
 		if (state->n_args == 1) {
 			op->int_arg1 = 1; // default to first occurrence when not provided
 		}
-		if (op->int_arg1 == 0)
-			// occurrence must be non-zero (1=first, -1=last)
+		if (op->int_arg1 == 0) {
+			as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+					"%s: occurrence must be non-zero (1=first, -1=last)",
+					state->def->name);
 			return -AS_ERR_PARAMETER;
+		}
 		break;
 	default:
 		// should never happen?
@@ -4464,6 +4467,9 @@ string_read_op_is_numeric(const string_op* op, const uint8_t* from, uint32_t sz,
 		result = is_valid_float_string(from, sz);
 		break;
 	default:
+		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+				"string_is_numeric: unrecognized numeric_type %d",
+				(int)op->int_arg1);
 		return -AS_ERR_PARAMETER;
 	}
 
