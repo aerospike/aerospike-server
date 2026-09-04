@@ -162,6 +162,9 @@ typedef struct exp_op_value_blob_s {
 	exp_op_base_mem base;
 	const uint8_t* value;
 	uint32_t value_sz;
+	// CDT literals only - a marker survives canonicalization, so eval refuses
+	// the value rather than let it reach a particle.
+	bool has_nonstorage;
 } exp_op_value_blob;
 
 typedef struct exp_op_value_int_s {
@@ -192,6 +195,9 @@ typedef struct exp_rt_value_s {
 		struct r_bytes_s {
 			uint32_t sz;
 			const uint8_t* contents;
+			// In the arm, not the header - the only op that would carry it
+			// into r_bin is the one that refuses it.
+			bool has_nonstorage;
 		} r_bytes;
 
 		struct r_geo_const_s {

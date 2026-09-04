@@ -144,7 +144,7 @@ typedef enum {
 	EXP_ERR_BAD_MSGPACK, // malformed / untranslatable stored msgpack
 	EXP_ERR_CALL_ARG, // invalid argument to a CDT/bits/HLL sub-op
 	EXP_ERR_GEOJSON, // invalid geojson
-	EXP_ERR_UNORDERED_MAP // ordered comparison of an unordered map (unsupported)
+	EXP_ERR_PRESERVE_ORDER_MAP // operand's element order is not key order
 } exp_err_reason;
 
 // Stamp an eval fault into the trilean rt_value. 'op_ix' is the FAILING op's
@@ -311,7 +311,7 @@ static const uint8_t* rt_value_get_str(const rt_value* val, uint32_t* sz_r);
 static as_exp_trilean cmp_bytes(exp_op_code code, const rt_value* e0,
 		const rt_value* e1);
 static as_exp_trilean cmp_msgpack(exp_op_code code, const rt_value* v0,
-		const rt_value* v1, bool* is_unordered_map);
+		const rt_value* v1, bool* preserve_order);
 
 // Runtime call utilities.
 static void call_cleanup_fn(call_cleanup* cc);
@@ -634,6 +634,32 @@ as_exp_result_has_nonstorage(const as_exp_result* res)
 	return res->type == AS_EXP_RESULT_MSGPACK && res->msgpack.has_nonstorage != 0;
 }
 
+bool
+as_exp_result_has_preserve_order_map(const as_exp_result* res)
+{
+	if (res->type == AS_EXP_RESULT_MSGPACK) {
+		return map_buf_is_preserve_order(res->msgpack.ptr, res->msgpack.sz);
+	}
+
+	if (res->type != AS_EXP_RESULT_BIN) {
+		return false;
+	}
+
+	as_bin b = { .particle = res->particle.ptr };
+
+	as_bin_state_set_from_type(&b, res->particle.ptr->type);
+
+	if (as_bin_get_particle_type(&b) != AS_PARTICLE_TYPE_MAP) {
+		return false;
+	}
+
+	cdt_payload packed;
+
+	as_bin_particle_map_get_packed_val(&b, &packed);
+
+	return map_buf_is_preserve_order(packed.ptr, packed.sz);
+}
+
 // Tri-state like as_exp_eval: TRUE produced a result, UNK is a clean
 // non-match, ERROR is a fault that also stages the eval-phase trace + message.
 as_exp_trilean
@@ -912,8 +938,8 @@ exp_err_reason_msg(exp_err_reason reason)
 		return "invalid argument to a collection operation";
 	case EXP_ERR_GEOJSON:
 		return "invalid GeoJSON";
-	case EXP_ERR_UNORDERED_MAP:
-		return "cannot compare an unordered map";
+	case EXP_ERR_PRESERVE_ORDER_MAP:
+		return "cannot compare a map with preserved element order";
 	}
 
 	// EXP_ERR_NONE, or a value from outside the enum. No fault site leaves the
@@ -1564,17 +1590,14 @@ exp_eval_compare(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	}
 	case EXP_RTYPE_LIST:
 	case EXP_RTYPE_MAP: {
-		bool is_unordered_map = false;
+		bool preserve_order = false;
 
-		ret_val->r_trilean = cmp_msgpack(ob->code, &v0, &v1, &is_unordered_map);
+		ret_val->r_trilean = cmp_msgpack(ob->code, &v0, &v1, &preserve_order);
 
-		// Distinguish a legal-but-unsupported unordered-map comparison from
-		// genuinely malformed stored msgpack, so the client message is
-		// accurate.
 		if (ret_val->r_trilean == AS_EXP_ERROR) {
 			rt_set_error(ret_val, self_ix,
-					is_unordered_map ? EXP_ERR_UNORDERED_MAP
-									 : EXP_ERR_BAD_MSGPACK);
+					preserve_order ? EXP_ERR_PRESERVE_ORDER_MAP
+								   : EXP_ERR_BAD_MSGPACK);
 		}
 
 		break;
@@ -2909,6 +2932,18 @@ eval_map_keys_or_values(runtime* rt, const op_base_mem* ob, rt_value* ret_val,
 		return;
 	}
 
+	// The one op that lifts literal bytes into a particle, so the marker has
+	// to stop here - past this the value is an as_bin and the flag is gone.
+	//
+	// Keys need no such gate, but for two different reasons: a wire literal's
+	// key type is refused at build, and an AEL literal's key cannot parse a
+	// marker at all - the map_key grammar has no case for one. A grammar
+	// change would leave the keys arm with no runtime backstop.
+	if (is_values && rt_map.r_bytes.has_nonstorage) {
+		rt_set_error(ret_val, self_ix, EXP_ERR_BAD_MSGPACK);
+		return;
+	}
+
 	as_bin rb;
 	define_rollback_alloc(alloc, NULL, 1);
 
@@ -3433,6 +3468,7 @@ exp_eval_value(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		ret_val->type = RT_MSGPACK;
 		ret_val->r_bytes.contents = ((op_value_blob*)ob)->value;
 		ret_val->r_bytes.sz = ((op_value_blob*)ob)->value_sz;
+		ret_val->r_bytes.has_nonstorage = ((op_value_blob*)ob)->has_nonstorage;
 		break;
 	default:
 		cf_crash(AS_EXP, "unexpected code %u", ob->code);
@@ -3696,10 +3732,10 @@ rt_value_destroy(rt_value* val)
 	}
 }
 
-// Free the per-bin slots after eval. Only masked object bins hold a particle;
-// they're borrowed views (do_not_destroy=1) and this is their sole freer. If
-// the result aliases a slot's particle, hand ownership to the result instead
-// so it is freed exactly once.
+// Free the per-bin slots after eval. Only masked or canonicalized object bins
+// hold a particle; they're borrowed views (do_not_destroy=1) and this is their
+// sole freer. If the result aliases a slot's particle, hand ownership to the
+// result instead so it is freed exactly once.
 static void
 rt_release_bins(runtime* rt, rt_value* ret_val)
 {
@@ -3767,6 +3803,94 @@ rt_bin_translate(rt_value* bin, rt_value* ret_val)
 	}
 }
 
+// A stored CDT is never re-validated on read, so a bin's keys may not be in
+// canonical order - and comparison relies on actual key order. Such a bin is
+// rewritten into an exp-owned copy. Records hold them from two eras: particles
+// predating sort-on-write (7.0), and map results an expression write op stored
+// in the order their op selected.
+//
+// Once per bin slot per evaluation - the memo is the eval's own var array, so
+// a record evaluated twice walks twice, as an expression sindex does on every
+// write. Almost every bin is already canonical, but proving that walks the
+// whole buffer: the cheap outcome is the absent copy, not absent work, and a
+// load wanting only the particle type pays for it.
+static void
+rt_bin_canonicalize(rt_value* val)
+{
+	if (val->type != RT_BIN && val->type != RT_BIN_PTR) {
+		return;
+	}
+
+	const as_bin* b = val->type == RT_BIN ? &val->r_bin : val->r_bin_p;
+	as_particle_type type = as_bin_get_particle_type(b);
+	cdt_payload packed;
+
+	if (type == AS_PARTICLE_TYPE_MAP) {
+		as_bin_particle_map_get_packed_val(b, &packed);
+	}
+	else if (type == AS_PARTICLE_TYPE_LIST) {
+		as_bin_particle_list_get_packed_val(b, &packed);
+	}
+	else {
+		return;
+	}
+
+	// toplvl_index keeps a persist index the source carried, matching how the
+	// bin was sized and built on the way in. It matters because the copy can
+	// outlive the eval - a returned bin's particle becomes the caller's - so
+	// dropping the index would let a bin be persisted without the one it was
+	// stored with. The copy is then not bounded by the stored size.
+	//
+	// trust_order_flags because a stored bin is exactly the source that
+	// qualifies - and verifying instead costs a descent per level on a nested
+	// ORDERED list, on a read.
+	define_untrusted_info(info, packed.ptr, packed.sz, .toplvl_index = true,
+			.trust_order_flags = true);
+
+	// Not only malformation: ERR_DUP_KEY and ERR_ORDER are structurally valid,
+	// storable maps - the relic shapes this function exists to repair. They
+	// can't be repaired, so eval compares them on their stored bytes and still
+	// reaches a verdict.
+	if (! cdt_untrusted_check(&info)) {
+		cf_detail(AS_EXP, "rt_bin_canonicalize - %s",
+				cdt_untrusted_err_msg(info.err));
+		return;
+	}
+
+	// Key order is the whole obligation - comparison reads keys in order, and
+	// escaping results must be key ordered. The rest of byte canonicality is
+	// size: a relic's wide headers and persist index pass through as stored.
+	if (cdt_untrusted_fully_checked(&info)) {
+		return; // keep the zero-copy view - no scratch, no copy
+	}
+
+	define_deferred_memory(canon, info.sz);
+
+	if (! cdt_untrusted_rewrite(canon, &info)) { // e.g. non-adjacent dup keys
+		cf_detail(AS_EXP, "rt_bin_canonicalize - %s",
+				cdt_untrusted_err_msg(info.err));
+		return;
+	}
+
+	uint32_t canon_sz = info.sz;
+	int32_t mem_sz = as_particle_size_from_msgpack(canon, canon_sz);
+
+	cf_assert(mem_sz > 0, AS_EXP, "unexpected"); // bytes are freshly rewritten
+
+	as_bin new_bin = { 0 };
+
+	as_bin_particle_from_msgpack(&new_bin, canon, canon_sz,
+			cf_malloc((size_t)mem_sz));
+
+	if (val->type == RT_BIN) { // masked - swap out the slot-owned particle
+		as_bin_particle_destroy(&val->r_bin);
+	}
+
+	val->type = RT_BIN;
+	val->r_bin = new_bin;
+	val->do_not_destroy = 1; // slot-owned, freed by rt_release_bins()
+}
+
 static void
 rt_load_bin(runtime* rt, uint32_t idx, rt_value* ret_val)
 {
@@ -3802,6 +3926,8 @@ rt_load_bin(runtime* rt, uint32_t idx, rt_value* ret_val)
 
 		rt_bin_translate(&temp, ret_val);
 	}
+
+	rt_bin_canonicalize(ret_val);
 }
 
 static bool
@@ -4092,30 +4218,36 @@ cmp_bytes(exp_op_code code, const rt_value* v0, const rt_value* v1)
 	return AS_EXP_UNK; // deadcode for eclipse
 }
 
+// Contents compare by actual byte order, so map operands must have their keys
+// in canonical (sorted) order regardless of the K_ORDERED flag - guaranteed by
+// sort-on-write for stored data, the relic repair at bin load for older bins,
+// build/emit-time key sorts for literals, and, for a map built by a CDT call,
+// the internal result type the expression entry points ask for.
+//
+// A PRESERVE_ORDER map is refused, not answered - it holds its op's selection
+// order. Declaring no key order is a different thing, and is answered.
+//
+// Only the top level is tested, the same reach the write path's guards have -
+// an operand carrying the flag deeper would have had to be stored that way.
+//
+// post: on ERROR, *preserve_order separates that refusal from malformed
+// msgpack - the caller has the op index to stamp, this does not.
 static as_exp_trilean
 cmp_msgpack(exp_op_code code, const rt_value* v0, const rt_value* v1,
-		bool* is_unordered_map)
+		bool* preserve_order)
 {
+	if (map_buf_is_preserve_order(v0->r_bytes.contents, v0->r_bytes.sz) ||
+			map_buf_is_preserve_order(v1->r_bytes.contents, v1->r_bytes.sz)) {
+		*preserve_order = true;
+		return AS_EXP_ERROR;
+	}
+
 	msgpack_in mp0 = { .buf = v0->r_bytes.contents, .buf_sz = v0->r_bytes.sz };
 	msgpack_in mp1 = { .buf = v1->r_bytes.contents, .buf_sz = v1->r_bytes.sz };
 
 	msgpack_cmp_type cmp = msgpack_cmp(&mp0, &mp1);
 
-	// A comparison of malformed/unorderable stored msgpack is a fault. The
-	// caller stamps the op_ix + reason, using *is_unordered_map to tell the
-	// two causes apart.
-	//
 	if (cmp == MSGPACK_CMP_ERROR) {
-		*is_unordered_map = false;
-		return AS_EXP_ERROR;
-	}
-
-	if (mp0.has_unordered_map || mp1.has_unordered_map) {
-		cf_debug(AS_EXP,
-				"illegal comparison of structure containing unordered map - arg0 %s arg1 %s",
-				mp0.has_unordered_map ? "has unordered" : "is ok",
-				mp1.has_unordered_map ? "has unordered" : "is ok");
-		*is_unordered_map = true;
 		return AS_EXP_ERROR;
 	}
 
@@ -4334,8 +4466,11 @@ rt_alloc_mem(runtime* rt, size_t sz, cf_ll_buf* ll_buf)
 static bool
 msgpack_to_bin(runtime* rt, as_bin* to, rt_value* from, cf_ll_buf* ll_buf)
 {
-	msgpack_type type =
-			msgpack_buf_peek_type(from->r_bytes.contents, from->r_bytes.sz);
+	// The storage boundary for a write result and a call receiver alike, so
+	// the walk answers for itself rather than trusting where the bytes came
+	// from.
+	msgpack_in mp = { .buf = from->r_bytes.contents, .buf_sz = from->r_bytes.sz };
+	msgpack_type type = msgpack_peek_type(&mp);
 	uint8_t p_type;
 
 	switch (type) {
@@ -4349,6 +4484,10 @@ msgpack_to_bin(runtime* rt, as_bin* to, rt_value* from, cf_ll_buf* ll_buf)
 		p_type = AS_PARTICLE_TYPE_BLOB;
 		break;
 	default:
+		return false;
+	}
+
+	if (msgpack_sz(&mp) == 0 || mp.has_nonstorage) {
 		return false;
 	}
 

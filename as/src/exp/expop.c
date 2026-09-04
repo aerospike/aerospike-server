@@ -34,6 +34,7 @@
 #include "log.h"
 #include "msgpack_in.h"
 
+#include "base/cdt.h"
 #include "base/datamodel.h"
 #include "base/proto.h"
 #include "exp/exp.h"
@@ -214,6 +215,36 @@ as_exp_modify_tr(const as_exp_ctx* ctx, as_bin* b, const as_msg_op* msg_op,
 				"as_bin_exp_modify_tr - error %u bin %.*s would delete",
 				AS_ERR_OP_NOT_APPLICABLE, (int)msg_op->name_sz, msg_op->name);
 		return -AS_ERR_OP_NOT_APPLICABLE;
+	}
+
+	// A CDT call's map holds selection order, and nothing re-canonicalizes a
+	// value on its way into a bin. Storing one is refused; returning one is not.
+	if (as_bin_get_particle_type(b) == AS_PARTICLE_TYPE_MAP) {
+		cdt_payload packed;
+
+		as_bin_particle_map_get_packed_val(b, &packed);
+
+		if (map_buf_is_preserve_order(packed.ptr, packed.sz)) {
+			// A slab owns every particle it allocated; without one, the bin owns
+			// this.
+			if (particles_llb == NULL) {
+				as_bin_particle_destroy(b);
+			}
+
+			b->particle = old_particle;
+			as_bin_state_set_from_type(b, old_type);
+
+			if ((flags & AS_EXP_FLAG_POLICY_NO_FAIL) != 0) {
+				return AS_OK;
+			}
+
+			cf_detail(AS_PARTICLE,
+					"as_bin_exp_modify_tr - error %u bin %.*s preserved order map",
+					AS_ERR_INCOMPATIBLE_TYPE, (int)msg_op->name_sz, msg_op->name);
+			as_error_details_set_fmt(AS_SUB_NONE,
+					"cannot store a map with preserved element order");
+			return -AS_ERR_INCOMPATIBLE_TYPE;
+		}
 	}
 
 	return AS_OK;

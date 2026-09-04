@@ -59,7 +59,13 @@ typedef enum {
 	RESULT_TYPE_UNUSED14 = 14,
 	RESULT_TYPE_UNUSED15 = 15,
 	RESULT_TYPE_UNORDERED_MAP = 16,
-	RESULT_TYPE_ORDERED_MAP = 17
+	RESULT_TYPE_ORDERED_MAP = 17,
+
+	// Built key ordered like an ordered map but flagged like an unordered one -
+	// the low bits carry the type it stands in for, so masking recovers it.
+	// Sits above AS_CDT_OP_FLAG_RESULT_MASK, which every wire value is masked
+	// to, so only an expression can select it.
+	RESULT_TYPE_INTERNAL_KEY_ORDERED_MAP = 0x00100000 | RESULT_TYPE_UNORDERED_MAP
 } result_type_t;
 
 typedef enum {

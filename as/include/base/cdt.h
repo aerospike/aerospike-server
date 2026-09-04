@@ -30,6 +30,7 @@
 
 #include "cf_defer.h"
 #include "dynbuf.h"
+#include "log.h"
 #include "msgpack_in.h"
 
 #include "base/cdt_wire.h"
@@ -70,6 +71,9 @@ typedef struct cdt_process_state_s {
 	as_cdt_optype type;
 	msgpack_in_vec* mv;
 	uint32_t ele_count;
+	// Never parsed from an op - the parse clears it and only the expression
+	// entry points opt in, so a client cannot reach the type it selects.
+	bool override_result_map_order;
 } cdt_process_state;
 
 typedef struct cdt_payload_s {
@@ -83,6 +87,9 @@ typedef struct cdt_result_data_s {
 	result_type_t type;
 	as_cdt_op_flags flags;
 	bool is_multi;
+	// Carried from the process state. Separate from the fields above because
+	// those are rewritten per op, which would erase it.
+	bool override_result_map_order;
 } cdt_result_data;
 
 typedef struct cdt_mem_s {
@@ -259,6 +266,151 @@ typedef enum {
 	LIST_CMP_ERROR = -1
 } list_cmp_t;
 
+// An adjacent-element scan settles order and uniqueness together - duplicates
+// in sorted input are adjacent by definition.
+typedef enum {
+	CDT_ORDER_SORTED_UNIQUE,
+	CDT_ORDER_SORTED_HAS_DUP,
+	CDT_ORDER_UNSORTED
+} cdt_order_check_t;
+
+// All of these are faults the rewrite cannot repair.
+typedef enum {
+	CDT_UNTRUSTED_OK = 0,
+	CDT_UNTRUSTED_ERR_MSGPACK, // malformed, truncated, or non-storage type
+	CDT_UNTRUSTED_ERR_KEY_TYPE, // map key not int/string/blob
+	CDT_UNTRUSTED_ERR_DUP_KEY,
+	CDT_UNTRUSTED_ERR_ORDER, // declared ordered but keys/elements are not
+	CDT_UNTRUSTED_ERR_PADDING, // trailing bytes after the top-level element
+	CDT_UNTRUSTED_ERR_DEPTH, // nested deeper than the level bound
+	CDT_UNTRUSTED_ERR_TOO_BIG // larger than the level entry can address
+} cdt_untrusted_err;
+
+// One container level of cdt_untrusted_check()'s walk. Offsets are into
+// cdt_untrusted_info.src. A map's key slots are the even ele_remaining values,
+// since the countdown starts at 2 per pair - no separate parity field needed.
+// An ORDERED list scans every element instead, so is_ordered says whether the
+// level made a claim about its own order that the walk has to hold it to.
+typedef struct {
+	uint32_t prev_off; // previous scanned element, UINT32_MAX until set
+	uint32_t ele_remaining : 30;
+	bool is_map : 1;
+	bool is_ordered : 1; // declares K_ORDERED (map) or ORDERED (list)
+} cdt_untrusted_istack;
+
+COMPILER_ASSERT(sizeof(cdt_untrusted_istack) == 8);
+
+// Levels held before either walk allocates - the depth real data reaches, not
+// the depth the bound allows. Sized to the bound instead, no accepted input
+// could ever reach the growth below them, and a fallback nothing exercises is
+// worse than an allocation nothing real hits.
+#define CDT_UNTRUSTED_ISTACK_INIT 16 // the check's levels
+#define CDT_UNTRUSTED_RSTACK_INIT 16 // the rewrite's levels
+
+// Nesting bound for any stored list/map. That there is a bound is forced - a
+// level costs 8 bytes of check stack against as little as one wire byte to ask
+// for, so unbounded a 128 MiB proto of nothing but headers asks for gigabytes.
+// Where to put it is a policy call, and 64 is product's: it is the depth a
+// select context path has been held to for far longer, and no real structure
+// approaches it. Here the two stacks top out at 512 bytes and 1536.
+//
+// It narrows what the server accepts, knowingly. Nesting has never been bounded
+// on any released version, so a stored list/map can be deeper than this and is
+// then refused wherever data arrives over the wire - XDR ship to an upgraded
+// destination, a restore of an older backup, a read-modify-write round trip.
+// This walk is not on the stored-read path - the flat side is its own vtable
+// slot - but reading such a record is not therefore unaffected: converting one
+// to an as_val goes through the shared deserializer, which refuses the same
+// depth.
+#define CDT_UNTRUSTED_MAX_LEVELS 64
+
+// dynmem doubles, so a bound that is not a power of two overshoots it by up to
+// half again before anything refuses.
+COMPILER_ASSERT((CDT_UNTRUSTED_MAX_LEVELS & (CDT_UNTRUSTED_MAX_LEVELS - 1)) == 0);
+
+// Exclusive ceiling on both the source and what a rewrite of it produces.
+// Source alone would not need saying - it can only reach PROTO_SIZE_MAX, which
+// is this - but a retained persist index is sized per element, so a map of tiny
+// pairs rewrites to several times its own length. Far above the 8 MiB a record
+// can reach either way.
+#define CDT_UNTRUSTED_MAX_SZ (1u << 27)
+
+// An element is at least a byte, so a source under the ceiling cannot declare
+// more of them than a check level's countdown holds.
+COMPILER_ASSERT(CDT_UNTRUSTED_MAX_SZ <= 1u << 30);
+
+// Declare a cdt_untrusted_info that examines keys and order. Trailing
+// designated initializers append, so a caller wanting .toplvl_index passes it
+// as one.
+#define define_untrusted_info(_name, _src, _src_sz, ...)                       \
+	cdt_untrusted_info _name = {                                               \
+		.src = (_src), .src_sz = (_src_sz), .examine = true, ##__VA_ARGS__     \
+	}
+
+// Knowing that an element is a map key is per-level state, so without
+// 'examine' key types, key order and duplicates go unexamined. 'checked'
+// says whether the per-level walk ran to completion - NOT that the input is
+// fully validated. An unsorted map has not been proved duplicate-free, because
+// the walk only ever compares a key against the one before it in stored order:
+// keys [c, a, c] walk out with err OK, order UNSORTED and checked true, the
+// duplicate still owed to the rewrite's post-sort scan.
+//
+// The verdict that means "everything rewrite() would prove" is the conjunction
+// - see cdt_untrusted_fully_checked(). A zero-initialized info makes rewrite()
+// validate in full.
+typedef struct {
+	// Input.
+	const uint8_t* src;
+	uint32_t src_sz;
+	bool examine; // false - size only, no key/order examination
+	// Take a declared order flag as true instead of verifying it. Only for
+	// bytes off storage, where reads already rely on that flag holding, so
+	// trusting it adds no exposure that is not already carried. Wire input must
+	// not set it.
+	bool trust_order_flags;
+	// Whether a persist index the source carries may survive level 0. Never
+	// builds one the source did not ask for; sub-levels strip either way.
+	bool toplvl_index;
+	bool allow_nonstorage; // for compare parameters
+
+	// Output.
+	uint32_t sz; // check() - upper bound on output; rewrite() - bytes written
+	msgpack_type type;
+	cdt_order_check_t order;
+	cdt_untrusted_err err;
+	// The bytes 'checked' was computed from. rewrite() ignores a verdict that
+	// did not come from the buffer it is about to read, so reusing one info
+	// across two buffers re-validates instead of trusting the wrong walk.
+	const uint8_t* checked_src;
+	uint32_t checked_src_sz;
+	bool checked;
+	bool is_canonical; // rewrite would be a no-op - implies checked
+	// Only ever true where the caller asked for markers - meaningless
+	// otherwise, since the walk stops at the first one it will not allow.
+	bool has_nonstorage;
+} cdt_untrusted_info;
+
+// Did the walk that set 'checked' actually read the bytes info->src points at
+// now? A caller reusing one info across two buffers gets false here, and pays
+// for re-validation rather than trusting a verdict about other bytes.
+static inline bool
+cdt_untrusted_is_current(const cdt_untrusted_info* info)
+{
+	return info->checked && info->checked_src == info->src &&
+			info->checked_src_sz == info->src_sz;
+}
+
+// The verdict 'checked' is mistaken for: every key type, every declared order
+// and every duplicate settled, which is exactly when rewrite() may skip
+// re-proving them. Order is a whole-walk aggregate, so one unsorted map
+// anywhere in the buffer withdraws the skip for all of it.
+static inline bool
+cdt_untrusted_fully_checked(const cdt_untrusted_info* info)
+{
+	return cdt_untrusted_is_current(info) &&
+			info->order == CDT_ORDER_SORTED_UNIQUE;
+}
+
 typedef struct {
 	order_index ordidx;
 	uint8_t mem_temp[];
@@ -400,9 +552,19 @@ bool as_bin_map_foreach(const as_bin* b, map_foreach_callback cb, void* udata);
 list_cmp_t as_bin_ordered_list_cmp_nondup(const as_bin* b, const uint8_t* buf,
 		uint32_t sz);
 
-// cdt_strip
+// list & map
 uint32_t cdt_strip_indexes_from_particle(const as_particle* p, uint8_t* dest,
 		msgpack_type expected_type);
+
+// Are the elements of one packed container in ascending order - list elements,
+// or map keys when is_map hops the values? Sorted input settles uniqueness in
+// the same pass, hence the tri-state: on a sorted buffer equal elements are
+// necessarily adjacent, so SORTED_HAS_DUP is exact and callers need no second
+// pass over an order index to confirm it. Single level only: nested containers
+// are skipped over, not descended into. Unparseable or uncomparable input
+// reports CDT_ORDER_UNSORTED rather than a distinct error.
+cdt_order_check_t cdt_check_order(const uint8_t* contents, uint32_t content_sz,
+		uint32_t ele_count, bool is_map);
 
 // cdt_delta_value
 bool cdt_calc_delta_init(cdt_calc_delta* cdv, const cdt_payload* delta_value,
@@ -608,6 +770,13 @@ void cdt_idx_mask_print(const uint64_t* mask, uint32_t ele_count,
 
 // list
 bool list_buf_check_and_order(uint8_t* buf, uint32_t buf_sz);
+
+// Are a raw ORDERED-flagged msgpack list buffer's elements in ascending order
+// (duplicates allowed)? False if it doesn't parse or isn't ordered - the AEL
+// path validates lists rather than sorting them, which is why this has no
+// in-place twin of map_buf_check_unique_and_sort().
+// pre: buf is the AEL literal packer's :ORDERED encoding -- header count =
+//      ele_count + 1, ext element with ORDERED, then the elements.
 bool list_buf_check_ordered(const uint8_t* buf, uint32_t buf_sz);
 bool list_buf_fill_offidx(uint8_t* buf, uint32_t buf_sz, offset_index* offidx);
 bool list_buf_init_allidx(const uint8_t* buf, uint32_t buf_sz,
@@ -639,12 +808,27 @@ uint8_t list_get_ext_flags(bool is_ordered, bool is_persist);
 
 // map
 bool map_is_key(const uint8_t* buf, uint32_t buf_sz);
+bool map_buf_is_preserve_order(const uint8_t* buf, uint32_t buf_sz);
 bool map_buf_fill_offidx(uint8_t* buf, uint32_t buf_sz, offset_index* offidx,
 		order_index* ordidx);
 bool map_buf_adjust_ordidx(uint8_t* buf, uint32_t buf_sz, const uint8_t* old,
 		uint32_t old_sz);
 bool map_buf_get_all_k_or_v(const uint8_t* buf, uint32_t buf_sz,
 		cdt_result_data* rd);
+
+// Reject a raw msgpack map buffer with duplicate keys, and key-sort it in place
+// when 'sort'. Non-storage elements (INF / wildcard) are accepted. Duplicates
+// mean the same thing here as on the untrusted wire path, so AEL and the wire
+// agree on what to reject.
+// pre:  buf is the AEL literal packer's encoding, either ordered -- count one
+//       over the pair count, then a K_ORDERED ext pair and a nil -- or
+//       :UNORDERED, a plain header and the pairs alone. Neither carries a
+//       persist index. The caller packed it, so a buffer that won't parse is a
+//       programmer error - and the asserts below cost a node rather than a
+//       test run, on a path a stored expression reaches at startup when its
+//       literals are repacked.
+// post: false and buf untouched if two keys are equal; otherwise true, with buf
+//       key-ordered when 'sort'.
 bool map_buf_check_unique_and_sort(uint8_t* buf, uint32_t buf_sz, bool sort);
 
 uint32_t map_calc_ext_content_sz(uint8_t flags, uint32_t ele_count,
@@ -721,10 +905,43 @@ cdt_context_is_toplvl(const cdt_context* ctx)
 }
 
 // cdt_untrusted
-uint32_t cdt_untrusted_get_size(const uint8_t* buf, uint32_t buf_sz,
-		msgpack_type* type, bool has_toplvl);
-uint32_t cdt_untrusted_rewrite(uint8_t* dest, const uint8_t* src,
-		uint32_t src_sz, bool has_toplvl);
+
+// Walk info->src once: size what a rewrite would produce, and decide whether
+// one is needed at all. Sizing skips str/blob payloads by pointer arithmetic,
+// but the order scan does not: it msgpack_cmp()s adjacent map keys, and
+// adjacent elements of an ORDERED list, which memcmps str/blob payloads and
+// descends into nested containers. That descent makes a nested ORDERED list
+// cost O(depth x bytes), which is what trust_order_flags exists to avoid.
+// Cost is O(bytes) on ordinary map data, not O(headers).
+//
+// Rejections log at cf_detail, not cf_warning - info->err carries the reason
+// and callers log it at the level their own path warrants. Both walks reach a
+// per-evaluation path, so neither may log a client-driven reject at warning.
+// pre:  info zeroed but for the input fields.
+// post: on false, info->err says which fault stopped the walk. On true,
+//       info->sz is an UPPER BOUND on the rewrite's output - exact whenever
+//       is_canonical - the persist-index arm sizes the index from the source
+//       run, as the rewrite does, so it over-sizes when contents compact. It
+//       sizes an allocation; only info->sz re-read after the rewrite is a
+//       length. is_canonical says the rewrite would reproduce src byte for
+//       byte, so callers may keep src.
+bool cdt_untrusted_check(cdt_untrusted_info* info);
+
+// Compactify, mask flags, key-sort and rebuild indexes from info->src into
+// dest.
+// pre:  dest has room for the info->sz cdt_untrusted_check() reported, or for
+//       src_sz when running without a preceding check. A check's key-type and
+//       order findings are taken as given rather than re-proven, but only when
+//       info->checked_src still matches the buffer being rewritten - so a
+//       stale verdict costs re-validation, not a bad write.
+// post: on false, info->err says why the input was rejected and dest holds
+//       partial garbage. On true, info->sz is the bytes written - and it is
+//       the only value a caller may use as a length.
+bool cdt_untrusted_rewrite(uint8_t* dest, cdt_untrusted_info* info);
+
+// Client-facing text for a rejection, for as_error_details_set_fmt(). Crashes
+// on CDT_UNTRUSTED_OK - only call it once a check or rewrite has failed.
+const char* cdt_untrusted_err_msg(cdt_untrusted_err err);
 
 // cdt_check
 bool cdt_check_flags(uint8_t flags, msgpack_type type);
@@ -780,6 +997,12 @@ result_data_set(cdt_result_data* rd, uint64_t result_type, bool is_multi)
 	rd->type = (result_type_t)(result_type & AS_CDT_OP_FLAG_RESULT_MASK);
 	rd->flags = (as_cdt_op_flags)(result_type & (~AS_CDT_OP_FLAG_RESULT_MASK));
 	rd->is_multi = is_multi;
+
+	// Only an unordered map is redirected - every other type means what it
+	// says, and a key-value map's rank order is the point of asking for it.
+	if (rd->override_result_map_order && rd->type == RESULT_TYPE_UNORDERED_MAP) {
+		rd->type = RESULT_TYPE_INTERNAL_KEY_ORDERED_MAP;
+	}
 }
 
 static inline void
@@ -790,18 +1013,29 @@ result_data_set_int(cdt_result_data* rd, int64_t value)
 	}
 }
 
+// The internal key-ordered map stands in for an unordered one, so masking sends
+// it to the arm it belongs in. Ordering is decided separately, off the unmasked
+// type.
+static inline result_type_t
+result_data_dispatch_type(const cdt_result_data* rd)
+{
+	return (result_type_t)(rd->type & AS_CDT_OP_FLAG_RESULT_MASK);
+}
+
 static inline bool
 result_data_is_return_map(const cdt_result_data* rd)
 {
 	return rd->type == RESULT_TYPE_KEY_VALUE_MAP ||
 			rd->type == RESULT_TYPE_UNORDERED_MAP ||
-			rd->type == RESULT_TYPE_ORDERED_MAP;
+			rd->type == RESULT_TYPE_ORDERED_MAP ||
+			rd->type == RESULT_TYPE_INTERNAL_KEY_ORDERED_MAP;
 }
 
 static inline bool
 result_data_is_ordered(const cdt_result_data* rd)
 {
-	return rd->type == RESULT_TYPE_ORDERED_MAP;
+	return rd->type == RESULT_TYPE_ORDERED_MAP ||
+			rd->type == RESULT_TYPE_INTERNAL_KEY_ORDERED_MAP;
 }
 
 static inline bool
@@ -840,7 +1074,7 @@ result_data_is_return_rank_range(const cdt_result_data* rd)
 static inline uint8_t
 result_map_type_to_map_flags(result_type_t type)
 {
-	switch (type) {
+	switch (type & AS_CDT_OP_FLAG_RESULT_MASK) {
 	case RESULT_TYPE_KEY_VALUE_MAP:
 		return AS_PACKED_MAP_FLAG_PRESERVE_ORDER;
 	case RESULT_TYPE_UNORDERED_MAP:

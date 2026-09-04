@@ -649,19 +649,31 @@ map_incr_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 int32_t
 map_size_from_wire(const uint8_t* wire_value, uint32_t value_size)
 {
-	msgpack_type type;
-	uint32_t sz = cdt_untrusted_get_size(wire_value, value_size, &type, true);
+	// Sizing only - the vtable's build entry is separate and cannot be handed
+	// a verdict from here, so the rewrite examines keys and order itself, and
+	// stamps the same info->err.
+	cdt_untrusted_info info = {
+		.src = wire_value, .src_sz = value_size, .toplvl_index = true
+	};
 
-	if (sz == 0 || type != MSGPACK_TYPE_MAP) {
-		cf_warning(AS_PARTICLE,
-				"map_size_from_wire() invalid map input sz %u type %d", sz, type);
-		as_error_details_set_fmt(AS_SUB_NONE,
-				"invalid map data (sz %u, msgpack type %s)", sz,
-				msgpack_type_str(type));
+	if (! cdt_untrusted_check(&info)) {
+		cf_warning(AS_PARTICLE, "map_size_from_wire() invalid map input - %s",
+				cdt_untrusted_err_msg(info.err));
+		as_error_details_set_fmt(AS_SUB_NONE, "%s",
+				cdt_untrusted_err_msg(info.err));
 		return -AS_ERR_UNKNOWN;
 	}
 
-	return (int32_t)(sizeof(map_mem) + sz);
+	if (info.type != MSGPACK_TYPE_MAP) {
+		cf_warning(AS_PARTICLE,
+				"map_size_from_wire() invalid map input type %d", info.type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"invalid map data (msgpack type %s)",
+				msgpack_type_str(info.type));
+		return -AS_ERR_UNKNOWN;
+	}
+
+	return (int32_t)(sizeof(map_mem) + info.sz);
 }
 
 int
@@ -669,17 +681,24 @@ map_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		uint32_t value_size, as_particle** pp)
 {
 	map_mem* p_map_mem = (map_mem*)*pp;
-	uint32_t sz =
-			cdt_untrusted_rewrite(p_map_mem->data, wire_value, value_size, true);
+	// A separate vtable entry from map_size_from_wire(), so the check's
+	// verdict can't be carried here - this validates for itself.
+	cdt_untrusted_info info = {
+		.src = wire_value,
+		.src_sz = value_size,
+		.toplvl_index = true,
+	};
 
-	if (sz == 0) {
-		cf_warning(AS_PARTICLE, "map_from_wire() invalid packed map");
-		as_error_details_set_fmt(AS_SUB_NONE, "invalid packed map");
+	if (! cdt_untrusted_rewrite(p_map_mem->data, &info)) {
+		cf_warning(AS_PARTICLE, "map_from_wire() invalid packed map - %s",
+				cdt_untrusted_err_msg(info.err));
+		as_error_details_set_fmt(AS_SUB_NONE, "%s",
+				cdt_untrusted_err_msg(info.err));
 		return -AS_ERR_UNKNOWN;
 	}
 
 	p_map_mem->type = wire_type;
-	p_map_mem->sz = sz;
+	p_map_mem->sz = info.sz;
 
 #ifdef MAP_DEBUG_VERIFY
 	{
@@ -1053,16 +1072,31 @@ map_subcontext_by_key(cdt_context* ctx, msgpack_in_vec* val)
 		return false;
 	}
 
-	uint8_t* new_key = cf_malloc(key.sz);
-	DEFER_FREE(new_key);
+	define_untrusted_info(key_info, key.ptr, key.sz);
 
-	key.sz = cdt_untrusted_rewrite(new_key, key.ptr, key.sz, false);
-
-	if (key.sz == 0) {
+	if (! cdt_untrusted_check(&key_info)) {
+		cf_warning(AS_PARTICLE, "map_subcontext_by_key() invalid key - %s",
+				cdt_untrusted_err_msg(key_info.err));
 		return false;
 	}
 
-	key.ptr = new_key;
+	// A canonical key needs no copy at all - it is only compared below, and
+	// nothing here retains the pointer (the context stores offsets and sizes).
+	// Map keys are scalars, so this is the common case.
+	uint8_t* new_key = key_info.is_canonical ? NULL : cf_malloc(key_info.sz);
+
+	DEFER_FREE(new_key); // NULL-safe
+
+	if (new_key != NULL) {
+		if (! cdt_untrusted_rewrite(new_key, &key_info)) {
+			cf_warning(AS_PARTICLE, "map_subcontext_by_key() invalid key - %s",
+					cdt_untrusted_err_msg(key_info.err));
+			return false;
+		}
+
+		key.ptr = new_key;
+		key.sz = key_info.sz;
+	}
 
 	if (map_is_k_ordered(&map)) {
 		packed_map_get_range_by_key_interval_ordered(&map, &key, &key, &index,
@@ -1303,10 +1337,14 @@ is_map_type(uint8_t type)
 	return type == AS_PARTICLE_TYPE_MAP;
 }
 
+// Order is not all this gates - index carriage rides on it too, so a bit here
+// is not free to drop on order reasoning alone. Named bits only: an unknown
+// flag must not come to mean order.
 static inline bool
 is_k_ordered(uint8_t flags)
 {
-	return flags != 0;
+	return (flags & (AS_PACKED_MAP_FLAG_KV_ORDERED | AS_PACKED_PERSIST_INDEX)) !=
+			0;
 }
 
 static inline bool
@@ -1354,6 +1392,25 @@ map_is_key(const uint8_t* buf, uint32_t buf_sz)
 	}
 
 	return false;
+}
+
+// Top level suffices: only a result builder sets the flag, and a result is
+// the whole particle.
+bool
+map_buf_is_preserve_order(const uint8_t* buf, uint32_t buf_sz)
+{
+	msgpack_in mp = { .buf = buf, .buf_sz = buf_sz };
+	uint32_t ele_count;
+
+	if (! msgpack_get_map_ele_count(&mp, &ele_count) || ele_count == 0 ||
+			! msgpack_peek_is_ext(&mp)) {
+		return false;
+	}
+
+	msgpack_ext ext;
+
+	return msgpack_get_ext(&mp, &ext) &&
+			(ext.type & AS_PACKED_MAP_FLAG_PRESERVE_ORDER) != 0;
 }
 
 bool
@@ -2142,37 +2199,70 @@ static int
 map_add(cdt_op_mem* com, const cdt_payload* ukey, const cdt_payload* uval,
 		const map_add_control* control, bool set_result)
 {
-	uint32_t k_sz = cdt_untrusted_get_size(ukey->ptr, ukey->sz, NULL, false);
-	uint32_t v_sz = cdt_untrusted_get_size(uval->ptr, uval->sz, NULL, false);
-	uint32_t rewrite_sz = k_sz + v_sz;
+	define_untrusted_info(k_info, ukey->ptr, ukey->sz);
+	define_untrusted_info(v_info, uval->ptr, uval->sz);
 
-	if (k_sz == 0 || v_sz == 0 || ! map_is_key(ukey->ptr, ukey->sz)) {
-		cf_warning(AS_PARTICLE, "map_add() invalid params");
-		as_error_details_set_fmt(AS_SUB_NONE,
-				"map_add: invalid key or value parameter");
+	if (! cdt_untrusted_check(&k_info)) {
+		cf_warning(AS_PARTICLE, "map_add() invalid key - %s",
+				cdt_untrusted_err_msg(k_info.err));
+		as_error_details_set_fmt(AS_SUB_NONE, "map_add: invalid key - %s",
+				cdt_untrusted_err_msg(k_info.err));
 		return -AS_ERR_PARAMETER;
 	}
 
-	define_deferred_memory(val_mem, rewrite_sz);
-
-	k_sz = cdt_untrusted_rewrite(val_mem, ukey->ptr, ukey->sz, false);
-
-	if (k_sz == 0) {
-		cf_warning(AS_PARTICLE, "map_add() invalid params");
-		as_error_details_set_fmt(AS_SUB_NONE, "map_add: invalid key parameter");
+	if (! cdt_untrusted_check(&v_info)) {
+		cf_warning(AS_PARTICLE, "map_add() invalid value - %s",
+				cdt_untrusted_err_msg(v_info.err));
+		as_error_details_set_fmt(AS_SUB_NONE, "map_add: invalid value - %s",
+				cdt_untrusted_err_msg(v_info.err));
 		return -AS_ERR_PARAMETER;
 	}
 
-	v_sz = cdt_untrusted_rewrite(val_mem + k_sz, uval->ptr, uval->sz, false);
-
-	if (v_sz == 0) {
-		cf_warning(AS_PARTICLE, "map_add() invalid params");
-		as_error_details_set_fmt(AS_SUB_NONE, "map_add: invalid value parameter");
+	if (! map_is_key(ukey->ptr, ukey->sz)) {
+		cf_warning(AS_PARTICLE, "map_add() invalid key type");
+		as_error_details_set_fmt(AS_SUB_NONE, "map_add: invalid key type");
 		return -AS_ERR_PARAMETER;
 	}
 
-	const cdt_payload key = { val_mem, k_sz };
-	const cdt_payload value = { val_mem + k_sz, v_sz };
+	// Whichever of key and value is canonical aliases the caller's bytes - they
+	// outlive this op and both are used read-only. Nothing downstream needs
+	// the two adjacent, so only the other one takes scratch. Sizing the
+	// scratch to 0 would be an undefined zero-length VLA, hence the minimum.
+	uint32_t k_scratch = k_info.is_canonical ? 0 : k_info.sz;
+	uint32_t v_scratch = v_info.is_canonical ? 0 : v_info.sz;
+
+	define_deferred_memory(val_mem,
+			k_scratch + v_scratch == 0 ? 1 : k_scratch + v_scratch);
+
+	cdt_payload key = { ukey->ptr, ukey->sz };
+	cdt_payload value = { uval->ptr, uval->sz };
+
+	if (! k_info.is_canonical) {
+		if (! cdt_untrusted_rewrite(val_mem, &k_info)) {
+			cf_warning(AS_PARTICLE, "map_add() invalid key - %s",
+					cdt_untrusted_err_msg(k_info.err));
+			as_error_details_set_fmt(AS_SUB_NONE, "map_add: invalid key - %s",
+					cdt_untrusted_err_msg(k_info.err));
+			return -AS_ERR_PARAMETER;
+		}
+
+		key.ptr = val_mem;
+		key.sz = k_info.sz;
+	}
+
+	if (! v_info.is_canonical) {
+		if (! cdt_untrusted_rewrite(val_mem + k_scratch, &v_info)) {
+			cf_warning(AS_PARTICLE, "map_add() invalid value - %s",
+					cdt_untrusted_err_msg(v_info.err));
+			as_error_details_set_fmt(AS_SUB_NONE, "map_add: invalid value - %s",
+					cdt_untrusted_err_msg(v_info.err));
+			return -AS_ERR_PARAMETER;
+		}
+
+		value.ptr = val_mem + k_scratch;
+		value.sz = v_info.sz;
+	}
+
 	packed_map map;
 
 	if (! packed_map_init_from_com(&map, com, true)) {
@@ -2558,30 +2648,47 @@ static int
 map_add_items(cdt_op_mem* com, const cdt_payload* items,
 		const map_add_control* control)
 {
-	msgpack_type type;
-	uint32_t rewrite_sz =
-			cdt_untrusted_get_size(items->ptr, items->sz, &type, false);
+	define_untrusted_info(info, items->ptr, items->sz);
 
-	if (rewrite_sz == 0 || type != MSGPACK_TYPE_MAP) {
+	if (! cdt_untrusted_check(&info)) {
+		cf_warning(AS_PARTICLE, "map_add_items() invalid parameter - %s",
+				cdt_untrusted_err_msg(info.err));
+		as_error_details_set_fmt(AS_SUB_NONE, "map_add_items: %s",
+				cdt_untrusted_err_msg(info.err));
+		return -AS_ERR_PARAMETER;
+	}
+
+	if (info.type != MSGPACK_TYPE_MAP) {
 		cf_warning(AS_PARTICLE, "map_add_items() invalid parameter, type %d",
-				type);
+				info.type);
 		as_error_details_set_fmt(AS_SUB_NONE,
 				"map_add_items: invalid parameter (msgpack type %s)",
-				msgpack_type_str(type));
+				msgpack_type_str(info.type));
 		return -AS_ERR_PARAMETER;
 	}
 
-	define_deferred_memory(val_mem, rewrite_sz);
+	// Canonical items rewrite to themselves, so alias the caller's bytes - the
+	// re-parse below is equivalent either way, and canonical implies the keys
+	// are already sorted and unique so the sort it feeds is a no-op. Sizing
+	// the scratch to 0 would be an undefined zero-length VLA, hence the
+	// minimum.
+	define_deferred_memory(val_mem, info.is_canonical ? 1 : info.sz);
+	const uint8_t* items_ptr = items->ptr;
 
-	rewrite_sz = cdt_untrusted_rewrite(val_mem, items->ptr, items->sz, false);
+	if (! info.is_canonical) {
+		if (! cdt_untrusted_rewrite(val_mem, &info)) {
+			cf_warning(AS_PARTICLE, "map_add_items() invalid parameter - %s",
+					cdt_untrusted_err_msg(info.err));
+			as_error_details_set_fmt(AS_SUB_NONE, "map_add_items: %s",
+					cdt_untrusted_err_msg(info.err));
+			return -AS_ERR_PARAMETER;
+		}
 
-	if (rewrite_sz == 0) {
-		cf_warning(AS_PARTICLE, "map_add_items() invalid parameter");
-		as_error_details_set_fmt(AS_SUB_NONE, "map_add_items: invalid parameter");
-		return -AS_ERR_PARAMETER;
+		items_ptr = val_mem;
 	}
 
-	msgpack_in mp = { .buf = val_mem, .buf_sz = rewrite_sz };
+	uint32_t rewrite_sz = info.sz;
+	msgpack_in mp = { .buf = items_ptr, .buf_sz = rewrite_sz };
 
 	uint32_t val_count;
 
@@ -3777,7 +3884,7 @@ packed_map_trim_ordered(const packed_map* map, cdt_op_mem* com, uint32_t index,
 		memcpy(mpk.write_ptr, map->contents + offset0, content_sz);
 	}
 
-	switch (result->type) {
+	switch (result_data_dispatch_type(result)) {
 	case RESULT_TYPE_NONE:
 		break;
 	case RESULT_TYPE_COUNT:
@@ -3979,7 +4086,7 @@ packed_map_get_remove_by_index_range(const packed_map* map, cdt_op_mem* com,
 			}
 		}
 
-		switch (result->type) {
+		switch (result_data_dispatch_type(result)) {
 		case RESULT_TYPE_RANK:
 		case RESULT_TYPE_REVRANK:
 			if (inverted) {
@@ -4390,7 +4497,7 @@ packed_map_get_remove_by_rank_range(const packed_map* map, cdt_op_mem* com,
 		}
 	}
 
-	switch (result->type) {
+	switch (result_data_dispatch_type(result)) {
 	case RESULT_TYPE_NONE:
 	case RESULT_TYPE_COUNT:
 	case RESULT_TYPE_EXISTS:
@@ -4628,7 +4735,7 @@ packed_map_get_remove_all_by_key_list_ordered(const packed_map* map,
 		}
 	}
 
-	switch (result->type) {
+	switch (result_data_dispatch_type(result)) {
 	case RESULT_TYPE_NONE:
 		break;
 	case RESULT_TYPE_REVINDEX:
@@ -4717,7 +4824,7 @@ packed_map_get_remove_all_by_key_list_unordered(const packed_map* map,
 		}
 	}
 
-	switch (result->type) {
+	switch (result_data_dispatch_type(result)) {
 	case RESULT_TYPE_NONE:
 		break;
 	case RESULT_TYPE_REVINDEX:
@@ -4855,7 +4962,7 @@ packed_map_get_remove_all_by_value_list(const packed_map* map, cdt_op_mem* com,
 		}
 	}
 
-	switch (result->type) {
+	switch (result_data_dispatch_type(result)) {
 	case RESULT_TYPE_NONE:
 		break;
 	case RESULT_TYPE_REVINDEX:
@@ -4972,7 +5079,7 @@ packed_map_get_remove_all_by_value_list_ordered(const packed_map* map,
 		}
 	}
 
-	switch (result->type) {
+	switch (result_data_dispatch_type(result)) {
 	case RESULT_TYPE_NONE:
 		break;
 	case RESULT_TYPE_REVINDEX:
@@ -5125,7 +5232,7 @@ packed_map_get_remove_all(const packed_map* map, cdt_op_mem* com)
 
 	bool is_rev = false;
 
-	switch (result->type) {
+	switch (result_data_dispatch_type(result)) {
 	case RESULT_TYPE_NONE:
 		break;
 	case RESULT_TYPE_REVINDEX:
@@ -5981,7 +6088,7 @@ static int
 packed_map_build_result_by_key(const packed_map* map, const cdt_payload* key,
 		uint32_t idx, uint32_t count, cdt_result_data* result)
 {
-	switch (result->type) {
+	switch (result_data_dispatch_type(result)) {
 	case RESULT_TYPE_NONE:
 		break;
 	case RESULT_TYPE_INDEX_RANGE:
@@ -6219,16 +6326,8 @@ packed_map_sort_in_place(packed_map* map)
 	memcpy((uint8_t*)map->contents, temp_mem, map->content_sz);
 }
 
-// Reject a raw msgpack map buffer with duplicate keys, and key-sort it in place
-// when 'sort'. Non-storage elements (INF / wildcard) are accepted.
-// pre:  buf is the AEL literal packer's encoding, either ordered -- count one
-//       over the pair count, then a K_ORDERED ext pair and a nil -- or
-//       :UNORDERED, a plain header and the pairs alone. Neither carries a
-//       persist index. The caller packed it, so a buffer that won't parse is a
-//       programmer error; the asserts below cost a node, though, since a stored
-//       expression recompiled at startup packs its literals through here.
-// post: false and buf untouched if two keys are equal; otherwise true, with buf
-//       key-ordered when 'sort'.
+// Shares order_index_has_dups() with the untrusted wire rewriter - that is
+// what makes AEL and the wire agree on what counts as a duplicate.
 bool
 map_buf_check_unique_and_sort(uint8_t* buf, uint32_t buf_sz, bool sort)
 {
@@ -6239,6 +6338,21 @@ map_buf_check_unique_and_sort(uint8_t* buf, uint32_t buf_sz, bool sort)
 
 	if (map.ele_count < 2) {
 		return true;
+	}
+
+	// The list side has had this fast path since list_buf_check_and_order() -
+	// scan first, and only build indexes when the scan says the buffer needs
+	// them. On sorted input equal keys are adjacent, so the scan settles
+	// uniqueness too and nothing below is owed. The common AEL literal is
+	// already written in key order and ael_emit_map_literal() sends every one
+	// of them through here.
+	switch (cdt_check_order(map.contents, map.content_sz, map.ele_count, true)) {
+	case CDT_ORDER_SORTED_UNIQUE:
+		return true; // sorted and unique - no index, no sort, nothing to write
+	case CDT_ORDER_SORTED_HAS_DUP:
+		return false;
+	case CDT_ORDER_UNSORTED:
+		break; // sorting is what settles uniqueness
 	}
 
 	setup_map_must_have_offidx(u, &map);
@@ -7594,8 +7708,6 @@ map_verify_fn(const cdt_context* ctx, rollback_alloc* alloc_idx)
 				map.content_sz, mp.offset);
 		return false;
 	}
-
-	map.flags &= ~AS_PACKED_MAP_FLAG_PRESERVE_ORDER; // don't check this flag
 
 	// Check key orders.
 	if (map_is_k_ordered(&map) && map.ele_count > 0) {

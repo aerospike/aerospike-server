@@ -454,7 +454,8 @@ ael_emit_map_literal(as_packer* pk, ast_pool* pool, const char* input,
 	ast_node* np = ast_pool_at(pool, node);
 	uint32_t ele_count = np->u.list.count;
 	// Maps default to ORDERED (K_ORDERED + key-sort, below); :UNORDERED opts
-	// out to a plain map (smaller, but uncomparable).
+	// out of the flag only -- a plain map header, smaller on the wire, but
+	// still key-sorted so it compares by content like any other map.
 	bool ordered = np->u.list.order_override != AEL_ORDER_UNORDERED;
 	uint32_t start = pk->offset;
 
@@ -482,15 +483,10 @@ ael_emit_map_literal(as_packer* pk, ast_pool* pool, const char* input,
 								  : AST_REF_NULL;
 	}
 
-	// Uniqueness is checked at both orderings: :UNORDERED opts out of the key
-	// sort, not out of distinct keys. Nothing downstream re-checks -- the
-	// untrusted rewriter only sees client msgpack, never a literal packed here,
-	// and map_verify compiles out (and passes K_ORDERED duplicates anyway).
-	// Sizing runs with a NULL buffer and no bytes to read; it re-runs here with
-	// one, so skipping it then loses nothing.
+	// Must output key ordered.
 	if (pk->buffer != NULL && ele_count >= 2) {
 		if (! map_buf_check_unique_and_sort(pk->buffer + start,
-					pk->offset - start, ordered)) {
+					pk->offset - start, true)) {
 			if (pool->diags != NULL) {
 				ael_diag_add(pool->diags, AEL_SEV_ERROR, ast_disp_offset(np),
 						np->sz, "map literal has duplicate keys");

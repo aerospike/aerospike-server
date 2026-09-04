@@ -1077,6 +1077,16 @@ ael_pack_call_blob(call_blob_ctx* cb, ast_pool* pool, const char* ael_src,
 	return 0;
 }
 
+// AEL packs its own literals, so the wire path's build_check_cdt_literal()
+// never sees them - but the eval sinks read this flag whatever the source.
+static bool
+ael_literal_has_nonstorage(const uint8_t* buf, uint32_t buf_sz)
+{
+	msgpack_in mp = { .buf = buf, .buf_sz = buf_sz };
+
+	return msgpack_sz(&mp) != 0 && mp.has_nonstorage;
+}
+
 static bool
 ael_build_node(ael_build_args* args, ast_ref ref)
 {
@@ -1679,6 +1689,7 @@ ael_build_node(ael_build_args* args, ast_ref ref)
 
 		opv->value = start;
 		opv->value_sz = pk.offset;
+		opv->has_nonstorage = ael_literal_has_nonstorage(start, pk.offset);
 		args->extra_ptr += pk.offset;
 		args->entry = &op_table[EXP_QUOTE];
 		break;
@@ -1702,6 +1713,7 @@ ael_build_node(ael_build_args* args, ast_ref ref)
 
 		opv->value = start;
 		opv->value_sz = pk.offset;
+		opv->has_nonstorage = ael_literal_has_nonstorage(start, pk.offset);
 		args->extra_ptr += pk.offset;
 		// Entry carries r_type = EXP_RTYPE_MAP so the caller (e.g.,
 		// build_set_expected_particle_type) sets the as_exp's expected

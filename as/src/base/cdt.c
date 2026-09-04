@@ -324,26 +324,40 @@ typedef struct {
 	bool error;
 } index_sort_userdata;
 
+// Every flag that survives the per-level masks below. PERSIST_INDEX is the
+// high one, so ext_type needs five bits and no more.
+#define CDT_UNTRUSTED_EXT_TYPE_MASK                                            \
+	(AS_PACKED_MAP_FLAG_KV_ORDERED | AS_PACKED_LIST_FLAG_ORDERED |             \
+			AS_PACKED_PERSIST_INDEX)
+
+// One container level of the rewrite.
 typedef struct {
-	offset_index offidx;
-	uint32_t n_msgpack;
-	uint32_t ix;
-	uint8_t* ext_start;
-	uint8_t* new_contents;
-	uint32_t ext_content_sz;
-	msgpack_in prev;
-	uint8_t type;
-	uint8_t ext_type;
-	bool need_sort;
+	uint32_t ele_count; // this level's elements, a map's pairs counted once
+	uint32_t ix; // elements written, a map's pairs counted twice
+	uint32_t prev_off; // last element compared for order, into info->src
+	uint32_t contents_off; // this level's elements, into dest
+	// This level's ext header, into dest - the header itself, not the container
+	// header before it.
+	uint32_t ext_start_off;
+	// Not the stack index: a container holding a single child takes no level,
+	// so the stack is shorter than the nesting is deep. Per level, so closing
+	// one restores the enclosing depth without unwinding what it skipped.
+	uint8_t depth;
+	uint8_t type; // MSGPACK_TYPE_LIST or MSGPACK_TYPE_MAP
+	uint8_t ext_type; // the level's flags, already masked
+	bool need_sort; // an out-of-order element arrived - sort before closing
 } cdt_stack_entry;
 
+COMPILER_ASSERT(CDT_UNTRUSTED_MAX_LEVELS <= UINT8_MAX);
+
 typedef struct {
-	cdt_stack_entry entries0[8];
-	cdt_stack_entry* entries;
-	uint32_t entries_cap;
+	dynmem levels;
 	uint32_t ilevel;
+	uint32_t depth; // nesting at the level on top, skipped containers included
 	msgpack_type toplvl_type;
-	bool has_toplvl;
+	// A persist index is top-level only, so at most one level of a walk has one.
+	offset_index top_offidx;
+	cdt_untrusted_info* info;
 } cdt_stack;
 
 // clang-format off
@@ -1037,7 +1051,7 @@ calc_rel_index_count(int64_t in_index, uint64_t in_count, uint32_t rel_index,
 bool
 result_data_set_not_found(cdt_result_data* rd, int64_t index)
 {
-	switch (rd->type) {
+	switch (result_data_dispatch_type(rd)) {
 	case RESULT_TYPE_NONE:
 		break;
 	case RESULT_TYPE_REVINDEX_RANGE:
@@ -1359,7 +1373,7 @@ as_bin_set_bool(as_bin* b, bool value)
 }
 
 //==========================================================
-// cdt_strip
+// list & map
 //
 
 uint32_t
@@ -1449,6 +1463,48 @@ cdt_strip_indexes_from_particle(const as_particle* p, uint8_t* dest,
 	}
 
 	return p_cdt_mem->sz;
+}
+
+// prev trails mp by one element - msgpack_cmp() advances both.
+cdt_order_check_t
+cdt_check_order(const uint8_t* contents, uint32_t content_sz,
+		uint32_t ele_count, bool is_map)
+{
+	if (ele_count < 2) {
+		return CDT_ORDER_SORTED_UNIQUE;
+	}
+
+	msgpack_in mp = { .buf = contents, .buf_sz = content_sz };
+	msgpack_in prev = mp;
+
+	if (msgpack_sz_rep(&mp, is_map ? 2 : 1) == 0) { // step mp to element 1
+		return CDT_ORDER_UNSORTED;
+	}
+
+	bool has_dup = false;
+
+	for (uint32_t i = 1; i < ele_count; i++) {
+		msgpack_cmp_type cmp = msgpack_cmp(&prev, &mp);
+
+		if (cmp == MSGPACK_CMP_EQUAL) {
+			has_dup = true;
+		}
+		else if (cmp != MSGPACK_CMP_LESS) {
+			return CDT_ORDER_UNSORTED;
+		}
+
+		if (is_map) {
+			if (i + 1 == ele_count) {
+				break; // no value hop past the last key - mp may sit at the end
+			}
+
+			if (msgpack_sz(&prev) == 0 || msgpack_sz(&mp) == 0) {
+				return CDT_ORDER_UNSORTED;
+			}
+		}
+	}
+
+	return has_dup ? CDT_ORDER_SORTED_HAS_DUP : CDT_ORDER_SORTED_UNIQUE;
 }
 
 //==========================================================
@@ -1680,6 +1736,10 @@ cdt_process_state_init_from_vec(cdt_process_state* cdt_state, msgpack_in_vec* mv
 	uint32_t sz = mv->vecs[0].buf_sz;
 
 	cdt_state->mv = mv;
+	// Not parsed from an op, so nothing below sets it - and the caller's state
+	// is a bare local. Cleared here so an expression entry point opting in
+	// after this returns is the only way it is ever true.
+	cdt_state->override_result_map_order = false;
 
 	if (data[0] == 0) { // TODO - deprecate this in "6 months"
 		if (sz < sizeof(uint16_t)) {
@@ -2139,6 +2199,16 @@ cdt_select_modify(select_ctx* sel, uint32_t off, uint32_t key_sz, uint32_t sz)
 		select_apply_undo_entry(sel->apply);
 		as_error_details_set_fmt(AS_SUB_NONE,
 				"cdt select apply expression result contains non-storable type");
+		sel->ret_code = -AS_ERR_INCOMPATIBLE_TYPE;
+		return false;
+	}
+
+	// The result lands verbatim, so selection order would sit inside a
+	// container whose flag promises key order.
+	if (as_exp_result_has_preserve_order_map(&re->res)) {
+		select_apply_undo_entry(sel->apply);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"cdt select apply expression result is a map with preserved element order");
 		sel->ret_code = -AS_ERR_INCOMPATIBLE_TYPE;
 		return false;
 	}
@@ -4419,11 +4489,15 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 
 	uint32_t n_levels = ctx_param_count / 2;
 
-	if (n_levels > 64) {
-		cf_warning(AS_PARTICLE, "cdt_process_state_select() ctx levels %u > 64",
-				n_levels);
+	// A path shallower than the data cannot reach it and a deeper one addresses
+	// nothing, so this is the nesting bound rather than a limit of its own.
+	// Nothing here is sized by it.
+	if (n_levels > CDT_UNTRUSTED_MAX_LEVELS) {
+		cf_warning(AS_PARTICLE, "cdt_process_state_select() ctx levels %u > %u",
+				n_levels, CDT_UNTRUSTED_MAX_LEVELS);
 		as_error_details_set_fmt(AS_SUB_NONE,
-				"cdt select context depth %u exceeds maximum of 64", n_levels);
+				"cdt select context depth %u exceeds maximum of %u", n_levels,
+				CDT_UNTRUSTED_MAX_LEVELS);
 		com->ret_code = -AS_ERR_PARAMETER;
 		return false;
 	}
@@ -4913,13 +4987,16 @@ cdt_context_ctx_type_create_sz(msgpack_in_vec* mv, uint32_t* sz, uint64_t ctx_ty
 			return false;
 		}
 
-		if ((key_sz = cdt_untrusted_get_size(key, key_sz, NULL, false)) == 0) {
+		define_untrusted_info(info, key, key_sz);
+
+		if (! cdt_untrusted_check(&info)) {
 			cf_warning(AS_PARTICLE,
-					"cdt_context_ctx_type_create_sz() invalid context key");
+					"cdt_context_ctx_type_create_sz() invalid context key - %s",
+					cdt_untrusted_err_msg(info.err));
 			return false;
 		}
 
-		*sz += key_sz;
+		*sz += info.sz;
 
 		if (map_get_ext_flags(ctx_type, true) != 0) {
 			*sz += 3 + 1; // ext element pair size
@@ -5075,13 +5152,13 @@ cdt_context_fill_create(const cdt_context* ctx, uint8_t* to_ptr, bool write_toph
 					"cdt_context_fill_create() invalid context key");
 		}
 
-		uint32_t to_sz = cdt_untrusted_rewrite(to_ptr, key_ptr, key_sz, false);
+		cdt_untrusted_info info = { .src = key_ptr, .src_sz = key_sz };
 
-		if (to_sz == 0) {
+		if (! cdt_untrusted_rewrite(to_ptr, &info)) {
 			return NULL;
 		}
 
-		to_ptr += to_sz;
+		to_ptr += info.sz;
 	}
 	else if (masked_type == (AS_CDT_CTX_INDEX | AS_CDT_CTX_LIST)) {
 		int64_t idx;
@@ -5179,14 +5256,13 @@ cdt_context_fill_create(const cdt_context* ctx, uint8_t* to_ptr, bool write_toph
 						"cdt_context_fill_create() invalid context key");
 			}
 
-			uint32_t to_sz =
-					cdt_untrusted_rewrite(to_ptr, key_ptr, key_sz, false);
+			cdt_untrusted_info info = { .src = key_ptr, .src_sz = key_sz };
 
-			if (to_sz == 0) {
+			if (! cdt_untrusted_rewrite(to_ptr, &info)) {
 				return NULL;
 			}
 
-			to_ptr += to_sz;
+			to_ptr += info.sz;
 		}
 		else if (masked_type == (AS_CDT_CTX_INDEX | AS_CDT_CTX_LIST)) {
 			int64_t idx;
@@ -5287,6 +5363,13 @@ cdt_context_create_new_particle_crnew(cdt_context* ctx, uint32_t subctx_sz)
 	}
 	else {
 		to_ptr = cdt_context_fill_create(ctx, to_ptr, true);
+	}
+
+	// A rejected create context leaves the particle half written - publishing
+	// it would reach the size assert below with a NULL to_ptr. The two sibling
+	// paths already guard this.
+	if (to_ptr == NULL) {
+		return NULL;
 	}
 
 	p_cdt_mem->sz = new_sz;
@@ -6154,7 +6237,9 @@ cdt_packed_modify(cdt_process_state* state, as_bin* b, as_bin* result,
 
 	cdt_op_mem com = {
 		.ctx = { .b = b, .orig = b->particle, .alloc_buf = alloc_buf },
-		.result = { .result = result, .alloc = alloc_result },
+		.result = { .result = result,
+				.alloc = alloc_result,
+				.override_result_map_order = state->override_result_map_order },
 		.alloc_idx = alloc_idx,
 		.alloc_convert = alloc_convert,
 		.ret_code = AS_OK,
@@ -6215,7 +6300,9 @@ cdt_packed_read(cdt_process_state* state, const as_bin* b, as_bin* result)
 
 	cdt_op_mem com = {
 		.ctx = { .b = (as_bin*)b, .alloc_buf = NULL },
-		.result = { .result = result, .alloc = alloc_result },
+		.result = { .result = result,
+				.alloc = alloc_result,
+				.override_result_map_order = state->override_result_map_order },
 		.alloc_idx = alloc_idx,
 		.ret_code = AS_OK,
 	};
@@ -6326,6 +6413,11 @@ as_bin_cdt_modify_exp(as_bin* b, msgpack_in_vec* mv, as_bin* result)
 		return -AS_ERR_PARAMETER;
 	}
 
+	// A result reaching an expression is compared by byte order, so an
+	// unordered map has to be built key ordered to compare by content. The
+	// wire entry points leave this alone - their results are the client's.
+	state.override_result_map_order = true;
+
 	return cdt_packed_modify(&state, b, result, NULL);
 }
 
@@ -6337,6 +6429,8 @@ as_bin_cdt_read_exp(const as_bin* b, msgpack_in_vec* mv, as_bin* result)
 	if (! cdt_process_state_init_from_vec(&state, mv)) {
 		return -AS_ERR_PARAMETER;
 	}
+
+	state.override_result_map_order = true;
 
 	return cdt_packed_read(&state, b, result);
 }
@@ -8282,25 +8376,221 @@ list_param_parse(const cdt_payload* items, msgpack_in* mp, uint32_t* count_r)
 // cdt_untrusted
 //
 
-uint32_t
-cdt_untrusted_get_size(const uint8_t* buf, uint32_t buf_sz, msgpack_type* ptype,
-		bool has_toplvl)
+// The level at 'depth', reserving one when the walk has never been this deep.
+// Depth only ever steps one past the high-water mark, so a reserve lands on
+// exactly the index asked for. dynmem adds buffers rather than moving them, so
+// levels already handed out stay valid across the growth.
+static cdt_untrusted_istack*
+untrusted_lvl_at(dynmem* levels, uint32_t depth)
 {
-	if (buf_sz == 0) {
-		return 0; // error
+	if (depth < levels->alloc_idx) {
+		return dynmem_at(levels, depth);
 	}
 
-	const uint8_t* next_b = buf;
-	const uint8_t* end = buf + buf_sz;
+	return dynmem_reserve(levels, NULL);
+}
+
+// Pop levels whose elements are spent and return the innermost live one - NULL
+// once back at the top. Non-const: the returned level is the caller's mutation
+// handle, and *depth is written here.
+static cdt_untrusted_istack*
+untrusted_pop_to_live_lvl(dynmem* levels, uint32_t* depth)
+{
+	while (*depth != 0) {
+		cdt_untrusted_istack* lvl = dynmem_at(levels, *depth - 1);
+
+		if (lvl->ele_remaining != 0) {
+			return lvl;
+		}
+
+		(*depth)--;
+	}
+
+	return NULL;
+}
+
+// Depth is a rejection, not a degradation - degrading would leave 'checked'
+// false for the life of the data, so every eval of a deep bin would re-run the
+// whole rewrite. Charged wherever the rewrite opens a level, not only where
+// this walk has something to track.
+static bool
+untrusted_depth_ok(cdt_untrusted_info* info, uint32_t depth)
+{
+	if (depth == CDT_UNTRUSTED_MAX_LEVELS) {
+		cf_detail(AS_PARTICLE, "list/map nested deeper than %u",
+				CDT_UNTRUSTED_MAX_LEVELS);
+		info->err = CDT_UNTRUSTED_ERR_DEPTH;
+		return false;
+	}
+
+	return true;
+}
+
+// False means "can't track this" - a header declaring more elements than the
+// bytes left can hold. Wire input reaches it, so it may not assert; the walk
+// stops examining and the rewrite validates instead. A too-deep push stamps
+// info->err instead, and the caller fails outright.
+static bool
+untrusted_push_lvl(cdt_untrusted_info* info, dynmem* levels, uint32_t* depth,
+		uint32_t n_ele, uint32_t remaining, bool is_map, bool is_ordered)
+{
+	if (! untrusted_depth_ok(info, *depth)) {
+		return false;
+	}
+
+	// n_ele counts a map's pair as two, and nothing encodes in less than a
+	// byte, so the bytes left bound it whichever the container is. That also
+	// keeps it inside ele_remaining's 30 bits, since a source at or past
+	// CDT_UNTRUSTED_MAX_SZ was refused before the walk began.
+	if (n_ele > remaining) {
+		return false;
+	}
+
+	cdt_untrusted_istack* lvl = untrusted_lvl_at(levels, *depth);
+
+	if (lvl == NULL) { // dynmem exhausted - not reachable below the bound
+		info->err = CDT_UNTRUSTED_ERR_DEPTH;
+		return false;
+	}
+
+	*lvl = (cdt_untrusted_istack){
+		.prev_off = UINT32_MAX,
+		.ele_remaining = n_ele,
+		.is_map = is_map,
+		.is_ordered = is_ordered,
+	};
+	(*depth)++;
+
+	return true;
+}
+
+// Compare one scanned element against the previous one at its level - a map's
+// key, or every element of an ORDERED list.
+//
+// A level is also what makes an element a key, since keys are found by
+// position. So this walk opens one for every container however few elements it
+// holds: the rewrite may skip a single-child container, being credited by
+// completion instead, but skipping here would hand that container's child to
+// the enclosing map at whichever position the map had reached.
+//
+// Only a flagless map's disorder is repairable (the rewrite sorts it), so it
+// alone reports through info->order; everything else is a fault the rewrite
+// would reject, caught here before a caller allocates anything. A list's
+// verdict must stay out of info->order entirely: duplicates are legal in an
+// ORDERED list, and order is a whole-walk aggregate that gates is_canonical
+// and the rewrite's skip for every level in the buffer.
+static bool
+untrusted_check_ele(cdt_untrusted_info* info, cdt_untrusted_istack* lvl,
+		const uint8_t* b, const uint8_t* end)
+{
+	if (lvl->is_map && ! map_is_key(b, (uint32_t)(end - b))) {
+		cf_detail(AS_PARTICLE, "map has invalid key type");
+		info->err = CDT_UNTRUSTED_ERR_KEY_TYPE;
+		return false;
+	}
+
+	// The key type is still vetted above - only the order claim is taken on
+	// trust, and only where the level made one.
+	if (info->trust_order_flags && lvl->is_ordered) {
+		return true;
+	}
+
+	uint32_t offset = (uint32_t)(b - info->src);
+
+	if (lvl->prev_off != UINT32_MAX) {
+		msgpack_in prev = {
+			.buf = info->src,
+			.buf_sz = info->src_sz,
+			.offset = lvl->prev_off,
+		};
+		msgpack_in cur = {
+			.buf = info->src,
+			.buf_sz = info->src_sz,
+			.offset = offset,
+		};
+
+		switch (msgpack_cmp(&prev, &cur)) {
+		case MSGPACK_CMP_LESS:
+			break;
+		case MSGPACK_CMP_EQUAL:
+			if (lvl->is_map) {
+				cf_detail(AS_PARTICLE, "map has duplicate keys");
+				info->err = CDT_UNTRUSTED_ERR_DUP_KEY;
+				return false;
+			}
+
+			break; // an ORDERED list may repeat elements
+		case MSGPACK_CMP_GREATER:
+			if (lvl->is_ordered) {
+				cf_detail(AS_PARTICLE, "%s not ordered as declared",
+						lvl->is_map ? "map" : "list");
+				info->err = CDT_UNTRUSTED_ERR_ORDER;
+				return false;
+			}
+
+			info->order = CDT_ORDER_UNSORTED; // flagless map - sortable
+			break;
+		default:
+			cf_detail(AS_PARTICLE, "uncomparable %s elements",
+					lvl->is_map ? "map key" : "list");
+			info->err = CDT_UNTRUSTED_ERR_MSGPACK;
+			return false;
+		}
+	}
+
+	lvl->prev_off = offset;
+
+	return true;
+}
+
+bool
+cdt_untrusted_check(cdt_untrusted_info* info)
+{
+	const uint8_t* next_b = info->src;
+	const uint8_t* end = info->src + info->src_sz;
 	uint32_t count = 1;
 	uint8_t top_flags = 0;
+	// The rewrite sizes a retained top-level persist index from the source run
+	// left after the meta pair; ret_sz here is already compacted. ele_sz steps
+	// at content_sz 2^8 / 2^16 / 2^24, so contents that compact across a step
+	// make the smaller number reserve fewer bytes than the rewrite writes.
+	// Both have to size the index from the same run.
+	uint32_t top_src_content_sz = 0;
 	uint32_t ret_sz = 0;
 	uint32_t top_ele_count = 0; // set to 0 to shut the compiler up
-	uint32_t top_content_raw_sz = 0;
-	msgpack_type dummy_type;
+	uint32_t depth = 0;
+	// Levels are kept whether or not the caller asked for elements to be
+	// examined: a caller wanting only a size still needs the depth ceiling
+	// charged here, or the rewrite is the first to refuse, having grown a
+	// stack to do it.
+	bool examine = info->examine;
+	bool tracking = true;
+	bool rewrite_alters = false; // needs compaction, or has maskable flags
 
-	if (ptype == NULL) {
-		ptype = &dummy_type;
+	// Owned here, not by the caller: the rewrite reads the verdict this walk
+	// leaves behind, never the levels themselves.
+	define_dynobj(levels, sizeof(cdt_untrusted_istack),
+			CDT_UNTRUSTED_ISTACK_INIT);
+	cf_defer { dynmem_destroy(&levels); };
+
+	info->sz = 0;
+	info->type = MSGPACK_TYPE_ERROR;
+	info->order = CDT_ORDER_SORTED_UNIQUE;
+	info->err = CDT_UNTRUSTED_OK;
+	info->checked = false;
+	info->is_canonical = false;
+	info->has_nonstorage = false;
+
+	if (info->src_sz == 0) {
+		info->err = CDT_UNTRUSTED_ERR_MSGPACK;
+		return false;
+	}
+
+	if (info->src_sz >= CDT_UNTRUSTED_MAX_SZ) {
+		cf_detail(AS_PARTICLE, "list/map %u bytes exceeds %u", info->src_sz,
+				CDT_UNTRUSTED_MAX_SZ);
+		info->err = CDT_UNTRUSTED_ERR_TOO_BIG;
+		return false;
 	}
 
 	for (uint32_t i = 0; i < count; i++) {
@@ -8313,31 +8603,62 @@ cdt_untrusted_get_size(const uint8_t* buf, uint32_t buf_sz, msgpack_type* ptype,
 		next_b = msgpack_parse(b, end, &count, &type, &has_nonstorage,
 				&not_compact);
 
-		uint32_t ele_count = count - old_count;
-		uint32_t parse_sz = (uint32_t)(next_b - b);
-
-		if (has_nonstorage || next_b == NULL) {
-			cf_warning(AS_PARTICLE, "invalid msgpack: has_nonstorage %d b %p",
+		if ((has_nonstorage && ! info->allow_nonstorage) || next_b == NULL) {
+			cf_detail(AS_PARTICLE, "invalid msgpack: has_nonstorage %d b %p",
 					has_nonstorage, b);
-			return 0;
+			info->err = CDT_UNTRUSTED_ERR_MSGPACK;
+			return false;
 		}
 
-		if (type == MSGPACK_TYPE_MAP) {
-			ele_count /= 2;
-		}
+		info->has_nonstorage = info->has_nonstorage || has_nonstorage;
+
+		uint32_t n_child = count - old_count;
+		uint32_t ele_count = type == MSGPACK_TYPE_MAP ? (n_child / 2) : n_child;
+		uint32_t parse_sz = (uint32_t)(next_b - b);
 
 		if (i == 0) {
 			top_ele_count = ele_count;
-			*ptype = type;
+			info->type = type;
 		}
 
-		if (old_count == count ||
+		rewrite_alters = rewrite_alters || not_compact;
+
+		// This element belongs to the enclosing level - vet it as a map key
+		// before opening a level of its own below.
+		cdt_untrusted_istack* lvl =
+				tracking ? untrusted_pop_to_live_lvl(&levels, &depth) : NULL;
+
+		if (lvl != NULL) {
+			// A map scans its keys; an ORDERED list scans everything. A plain
+			// list declared nothing, so there is nothing to hold it to.
+			bool scan = lvl->is_map ? (lvl->ele_remaining % 2) == 0
+									: lvl->is_ordered;
+
+			if (examine && scan && ! untrusted_check_ele(info, lvl, b, end)) {
+				return false;
+			}
+
+			lvl->ele_remaining--;
+		}
+
+		if (n_child == 0 ||
 				msgpack_buf_peek_type(next_b, end - next_b) != MSGPACK_TYPE_EXT) {
 			if (not_compact) {
 				ret_sz += msgpack_compactify_element(NULL, b);
 			}
 			else {
 				ret_sz += parse_sz;
+			}
+
+			// No ext, so no flags - nothing declared about this level's order.
+			if (n_child != 0 && tracking) {
+				tracking = untrusted_push_lvl(info, &levels, &depth, n_child,
+						(uint32_t)(end - next_b), type == MSGPACK_TYPE_MAP,
+						false);
+
+				if (info->err != CDT_UNTRUSTED_OK) { // too deep to store
+					return false;
+				}
 			}
 
 			continue;
@@ -8347,17 +8668,21 @@ cdt_untrusted_get_size(const uint8_t* buf, uint32_t buf_sz, msgpack_type* ptype,
 		uint32_t ext_sz = msgpack_buf_get_ext(next_b, end - next_b, &ext);
 
 		if (ext_sz == 0) {
-			cf_warning(AS_PARTICLE, "invalid msgpack: b %lx", *(uint64_t*)b);
-			return 0;
+			// Offset, not the 8 bytes at b - b can sit within 8 of the end.
+			cf_detail(AS_PARTICLE, "invalid msgpack ext at offset %ld",
+					b - info->src);
+			info->err = CDT_UNTRUSTED_ERR_MSGPACK;
+			return false;
 		}
+
+		uint8_t ext_type_in = ext.type;
 
 		next_b += ext_sz;
 		count--; // ext element was parsed
 
-		if (i == 0 && has_toplvl) {
-			top_flags = ext.type;
-		}
-		else {
+		bool keep_top_flags = i == 0 && info->toplvl_index;
+
+		if (! keep_top_flags) {
 			ext.type &= ~AS_PACKED_PERSIST_INDEX;
 		}
 
@@ -8370,10 +8695,25 @@ cdt_untrusted_get_size(const uint8_t* buf, uint32_t buf_sz, msgpack_type* ptype,
 			count--; // meta-pair 2nd element skipped
 			ext.type &= AS_PACKED_PERSIST_INDEX | AS_PACKED_MAP_FLAG_KV_ORDERED;
 
-			if (next_b == NULL) {
-				cf_warning(AS_PARTICLE, "invalid msgpack");
-				return 0;
+			// After the mask, since the rewrite sizes the index from the masked
+			// byte - a bit outside the mask would otherwise size two ways.
+			if (keep_top_flags) {
+				top_flags = ext.type;
 			}
+
+			// Tested here rather than at the next iteration's parse: an empty
+			// map ends the loop before that, and the two walks have to agree.
+			if (has_nonstorage || next_b == NULL) {
+				cf_detail(AS_PARTICLE, "invalid msgpack: has_nonstorage %d",
+						has_nonstorage);
+				info->err = CDT_UNTRUSTED_ERR_MSGPACK;
+				return false;
+			}
+
+			// The rewrite always emits nil as the meta value, so any other
+			// value is a byte it would change. ret_sz can't catch that: nil
+			// and a fixint are both one byte.
+			rewrite_alters = rewrite_alters || temp_type != MSGPACK_TYPE_NIL;
 
 			if (ext.type == 0) {
 				ret_sz += as_pack_map_header_get_size(ele_count - 1);
@@ -8387,6 +8727,10 @@ cdt_untrusted_get_size(const uint8_t* buf, uint32_t buf_sz, msgpack_type* ptype,
 		else { // LIST
 			ext.type &= AS_PACKED_PERSIST_INDEX | AS_PACKED_LIST_FLAG_ORDERED;
 
+			if (keep_top_flags) {
+				top_flags = ext.type;
+			}
+
 			if (ext.type == 0) {
 				ret_sz += as_pack_list_header_get_size(ele_count - 1);
 			}
@@ -8396,26 +8740,60 @@ cdt_untrusted_get_size(const uint8_t* buf, uint32_t buf_sz, msgpack_type* ptype,
 			}
 		}
 
-		// The persisted offset-index width is chosen from the top-level content
-		// size. cdt_stack_untrusted_rewrite sizes it from the raw
-		// (un-compacted) content (est_content_sz = end - next_b); size it here
-		// from the same raw span so the allocation can never be smaller than
-		// the layout.
 		if (i == 0) {
-			top_content_raw_sz = (uint32_t)(end - next_b);
+			top_src_content_sz = (uint32_t)(end - next_b);
 		}
+
+		// Two ways the meta ext isn't canonical: flags the rewrite would mask
+		// off, and content it would drop - it always emits a zero-content ext
+		// header. ret_sz can't catch the second: a fixext1 element and
+		// 'c7 00 <type>' are both three bytes.
+		rewrite_alters = rewrite_alters || ext.type != ext_type_in ||
+				ext.size != 0;
+
+		uint32_t n_data = n_child - (type == MSGPACK_TYPE_MAP ? 2 : 1);
+
+		// The rewrite opens a level for a flags-only empty container, which
+		// this walk has nothing to track - charge the ceiling anyway, so a
+		// passing walk is a promise the rewrite can keep.
+		if (tracking && n_data == 0 && ! untrusted_depth_ok(info, depth)) {
+			return false;
+		}
+
+		if (n_data != 0 && tracking) {
+			bool is_map = type == MSGPACK_TYPE_MAP;
+			// Both flags are bit 0 and both survive their mask above.
+			bool is_ordered =
+					(ext.type &
+							(is_map ? AS_PACKED_MAP_FLAG_K_ORDERED
+									: AS_PACKED_LIST_FLAG_ORDERED)) != 0;
+
+			tracking = untrusted_push_lvl(info, &levels, &depth, n_data,
+					(uint32_t)(end - next_b), is_map, is_ordered);
+
+			if (info->err != CDT_UNTRUSTED_OK) { // too deep to store
+				return false;
+			}
+		}
+	}
+
+	if (next_b != end) {
+		cf_detail(AS_PARTICLE, "list/map rejected padding size %lu != 0",
+				end - next_b);
+		info->err = CDT_UNTRUSTED_ERR_PADDING;
+		return false;
 	}
 
 	if (flags_is_persist(top_flags)) {
 		uint32_t ext_content_sz;
 
-		if (*ptype == MSGPACK_TYPE_MAP) {
+		if (info->type == MSGPACK_TYPE_MAP) {
 			ext_content_sz = map_calc_ext_content_sz(top_flags,
-					top_ele_count - 1, top_content_raw_sz);
+					top_ele_count - 1, top_src_content_sz);
 		}
 		else { // LIST
 			ext_content_sz = list_calc_ext_content_sz(top_flags,
-					top_ele_count - 1, top_content_raw_sz);
+					top_ele_count - 1, top_src_content_sz);
 		}
 
 		ret_sz -= as_pack_ext_header_get_size(0);
@@ -8423,35 +8801,76 @@ cdt_untrusted_get_size(const uint8_t* buf, uint32_t buf_sz, msgpack_type* ptype,
 		ret_sz += ext_content_sz;
 	}
 
-	return ret_sz;
+	if (ret_sz >= CDT_UNTRUSTED_MAX_SZ) {
+		cf_detail(AS_PARTICLE, "list/map rewrites to %u bytes, exceeds %u",
+				ret_sz, CDT_UNTRUSTED_MAX_SZ);
+		info->err = CDT_UNTRUSTED_ERR_TOO_BIG;
+		return false;
+	}
+
+	info->sz = ret_sz;
+	info->checked = tracking && examine;
+	info->checked_src = info->src;
+	info->checked_src_sz = info->src_sz;
+	// is_canonical promises the rewrite would reproduce src byte for byte, so
+	// it has to be false wherever this walk did not actually establish that.
+	// One blind spot remains: a retained top-level persist index, whose
+	// content only the rewrite rebuilds - this walk sizes it but never reads
+	// the stored bytes. Order is not a blind spot: declared-ordered violations
+	// fail outright above, so reaching here with SORTED_UNIQUE means every map
+	// and every ORDERED list was examined and passed.
+	info->is_canonical = tracking && examine && ! rewrite_alters &&
+			! flags_is_persist(top_flags) &&
+			info->order == CDT_ORDER_SORTED_UNIQUE && ret_sz == info->src_sz;
+
+	return true;
 }
 
 static cdt_stack_entry*
 cdt_stack_get_entry(cdt_stack* cs)
 {
-	return &cs->entries[cs->ilevel];
+	return dynmem_at(&cs->levels, cs->ilevel);
 }
 
+// NULL past the level bound - the belt to the checking walk's braces, since
+// callers may rewrite with no preceding check. Without it the doubling below is
+// bounded only by the input's own length.
 static cdt_stack_entry*
 cdt_stack_incr_level(cdt_stack* cs)
 {
 	cs->ilevel++;
+	cs->depth++;
 
-	if (cs->ilevel >= cs->entries_cap) {
-		cs->entries_cap *= 2;
-
-		size_t new_sz = sizeof(cdt_stack_entry) * cs->entries_cap;
-
-		if (cs->entries == cs->entries0) {
-			cs->entries = cf_malloc(new_sz);
-			memcpy(cs->entries, cs->entries0, sizeof(cs->entries0));
-		}
-		else {
-			cs->entries = cf_realloc(cs->entries, new_sz);
-		}
+	if (cs->depth > CDT_UNTRUSTED_MAX_LEVELS) {
+		cf_detail(AS_PARTICLE, "list/map nested deeper than %u",
+				CDT_UNTRUSTED_MAX_LEVELS);
+		cs->info->err = CDT_UNTRUSTED_ERR_DEPTH;
+		return NULL;
 	}
 
-	return cdt_stack_get_entry(cs);
+	cdt_stack_entry* pe = cs->ilevel < cs->levels.alloc_idx
+			? cdt_stack_get_entry(cs)
+			: dynmem_reserve(&cs->levels, NULL);
+
+	if (pe == NULL) { // dynmem exhausted - not reachable below the bound
+		cs->info->err = CDT_UNTRUSTED_ERR_DEPTH;
+		return NULL;
+	}
+
+	pe->depth = (uint8_t)cs->depth;
+
+	return pe;
+}
+
+// The persist index to record offsets into, or NULL. Only the top level can
+// carry one, and a partial index is deliberately left with no pointer, so NULL
+// is the usual answer.
+static offset_index*
+cdt_stack_offidx(cdt_stack* cs)
+{
+	return cs->ilevel == 0 && ! offset_index_is_null(&cs->top_offidx)
+			? &cs->top_offidx
+			: NULL;
 }
 
 static cdt_stack_entry*
@@ -8460,20 +8879,28 @@ cdt_stack_decr_level(cdt_stack* cs)
 	cf_assert(cs->ilevel != 0, AS_PARTICLE, "ilevel == 0");
 	cs->ilevel--;
 
-	return &cs->entries[cs->ilevel];
+	return cdt_stack_get_entry(cs);
 }
 
 static uint32_t
-cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
-		uint32_t src_sz)
+cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest)
 {
+	const uint8_t* src = cs->info->src;
+	uint32_t src_sz = cs->info->src_sz;
 	uint8_t* wptr = dest;
 	const uint8_t* b = src;
 	const uint8_t* end = src + src_sz;
 	uint32_t count = 1;
 	bool has_nonstorage = false;
+	// cdt_untrusted_check() already proved the key types, and - reaching here
+	// with SORTED_UNIQUE - the order of every map and every ORDERED list. Only
+	// for the bytes it actually walked, though: a verdict carried over from a
+	// different buffer buys nothing and is re-proven below.
+	bool checked = cdt_untrusted_is_current(cs->info);
+	bool skip_order = cdt_untrusted_fully_checked(cs->info);
 
 	if (src_sz == 0) {
+		cs->info->err = CDT_UNTRUSTED_ERR_MSGPACK;
 		return 0;
 	}
 
@@ -8494,10 +8921,11 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 			ele_count /= 2;
 		}
 
-		if (has_nonstorage || next_b == NULL) {
+		if ((has_nonstorage && ! cs->info->allow_nonstorage) || next_b == NULL) {
 			cf_detail(AS_PARTICLE,
 					"untrusted_rewrite() has_nonstorage %d b %p sz %u i %u",
 					has_nonstorage, b, (uint32_t)(end - b), i);
+			cs->info->err = CDT_UNTRUSTED_ERR_MSGPACK;
 			return 0;
 		}
 
@@ -8543,6 +8971,10 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 		else { // non-empty list/map
 			if (i != 0) {
 				pe = cdt_stack_incr_level(cs);
+
+				if (pe == NULL) { // too deep to store
+					return 0;
+				}
 			}
 
 			uint32_t tail_sz = (uint32_t)(end - next_b);
@@ -8555,15 +8987,18 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 				uint32_t ext_sz = msgpack_buf_get_ext(next_b, tail_sz, &ext);
 
 				if (ext_sz == 0) {
-					cf_warning(AS_PARTICLE, "invalid msgpack: b %lx",
-							*(uint64_t*)b);
+					// Offset, not the 8 bytes at b - b can sit within 8 of the
+					// end.
+					cf_detail(AS_PARTICLE, "invalid msgpack ext at offset %ld",
+							b - src);
+					cs->info->err = CDT_UNTRUSTED_ERR_MSGPACK;
 					return 0;
 				}
 
 				next_b += ext_sz;
 				ele_count--;
 
-				if (i != 0 || ! cs->has_toplvl) {
+				if (i != 0 || ! cs->info->toplvl_index) {
 					// Quietly ignore when asking to persist index at sub-level.
 					ext.type &= ~AS_PACKED_PERSIST_INDEX;
 				}
@@ -8572,16 +9007,31 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 					msgpack_type next_type;
 					uint32_t temp_count = 0;
 
+					// Its own flag - the shared one latches, and an earlier
+					// element's marker would read as this meta value's.
+					bool meta_nonstorage = false;
+
 					count--;
 					next_b = msgpack_parse(next_b, end, &temp_count, &next_type,
-							&has_nonstorage, &not_compact);
+							&meta_nonstorage, &not_compact);
+
+					if (meta_nonstorage || next_b == NULL) {
+						cf_detail(AS_PARTICLE,
+								"invalid msgpack: meta has_nonstorage %d",
+								meta_nonstorage);
+						cs->info->err = CDT_UNTRUSTED_ERR_MSGPACK;
+						return 0;
+					}
+
 					tail_sz = (uint32_t)(end - next_b);
 					ext.type &= AS_PACKED_MAP_FLAG_KV_ORDERED |
 							AS_PACKED_PERSIST_INDEX;
 					as_pack_map_header(&pk, ele_count + (ext.type == 0 ? 0 : 1));
 
-					if (ele_count != 0 && ! map_is_key(next_b, tail_sz)) {
-						cf_warning(AS_PARTICLE, "map has invalid key type");
+					if (! checked && ele_count != 0 &&
+							! map_is_key(next_b, tail_sz)) {
+						cf_detail(AS_PARTICLE, "map has invalid key type");
+						cs->info->err = CDT_UNTRUSTED_ERR_KEY_TYPE;
 						return 0;
 					}
 				}
@@ -8606,7 +9056,7 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 								ele_count, est_content_sz);
 					}
 
-					pe->ext_start = pk.buffer + pk.offset;
+					pe->ext_start_off = (uint32_t)(pk.buffer + pk.offset - dest);
 					as_pack_ext_header(&pk, ext_content_sz, ext.type);
 
 					uint8_t* idx_mem = pk.buffer + pk.offset;
@@ -8621,35 +9071,32 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 
 					if (type == MSGPACK_TYPE_LIST &&
 							ext.type == AS_PACKED_PERSIST_INDEX) {
-						// Set partial indexes to empty state.
-						list_partial_offset_index_init(&pe->offidx, idx_mem,
+						// A partial index is filled on a later read, so dest
+						// gets one in its empty state and the handle is then
+						// left with no pointer: this walk must neither record
+						// offsets into it nor shrink it when the level closes.
+						list_partial_offset_index_init(&cs->top_offidx, idx_mem,
 								ele_count, contents, est_content_sz);
-						offset_index_set_filled(&pe->offidx, 1);
-						offset_index_set_ptr(&pe->offidx, NULL, NULL);
+						offset_index_set_filled(&cs->top_offidx, 1);
+						offset_index_set_ptr(&cs->top_offidx, NULL, NULL);
 					}
 					else {
-						offset_index_init(&pe->offidx, idx_mem, ele_count,
+						offset_index_init(&cs->top_offidx, idx_mem, ele_count,
 								contents, est_content_sz);
-						offset_index_set_filled(&pe->offidx, ele_count);
+						offset_index_set_filled(&cs->top_offidx, ele_count);
 					}
-
-					pe->ext_content_sz = ext_content_sz;
 				}
 				else { // not persist
 					if (ext.type != 0) {
-						pe->ext_start = wptr;
 						as_pack_ext_header(&pk, 0, ext.type);
 
 						if (type == MSGPACK_TYPE_MAP) {
 							as_pack_nil(&pk);
 						}
 					}
-
-					offset_index_init(&pe->offidx, NULL, ele_count,
-							pk.buffer + pk.offset, est_content_sz);
 				}
 
-				pe->new_contents = pk.buffer + pk.offset;
+				pe->contents_off = (uint32_t)(pk.buffer + pk.offset - dest);
 				pe->ext_type = ext.type;
 				count--;
 			}
@@ -8658,8 +9105,10 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 					as_pack_map_header(&pk, ele_count);
 					pe->ext_type = 0;
 
-					if (ele_count != 0 && ! map_is_key(next_b, tail_sz)) {
-						cf_warning(AS_PARTICLE, "map has invalid key type");
+					if (! checked && ele_count != 0 &&
+							! map_is_key(next_b, tail_sz)) {
+						cf_detail(AS_PARTICLE, "map has invalid key type");
+						cs->info->err = CDT_UNTRUSTED_ERR_KEY_TYPE;
 						return 0;
 					}
 				}
@@ -8668,9 +9117,7 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 					pe->ext_type = 0;
 				}
 
-				pe->new_contents = pk.buffer + pk.offset;
-				offset_index_init(&pe->offidx, NULL, ele_count,
-						pe->new_contents, end - b);
+				pe->contents_off = (uint32_t)(pk.buffer + pk.offset - dest);
 			}
 
 			if (ele_count == 0) {
@@ -8679,11 +9126,53 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 					do_incr_ix = true;
 				}
 			}
+			// A level holds its elements to an order and closes when the last
+			// one lands; a single child needs neither. Skipping is safe because
+			// a level is credited by completion rather than by position - this
+			// container completes exactly when its child does, so the one
+			// cascade that follows closes both. cs->depth is deliberately left
+			// where it is: the container is still open in the data, so its
+			// child nests one deeper and is charged the bound accordingly.
+			else if (ele_count == 1 && i != 0) {
+				if (type == MSGPACK_TYPE_MAP) {
+					// A key can only be a scalar, so it never opens a level of
+					// its own - but left to the loop it would be counted
+					// against whatever level is then on top, closing that one
+					// an element early.
+					uint32_t key_count = 0;
+					bool key_nonstorage = false;
+					bool key_not_compact = false;
+					const uint8_t* key_end = msgpack_parse(next_b, end,
+							&key_count, NULL, &key_nonstorage, &key_not_compact);
+
+					if (key_end == NULL || key_nonstorage || key_count != 0) {
+						cf_detail(AS_PARTICLE, "invalid msgpack map key");
+						cs->info->err = CDT_UNTRUSTED_ERR_MSGPACK;
+						return 0;
+					}
+
+					if (key_not_compact) {
+						pk.offset +=
+								msgpack_compactify_element(pk.buffer + pk.offset,
+										next_b);
+					}
+					else {
+						as_pack_append(&pk, next_b, (uint32_t)(key_end - next_b));
+					}
+
+					next_b = key_end;
+					count--;
+				}
+
+				pe = cdt_stack_decr_level(cs);
+			}
 			else {
 				pe->type = (uint8_t)type;
-				pe->n_msgpack = ele_count * ((type == MSGPACK_TYPE_MAP) ? 2 : 1);
-				pe->prev.buf = next_b;
-				pe->prev.buf_sz = UINT32_MAX;
+				pe->ele_count = ele_count;
+				// The compare rebuilds a bounded msgpack_in from this, so an
+				// over-declared element still reaches it as CMP_END rather
+				// than as a read past src.
+				pe->prev_off = (uint32_t)(next_b - src);
 				pe->need_sort = false;
 			}
 		}
@@ -8692,24 +9181,30 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 		wptr += pk.offset;
 
 		while (do_incr_ix) {
-			uint32_t offset = (uint32_t)(wptr - pe->new_contents);
+			// Whatever was skipped above this level closed with the element
+			// that just landed.
+			cs->depth = pe->depth;
 
-			ele_count = pe->offidx._.ele_count;
+			offset_index* offidx = cdt_stack_offidx(cs);
+			uint8_t* contents = dest + pe->contents_off;
+			uint32_t offset = (uint32_t)(wptr - contents);
+
+			ele_count = pe->ele_count;
 			pe->ix++;
 
-			if (pe->ix >= pe->n_msgpack) {
+			// A map's pairs arrive as two elements each.
+			if (pe->ix >= ele_count * (pe->type == MSGPACK_TYPE_MAP ? 2u : 1u)) {
 				if (pe->need_sort) {
 					define_order_index(ordidx, ele_count);
-					define_offset_index(new_offidx, pe->new_contents, offset,
-							ele_count);
+					define_offset_index(new_offidx, contents, offset, ele_count);
 
 					if (pe->type == MSGPACK_TYPE_LIST) {
 						// TODO - track list sorting
-						if (! offset_index_is_valid(&pe->offidx)) {
+						if (offidx == NULL) {
 							list_full_offset_index_fill_all(&new_offidx);
 						}
 						else {
-							offset_index_copy(&new_offidx, &pe->offidx, 0, 0,
+							offset_index_copy(&new_offidx, offidx, 0, 0,
 									ele_count, 0);
 						}
 
@@ -8718,12 +9213,12 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 					}
 					else {
 						// TODO - track map sorting
-						if (! offset_index_is_valid(&pe->offidx)) {
+						if (offidx == NULL) {
 							map_offset_index_check_and_fill(&new_offidx,
 									ele_count);
 						}
 						else {
-							offset_index_copy(&new_offidx, &pe->offidx, 0, 0,
+							offset_index_copy(&new_offidx, offidx, 0, 0,
 									ele_count, 0);
 						}
 
@@ -8731,7 +9226,8 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 								MAP_SORT_BY_KEY);
 
 						if (order_index_has_dups(&ordidx, &new_offidx)) {
-							cf_warning(AS_PARTICLE, "map has duplicate keys");
+							cf_detail(AS_PARTICLE, "map has duplicate keys");
+							cs->info->err = CDT_UNTRUSTED_ERR_DUP_KEY;
 							return 0;
 						}
 					}
@@ -8740,22 +9236,25 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 					DEFER_FREE(sort_contents);
 
 					wptr = order_index_write_eles(&ordidx, ele_count,
-							&new_offidx, sort_contents, &pe->offidx, false);
+							&new_offidx, sort_contents, offidx, false);
 					cf_assert(wptr - sort_contents == offset, AS_PARTICLE,
 							"write mismatch %lu != %u", wptr - sort_contents,
 							offset);
-					memcpy(pe->new_contents, sort_contents, offset);
-					wptr = pe->new_contents + offset;
+					memcpy(contents, sort_contents, offset);
+					wptr = contents + offset;
 				}
 
-				uint8_t ext_type_pkv =
-						AS_PACKED_PERSIST_INDEX | AS_PACKED_MAP_FLAG_KV_ORDERED;
+				// The sizer reserves an order index for the V bit alone, so
+				// gating the fill on K as well leaves the region uninitialized
+				// in a particle that reaches storage.
+				uint8_t ext_type_pv =
+						AS_PACKED_PERSIST_INDEX | AS_PACKED_MAP_FLAG_V_ORDERED;
 
 				if (pe->type == MSGPACK_TYPE_MAP &&
-						(pe->ext_type & ext_type_pkv) ==
-								ext_type_pkv) { // has order_index
+						(pe->ext_type & ext_type_pv) ==
+								ext_type_pv) { // has order_index
 					uint8_t* ordidx_ptr =
-							pe->offidx._.ptr + offset_index_size(&pe->offidx);
+							offidx->_.ptr + offset_index_size(offidx);
 					order_index ordidx;
 					bool ord_need_sort = true;
 
@@ -8763,26 +9262,25 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 
 					if (order_index_is_filled(&ordidx)) {
 						ord_need_sort =
-								! order_index_check_order(&ordidx, &pe->offidx);
+								! order_index_check_order(&ordidx, offidx);
 					}
 
 					if (ord_need_sort) {
-						map_order_index_sort(&ordidx, &pe->offidx,
-								MAP_SORT_BY_VALUE);
+						map_order_index_sort(&ordidx, offidx, MAP_SORT_BY_VALUE);
 					}
 				}
 
-				if (pe->offidx.content_sz != offset &&
-						offset_index_is_valid(&pe->offidx)) {
-					wptr = shrink_ext_offidx(pe->ext_start, wptr, ele_count,
-							pe->offidx.content_sz, offset);
+				if (offidx != NULL && offidx->content_sz != offset) {
+					wptr = shrink_ext_offidx(dest + pe->ext_start_off, wptr,
+							ele_count, offidx->content_sz, offset);
 				}
 
 				if (cs->ilevel == 0) {
 					if (b != end) {
-						cf_warning(AS_PARTICLE,
+						cf_detail(AS_PARTICLE,
 								"list/map rejected padding size %lu != 0",
 								end - b);
+						cs->info->err = CDT_UNTRUSTED_ERR_PADDING;
 						return 0;
 					}
 
@@ -8801,35 +9299,38 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 
 			if (pe->type == MSGPACK_TYPE_MAP) {
 				idx /= 2;
-				check_ordered = ! pe->need_sort;
+				check_ordered = ! pe->need_sort && ! skip_order;
 
 				if (pe->ix % 2 != 0) {
 					is_ele_key = false;
 				}
-				else if (! map_is_key(b, end - b)) {
-					cf_warning(AS_PARTICLE, "map has invalid key type");
+				else if (! checked && ! map_is_key(b, end - b)) {
+					cf_detail(AS_PARTICLE, "map has invalid key type");
+					cs->info->err = CDT_UNTRUSTED_ERR_KEY_TYPE;
 					return 0;
 				}
 			}
 			else if (pe->type == MSGPACK_TYPE_LIST) {
-				if ((pe->ext_type & AS_PACKED_LIST_FLAG_ORDERED) != 0) {
+				if (! skip_order &&
+						(pe->ext_type & AS_PACKED_LIST_FLAG_ORDERED) != 0) {
 					check_ordered = true;
 				}
 			}
 
 			if (check_ordered && is_ele_key) {
-				pe->prev.offset = 0;
+				msgpack_in prev = { .buf = src + pe->prev_off,
+					.buf_sz = src_sz - pe->prev_off };
+				msgpack_in mp = { .buf = b, .buf_sz = (uint32_t)(end - b) };
 
-				msgpack_in mp = { .buf = b, .buf_sz = UINT32_MAX };
-
-				msgpack_cmp_type cmp = msgpack_cmp(&pe->prev, &mp);
+				msgpack_cmp_type cmp = msgpack_cmp(&prev, &mp);
 
 				switch (cmp) {
 				case MSGPACK_CMP_LESS:
 					break;
 				case MSGPACK_CMP_EQUAL:
 					if (pe->type == MSGPACK_TYPE_MAP) {
-						cf_warning(AS_PARTICLE, "map has duplicate keys");
+						cf_detail(AS_PARTICLE, "map has duplicate keys");
+						cs->info->err = CDT_UNTRUSTED_ERR_DUP_KEY;
 						return 0;
 					}
 					break;
@@ -8837,15 +9338,16 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 					switch (pe->type) {
 					case MSGPACK_TYPE_LIST:
 						if ((pe->ext_type & AS_PACKED_LIST_FLAG_ORDERED) != 0) {
-							cf_warning(AS_PARTICLE,
+							cf_detail(AS_PARTICLE,
 									"list not ordered as expected");
+							cs->info->err = CDT_UNTRUSTED_ERR_ORDER;
 							return 0;
 						}
 						break;
 					case MSGPACK_TYPE_MAP:
 						if ((pe->ext_type & AS_PACKED_MAP_FLAG_K_ORDERED) != 0) {
-							cf_warning(AS_PARTICLE,
-									"map not ordered as expected");
+							cf_detail(AS_PARTICLE, "map not ordered as expected");
+							cs->info->err = CDT_UNTRUSTED_ERR_ORDER;
 							return 0;
 						}
 						break;
@@ -8856,14 +9358,19 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 				case MSGPACK_CMP_ERROR:
 				case MSGPACK_CMP_END:
 				default:
-					cf_crash(AS_PARTICLE, "unexpected %d", cmp);
+					cf_detail(AS_PARTICLE, "uncomparable %s elements",
+							pe->type == MSGPACK_TYPE_MAP ? "map key" : "list");
+					cs->info->err = CDT_UNTRUSTED_ERR_MSGPACK;
+					return 0;
 				}
 
-				pe->prev = mp;
+				pe->prev_off = (uint32_t)(b - src);
 			}
 
-			if (offset_index_is_valid(&pe->offidx) && is_ele_key) {
-				offset_index_set(&pe->offidx, idx, offset);
+			offidx = cdt_stack_offidx(cs);
+
+			if (offidx != NULL && is_ele_key) {
+				offset_index_set(offidx, idx, offset);
 			}
 
 			break;
@@ -8871,34 +9378,110 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 	}
 
 	if (b != end) {
-		cf_warning(AS_PARTICLE, "list/map rejected padding size %lu != 0",
+		cf_detail(AS_PARTICLE, "list/map rejected padding size %lu != 0",
 				end - b);
+		cs->info->err = CDT_UNTRUSTED_ERR_PADDING;
 		return 0;
 	}
 
 	return wptr - dest;
 }
 
-uint32_t
-cdt_untrusted_rewrite(uint8_t* dest, const uint8_t* src, uint32_t src_sz,
-		bool has_toplvl)
+bool
+cdt_untrusted_rewrite(uint8_t* dest, cdt_untrusted_info* info)
 {
 	cdt_stack cs;
+	uint8_t levels_mem[CDT_UNTRUSTED_RSTACK_INIT * sizeof(cdt_stack_entry)]
+			__attribute__((aligned(16)));
 
-	cs.entries = cs.entries0;
-	cs.entries_cap = sizeof(cs.entries0) / sizeof(cdt_stack_entry);
+	dynmem_init(&cs.levels, sizeof(cdt_stack_entry), CDT_UNTRUSTED_RSTACK_INIT,
+			levels_mem);
+	cf_defer { dynmem_destroy(&cs.levels); };
+
 	cs.ilevel = 0;
-	cs.entries->n_msgpack = 1;
-	cs.entries->ix = 0;
-	cs.has_toplvl = has_toplvl;
+	cs.depth = 1;
+	cs.info = info;
+	offset_index_set_ptr(&cs.top_offidx, NULL, NULL);
 
-	uint32_t ret = cdt_stack_untrusted_rewrite(&cs, dest, src, src_sz);
+	cdt_stack_entry* top = dynmem_reserve(&cs.levels, NULL);
 
-	if (cs.entries != cs.entries0) {
-		cf_free(cs.entries);
+	top->ix = 0;
+	top->depth = 1;
+
+	info->err = CDT_UNTRUSTED_OK;
+
+	// Repeated rather than left to the check, which this entry point may run
+	// without.
+	if (info->src_sz >= CDT_UNTRUSTED_MAX_SZ) {
+		cf_detail(AS_PARTICLE, "list/map %u bytes exceeds %u", info->src_sz,
+				CDT_UNTRUSTED_MAX_SZ);
+		info->err = CDT_UNTRUSTED_ERR_TOO_BIG;
+		return false;
 	}
 
-	return ret;
+#if defined(CDT_DEBUG_VERIFY)
+	// The two walks have to stay in step: a check that read these same bytes
+	// told the caller how much room to allocate, and - where it fully validated
+	// them - that a rewrite of them would succeed. The size is a ceiling rather than a
+	// figure, since a retained persist index is reserved from the source run
+	// and shrunk once the contents are compacted. Nothing but review keeps the
+	// two walks agreeing, so pin the promise here, where a drift would
+	// otherwise surface as a short buffer at a caller.
+	bool sized = info->checked_src == info->src &&
+			info->checked_src_sz == info->src_sz;
+	bool promised = cdt_untrusted_fully_checked(info);
+	uint32_t promised_sz = info->sz;
+#endif
+
+	uint32_t ret = cdt_stack_untrusted_rewrite(&cs, dest);
+
+#if defined(CDT_DEBUG_VERIFY)
+	cf_assert(! promised || ret != 0, AS_PARTICLE,
+			"rewrite refused what the check passed - err %d", info->err);
+	cf_assert(! sized || ret <= promised_sz, AS_PARTICLE,
+			"rewrite wrote %u against a promised %u", ret, promised_sz);
+#endif
+
+	if (ret == 0) {
+		if (info->err == CDT_UNTRUSTED_OK) {
+			info->err = CDT_UNTRUSTED_ERR_MSGPACK; // no site left a reason
+		}
+
+		return false;
+	}
+
+	info->sz = ret;
+
+	return true;
+}
+
+const char*
+cdt_untrusted_err_msg(cdt_untrusted_err err)
+{
+	switch (err) {
+	case CDT_UNTRUSTED_ERR_MSGPACK:
+		return "invalid packed list/map";
+	case CDT_UNTRUSTED_ERR_KEY_TYPE:
+		return "map has invalid key type";
+	case CDT_UNTRUSTED_ERR_DUP_KEY:
+		return "map has duplicate keys";
+	case CDT_UNTRUSTED_ERR_ORDER:
+		return "list/map not ordered as declared";
+	case CDT_UNTRUSTED_ERR_PADDING:
+		return "list/map has trailing bytes";
+	case CDT_UNTRUSTED_ERR_DEPTH:
+		return "list/map nested too deeply";
+	case CDT_UNTRUSTED_ERR_TOO_BIG:
+		return "list/map too large";
+	case CDT_UNTRUSTED_OK:
+		break;
+	}
+
+	// No label covers CDT_UNTRUSTED_OK or a value from outside the enum, so
+	// -Wswitch names a new reason that forgets its case.
+	cf_crash(AS_PARTICLE, "unexpected cdt_untrusted_err %u", err);
+
+	return NULL;
 }
 
 //==========================================================

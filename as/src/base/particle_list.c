@@ -435,20 +435,31 @@ list_incr_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 int32_t
 list_size_from_wire(const uint8_t* wire_value, uint32_t value_size)
 {
-	msgpack_type type;
-	uint32_t sz = cdt_untrusted_get_size(wire_value, value_size, &type, true);
+	// Sizing only - the vtable's build entry is separate and cannot be handed
+	// a verdict from here, so the rewrite examines keys and order itself, and
+	// stamps the same info->err.
+	cdt_untrusted_info info = {
+		.src = wire_value, .src_sz = value_size, .toplvl_index = true
+	};
 
-	if (sz == 0 || type != MSGPACK_TYPE_LIST) {
-		cf_warning(AS_PARTICLE,
-				"list_size_from_wire() invalid list input sz %u type %d", sz,
-				type);
-		as_error_details_set_fmt(AS_SUB_NONE,
-				"invalid list data (sz %u, msgpack type %s)", sz,
-				msgpack_type_str(type));
+	if (! cdt_untrusted_check(&info)) {
+		cf_warning(AS_PARTICLE, "list_size_from_wire() invalid list input - %s",
+				cdt_untrusted_err_msg(info.err));
+		as_error_details_set_fmt(AS_SUB_NONE, "%s",
+				cdt_untrusted_err_msg(info.err));
 		return -AS_ERR_UNKNOWN;
 	}
 
-	return (int32_t)(sizeof(list_mem) + sz);
+	if (info.type != MSGPACK_TYPE_LIST) {
+		cf_warning(AS_PARTICLE,
+				"list_size_from_wire() invalid list input type %d", info.type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"invalid list data (msgpack type %s)",
+				msgpack_type_str(info.type));
+		return -AS_ERR_UNKNOWN;
+	}
+
+	return (int32_t)(sizeof(list_mem) + info.sz);
 }
 
 int
@@ -456,17 +467,24 @@ list_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		uint32_t value_size, as_particle** pp)
 {
 	list_mem* p_list_mem = (list_mem*)*pp;
-	uint32_t sz = cdt_untrusted_rewrite(p_list_mem->data, wire_value,
-			value_size, true);
+	// A separate vtable entry from list_size_from_wire(), so the check's
+	// verdict can't be carried here - this validates for itself.
+	cdt_untrusted_info info = {
+		.src = wire_value,
+		.src_sz = value_size,
+		.toplvl_index = true,
+	};
 
-	if (sz == 0) {
-		cf_warning(AS_PARTICLE, "list_from_wire() invalid packed list");
-		as_error_details_set_fmt(AS_SUB_NONE, "invalid packed list");
+	if (! cdt_untrusted_rewrite(p_list_mem->data, &info)) {
+		cf_warning(AS_PARTICLE, "list_from_wire() invalid packed list - %s",
+				cdt_untrusted_err_msg(info.err));
+		as_error_details_set_fmt(AS_SUB_NONE, "%s",
+				cdt_untrusted_err_msg(info.err));
 		return -AS_ERR_UNKNOWN;
 	}
 
 	p_list_mem->type = wire_type;
-	p_list_mem->sz = sz;
+	p_list_mem->sz = info.sz;
 
 #ifdef LIST_DEBUG_VERIFY
 	{
@@ -3602,37 +3620,13 @@ packed_list_replace_ordered(const packed_list* list, cdt_op_mem* com,
 static bool
 packed_list_check_order(const packed_list* list, bool error_on_dup)
 {
-	if (list->ele_count <= 1) {
-		return true;
-	}
+	cdt_order_check_t order = cdt_check_order(list->contents, list->content_sz,
+			list->ele_count, false);
 
-	msgpack_in mp = { .buf = list->contents, .buf_sz = list->content_sz };
-
-	msgpack_in prev = mp;
-
-	if (msgpack_sz(&mp) == 0) {
-		return false;
-	}
-
-	for (uint32_t i = 1; i < list->ele_count; i++) {
-		msgpack_cmp_type cmp = msgpack_cmp(&prev, &mp);
-
-		if ((cmp == MSGPACK_CMP_LESS) ||
-				(! error_on_dup && (cmp == MSGPACK_CMP_EQUAL))) {
-			continue;
-		}
-
-		return false;
-	}
-
-	return true;
+	return error_on_dup ? order == CDT_ORDER_SORTED_UNIQUE
+						: order != CDT_ORDER_UNSORTED;
 }
 
-// Check that a raw ORDERED-flagged msgpack list buffer has its elements in
-// ascending order (duplicates allowed). buf must be a well-formed list (the AEL
-// literal packer's :ORDERED encoding: header count = ele_count + 1, ext element
-// with ORDERED, then the elements). Returns false if it doesn't parse or isn't
-// ordered. The AEL path validates rather than sorts lists.
 bool
 list_buf_check_ordered(const uint8_t* buf, uint32_t buf_sz)
 {
@@ -4002,23 +3996,45 @@ static int
 list_append(cdt_op_mem* com, const cdt_payload* uval, bool payload_is_list,
 		uint64_t mod_flags)
 {
-	msgpack_type type;
-	uint32_t rewrite_sz =
-			cdt_untrusted_get_size(uval->ptr, uval->sz, &type, false);
+	define_untrusted_info(info, uval->ptr, uval->sz);
 
-	if (rewrite_sz == 0 || (type != MSGPACK_TYPE_LIST && payload_is_list)) {
-		cf_warning(AS_PARTICLE, "list_append() invalid parameter, type %d", type);
-		as_error_details_set_fmt(AS_SUB_NONE,
-				"list_append: invalid parameter (msgpack type %s)",
-				msgpack_type_str(type));
+	if (! cdt_untrusted_check(&info)) {
+		cf_warning(AS_PARTICLE, "list_append() invalid parameter - %s",
+				cdt_untrusted_err_msg(info.err));
+		as_error_details_set_fmt(AS_SUB_NONE, "list_append: %s",
+				cdt_untrusted_err_msg(info.err));
 		return -AS_ERR_PARAMETER;
 	}
 
-	define_deferred_memory(val_mem, rewrite_sz);
+	if (info.type != MSGPACK_TYPE_LIST && payload_is_list) {
+		cf_warning(AS_PARTICLE, "list_append() invalid parameter, type %d",
+				info.type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"list_append: invalid parameter (msgpack type %s)",
+				msgpack_type_str(info.type));
+		return -AS_ERR_PARAMETER;
+	}
 
-	rewrite_sz = cdt_untrusted_rewrite(val_mem, uval->ptr, uval->sz, false);
+	// Canonical input rewrites to itself, so alias the caller's bytes - they
+	// outlive this op and every use below is read-only. The scratch is still
+	// declared here so its lifetime spans that use; sizing it to 0 would be an
+	// undefined zero-length VLA, hence the minimum.
+	define_deferred_memory(val_mem, info.is_canonical ? 1 : info.sz);
+	cdt_payload val = { uval->ptr, uval->sz };
 
-	const cdt_payload val = { val_mem, rewrite_sz };
+	if (! info.is_canonical) {
+		if (! cdt_untrusted_rewrite(val_mem, &info)) {
+			cf_warning(AS_PARTICLE, "list_append() invalid parameter - %s",
+					cdt_untrusted_err_msg(info.err));
+			as_error_details_set_fmt(AS_SUB_NONE, "list_append: %s",
+					cdt_untrusted_err_msg(info.err));
+			return -AS_ERR_PARAMETER;
+		}
+
+		val.ptr = val_mem;
+		val.sz = info.sz;
+	}
+
 	packed_list list;
 
 	if (! packed_list_init_from_com(&list, com)) {
@@ -4046,22 +4062,42 @@ static int
 list_insert(cdt_op_mem* com, int64_t index, const cdt_payload* uval,
 		bool payload_is_list, uint64_t mod_flags)
 {
-	msgpack_type type;
-	uint32_t rewrite_sz =
-			cdt_untrusted_get_size(uval->ptr, uval->sz, &type, false);
+	define_untrusted_info(info, uval->ptr, uval->sz);
 
-	if (rewrite_sz == 0 || (type != MSGPACK_TYPE_LIST && payload_is_list)) {
-		cf_warning(AS_PARTICLE, "list_append() invalid parameter, type %d", type);
-		as_error_details_set_fmt(AS_SUB_NONE,
-				"list_insert: invalid parameter (msgpack type %s)",
-				msgpack_type_str(type));
+	if (! cdt_untrusted_check(&info)) {
+		cf_warning(AS_PARTICLE, "list_insert() invalid parameter - %s",
+				cdt_untrusted_err_msg(info.err));
+		as_error_details_set_fmt(AS_SUB_NONE, "list_insert: %s",
+				cdt_untrusted_err_msg(info.err));
 		return -AS_ERR_PARAMETER;
 	}
 
-	define_deferred_memory(val_mem, rewrite_sz);
-	rewrite_sz = cdt_untrusted_rewrite(val_mem, uval->ptr, uval->sz, false);
+	if (info.type != MSGPACK_TYPE_LIST && payload_is_list) {
+		cf_warning(AS_PARTICLE, "list_insert() invalid parameter, type %d",
+				info.type);
+		as_error_details_set_fmt(AS_SUB_NONE,
+				"list_insert: invalid parameter (msgpack type %s)",
+				msgpack_type_str(info.type));
+		return -AS_ERR_PARAMETER;
+	}
 
-	const cdt_payload val = { val_mem, rewrite_sz };
+	// Alias when canonical - see list_append().
+	define_deferred_memory(val_mem, info.is_canonical ? 1 : info.sz);
+	cdt_payload val = { uval->ptr, uval->sz };
+
+	if (! info.is_canonical) {
+		if (! cdt_untrusted_rewrite(val_mem, &info)) {
+			cf_warning(AS_PARTICLE, "list_insert() invalid parameter - %s",
+					cdt_untrusted_err_msg(info.err));
+			as_error_details_set_fmt(AS_SUB_NONE, "list_insert: %s",
+					cdt_untrusted_err_msg(info.err));
+			return -AS_ERR_PARAMETER;
+		}
+
+		val.ptr = val_mem;
+		val.sz = info.sz;
+	}
+
 	packed_list list;
 
 	if (! packed_list_init_from_com(&list, com)) {
@@ -4086,23 +4122,33 @@ static int
 list_set(cdt_op_mem* com, int64_t index, const cdt_payload* uval,
 		uint64_t mod_flags)
 {
-	msgpack_type type;
-	uint32_t rewrite_sz =
-			cdt_untrusted_get_size(uval->ptr, uval->sz, &type, false);
+	define_untrusted_info(info, uval->ptr, uval->sz);
 
-	if (rewrite_sz == 0) {
-		cf_warning(AS_PARTICLE, "list_set() invalid parameter, type %d", type);
-		as_error_details_set_fmt(AS_SUB_NONE,
-				"list_set: invalid parameter (msgpack type %s)",
-				msgpack_type_str(type));
+	if (! cdt_untrusted_check(&info)) {
+		cf_warning(AS_PARTICLE, "list_set() invalid parameter - %s",
+				cdt_untrusted_err_msg(info.err));
+		as_error_details_set_fmt(AS_SUB_NONE, "list_set: %s",
+				cdt_untrusted_err_msg(info.err));
 		return -AS_ERR_PARAMETER;
 	}
 
-	define_deferred_memory(val_mem, rewrite_sz);
+	// Alias when canonical - see list_append().
+	define_deferred_memory(val_mem, info.is_canonical ? 1 : info.sz);
+	cdt_payload val = { uval->ptr, uval->sz };
 
-	rewrite_sz = cdt_untrusted_rewrite(val_mem, uval->ptr, uval->sz, false);
+	if (! info.is_canonical) {
+		if (! cdt_untrusted_rewrite(val_mem, &info)) {
+			cf_warning(AS_PARTICLE, "list_set() invalid parameter - %s",
+					cdt_untrusted_err_msg(info.err));
+			as_error_details_set_fmt(AS_SUB_NONE, "list_set: %s",
+					cdt_untrusted_err_msg(info.err));
+			return -AS_ERR_PARAMETER;
+		}
 
-	const cdt_payload val = { val_mem, rewrite_sz };
+		val.ptr = val_mem;
+		val.sz = info.sz;
+	}
+
 	packed_list list;
 
 	if (! packed_list_init_from_com(&list, com)) {
@@ -5376,7 +5422,7 @@ list_order_heap_cmp_fn(const void* udata, uint32_t idx1, uint32_t idx2)
 static bool
 list_result_data_set_not_found(cdt_result_data* rd, int64_t index)
 {
-	switch (rd->type) {
+	switch (result_data_dispatch_type(rd)) {
 	case RESULT_TYPE_KEY:
 	case RESULT_TYPE_KEY_VALUE_MAP:
 	case RESULT_TYPE_UNORDERED_MAP:

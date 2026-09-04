@@ -382,6 +382,9 @@ void as_exp_result_msgpack_write(const as_exp_result* res, uint8_t* wptr);
 void as_exp_result_msgpack_pack(const as_exp_result* res, as_packer* pk);
 bool as_exp_result_has_nonstorage(const as_exp_result* res);
 
+// A container must not take in a map holding selection order.
+bool as_exp_result_has_preserve_order_map(const as_exp_result* res);
+
 // post: res is always destroyable, whatever the return -- only the
 //       AS_EXP_RESULT_BIN variant owns anything. AS_EXP_TRUE carries a value
 //       except for AS_EXP_RESULT_REMOVE.
