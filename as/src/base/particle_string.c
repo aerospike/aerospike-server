@@ -2575,53 +2575,88 @@ icu_search_exit(void* udata)
 }
 
 // Assumes from is ASCII (all bytes < 0x80).
+// True when every cased character is uppercase and at least one cased character
+// exists. Non-cased characters (digits, punctuation, whitespace) are skipped.
+// The empty string is vacuously true (SERVER-97 comment 198220).
 static bool
 is_ascii_upper(const uint8_t* from, uint32_t sz)
 {
+	bool has_cased = false;
+
 	for (uint32_t i = 0; i < sz; i++) {
-		if (from[i] < 'A' || from[i] > 'Z') {
+		if (from[i] >= 'a' && from[i] <= 'z') {
 			return false;
 		}
+
+		if (from[i] >= 'A' && from[i] <= 'Z') {
+			has_cased = true;
+		}
 	}
-	return true;
+
+	return sz == 0 || has_cased;
 }
 
 // Assumes from is ASCII (all bytes < 0x80).
 static bool
 is_ascii_lower(const uint8_t* from, uint32_t sz)
 {
+	bool has_cased = false;
+
 	for (uint32_t i = 0; i < sz; i++) {
-		if (from[i] < 'a' || from[i] > 'z') {
+		if (from[i] >= 'A' && from[i] <= 'Z') {
 			return false;
 		}
+
+		if (from[i] >= 'a' && from[i] <= 'z') {
+			has_cased = true;
+		}
 	}
-	return true;
+
+	return sz == 0 || has_cased;
 }
 
 static bool
 is_utf8_lower(const uint8_t* from, uint32_t sz)
 {
+	bool has_cased = false;
 	UChar32 c;
 	int32_t i = 0;
+
 	while (i < (int32_t)sz) {
 		U8_NEXT(from, i, (int32_t)sz, c);
-		if (c < 0 || ! u_islower(c))
+
+		if (c < 0 || u_isupper(c)) {
 			return false;
+		}
+
+		if (u_islower(c)) {
+			has_cased = true;
+		}
 	}
-	return true;
+
+	return sz == 0 || has_cased;
 }
 
 static bool
 is_utf8_upper(const uint8_t* from, uint32_t sz)
 {
+	bool has_cased = false;
 	UChar32 c;
 	int32_t i = 0;
+
 	while (i < (int32_t)sz) {
 		U8_NEXT(from, i, (int32_t)sz, c);
-		if (c < 0 || ! u_isupper(c))
+
+		if (c < 0 || u_islower(c)) {
 			return false;
+		}
+
+		if (u_isupper(c)) {
+			has_cased = true;
+		}
 	}
-	return true;
+
+	return sz == 0 || has_cased;
 }
 
 // Returns true if the UTF-8 string is already in NFC (Canonical Decomposition
