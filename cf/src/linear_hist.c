@@ -116,6 +116,7 @@ void
 linear_hist_destroy(linear_hist* h)
 {
 	cf_mutex_destroy(&h->info_lock);
+	cf_free(h->info_snapshot);
 	cf_free(h->counts);
 	cf_free(h);
 }
