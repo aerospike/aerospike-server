@@ -354,7 +354,6 @@ typedef struct {
 	dynmem levels;
 	uint32_t ilevel;
 	uint32_t depth; // nesting at the level on top, skipped containers included
-	msgpack_type toplvl_type;
 	// A persist index is top-level only, so at most one level of a walk has one.
 	offset_index top_offidx;
 	cdt_untrusted_info* info;
@@ -1964,6 +1963,15 @@ select_apply_undo_entry(select_apply* a)
 	a->tail->idx--;
 }
 
+// An undone entry is outside what the sweep at destroy covers, so a result
+// holding a particle has to be released before undoing.
+static void
+select_apply_reject_result(select_apply* a, as_exp_result* res)
+{
+	as_exp_result_destroy(res);
+	select_apply_undo_entry(a);
+}
+
 // pre:  every surviving entry has had its sz set -- overflow pages are
 //       cf_malloc'd rather than zeroed, so an unwritten sz reads garbage.
 //       sz == 0 is the hdr variant, whose union holds no result.
@@ -2182,7 +2190,7 @@ cdt_select_modify(select_ctx* sel, uint32_t off, uint32_t key_sz, uint32_t sz)
 	// existing failure path. A fault has already staged a precise trace +
 	// message, making the generic set below a first-set-wins no-op.
 	if (rv != AS_EXP_TRUE) {
-		select_apply_undo_entry(sel->apply);
+		select_apply_reject_result(sel->apply, &re->res);
 
 		if (! no_fail) {
 			cf_debug(AS_PARTICLE, "cdt_select_modify() exp eval not TRUE");
@@ -2196,7 +2204,7 @@ cdt_select_modify(select_ctx* sel, uint32_t off, uint32_t key_sz, uint32_t sz)
 	}
 
 	if (as_exp_result_has_nonstorage(&re->res)) {
-		select_apply_undo_entry(sel->apply);
+		select_apply_reject_result(sel->apply, &re->res);
 		as_error_details_set_fmt(AS_SUB_NONE,
 				"cdt select apply expression result contains non-storable type");
 		sel->ret_code = -AS_ERR_INCOMPATIBLE_TYPE;
@@ -2206,7 +2214,7 @@ cdt_select_modify(select_ctx* sel, uint32_t off, uint32_t key_sz, uint32_t sz)
 	// The result lands verbatim, so selection order would sit inside a
 	// container whose flag promises key order.
 	if (as_exp_result_has_preserve_order_map(&re->res)) {
-		select_apply_undo_entry(sel->apply);
+		select_apply_reject_result(sel->apply, &re->res);
 		as_error_details_set_fmt(AS_SUB_NONE,
 				"cdt select apply expression result is a map with preserved element order");
 		sel->ret_code = -AS_ERR_INCOMPATIBLE_TYPE;
@@ -8563,7 +8571,7 @@ cdt_untrusted_check(cdt_untrusted_info* info)
 	// examined: a caller wanting only a size still needs the depth ceiling
 	// charged here, or the rewrite is the first to refuse, having grown a
 	// stack to do it.
-	bool examine = info->examine;
+	const bool examine = info->examine;
 	bool tracking = true;
 	bool rewrite_alters = false; // needs compaction, or has maskable flags
 
@@ -8912,10 +8920,6 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest)
 				&has_nonstorage, &not_compact);
 		uint32_t parse_sz = next_b - b;
 		uint32_t ele_count = count - old_count;
-
-		if (i == 0) {
-			cs->toplvl_type = type;
-		}
 
 		if (type == MSGPACK_TYPE_MAP) {
 			ele_count /= 2;

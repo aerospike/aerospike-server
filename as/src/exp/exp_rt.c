@@ -3857,10 +3857,16 @@ rt_bin_canonicalize(rt_value* val)
 		return;
 	}
 
-	// Key order is the whole obligation - comparison reads keys in order, and
-	// escaping results must be key ordered. The rest of byte canonicality is
-	// size: a relic's wide headers and persist index pass through as stored.
-	if (cdt_untrusted_fully_checked(&info)) {
+	// Key order is owed to comparison, which reads keys in order, and to
+	// storage. Not to a client - a collection op's result is routinely
+	// unordered. The rest of byte canonicality is size: a relic's wide headers
+	// and persist index pass through as stored.
+	//
+	// A declared preserved order is not repaired here: sorting it away would
+	// make a comparison's verdict turn on whether the keys happened to be
+	// sorted already, and would strip the marker the write path refuses on.
+	if (cdt_untrusted_fully_checked(&info) ||
+			map_buf_is_preserve_order(packed.ptr, packed.sz)) {
 		return; // keep the zero-copy view - no scratch, no copy
 	}
 
