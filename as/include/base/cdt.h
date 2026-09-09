@@ -623,6 +623,9 @@ uint32_t cdt_untrusted_get_size(const uint8_t* buf, uint32_t buf_sz,
 		msgpack_type* type, bool has_toplvl);
 uint32_t cdt_untrusted_rewrite(uint8_t* dest, const uint8_t* src,
 		uint32_t src_sz, bool has_toplvl);
+// Markers pass through - keeping them out of a particle is the caller's job.
+uint32_t cdt_untrusted_rewrite_literal(uint8_t* dest, const uint8_t* src,
+		uint32_t src_sz, bool* has_marker_r);
 
 // cdt_check
 bool cdt_check_flags(uint8_t flags, msgpack_type type);

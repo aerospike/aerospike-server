@@ -409,14 +409,14 @@ typedef struct build_args_s {
 	uint32_t max_var_idx;
 	var_scope* current;
 
-	// Count of CDT literals the sizing pass found out of canonical form -
-	// build_canonicalize_cdt() consumes one per literal it retains.
+	// Count of CDT literals the sizing pass found out of canonical form - the
+	// build pass consumes one per literal it retains.
 	uint32_t literal_cleanup;
 } build_args;
 
 typedef enum {
 	CDT_LITERAL_OK,
-	CDT_LITERAL_NEEDS_SORT,
+	CDT_LITERAL_NEEDS_REWRITE,
 	CDT_LITERAL_INVALID
 } cdt_literal_status;
 
@@ -1018,9 +1018,8 @@ as_exp_destroy(as_exp* exp)
 			break;
 		case VOP_VALUE_LIST:
 		case VOP_VALUE_MSGPACK:
-			// A canonicalized CDT literal retained by
-			// build_canonicalize_cdt() - literals that arrived canonical
-			// alias the wire and are never on this stack.
+			// A canonicalized CDT literal retained at build - literals that
+			// arrived canonical alias the wire and are never on this stack.
 			cf_free((void*)((op_value_blob*)ob)->value);
 			break;
 		default:
@@ -1076,7 +1075,7 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire)
 		return NULL;
 	}
 
-	// CDT literals found out of canonical form get sorted into retained
+	// CDT literals found out of canonical form are rewritten into retained
 	// allocations at build - reserve a cleanup slot for each.
 	cleanup_count += literal_cleanup;
 
@@ -1119,8 +1118,8 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire)
 			"cleanup_stack_ix (%u) not equal to cleanup_count (%u)",
 			args.exp->cleanup_stack_ix, cleanup_count);
 	// Every literal the sizing pass counted as needing canonicalization must
-	// have been consumed by build_canonicalize_cdt() - a remainder means the
-	// passes disagreed and an unsorted literal may have aliased through.
+	// have been consumed by the build pass - a remainder means the passes
+	// disagreed and a non-canonical literal may have aliased through.
 	cf_assert(args.literal_cleanup == 0, AS_EXP,
 			"literal_cleanup (%u) not consumed", args.literal_cleanup);
 
@@ -1294,13 +1293,12 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 				}
 
 				// Map literals: validate now, and count any needing
-				// canonicalization so a cleanup slot gets reserved for
-				// build_canonicalize_cdt().
+				// canonicalization so a cleanup slot gets reserved.
 				if (type == MSGPACK_TYPE_MAP) {
 					switch (build_check_cdt_literal(ele_start, ele_sz)) {
 					case CDT_LITERAL_INVALID:
 						return false;
-					case CDT_LITERAL_NEEDS_SORT:
+					case CDT_LITERAL_NEEDS_REWRITE:
 						(*literal_cleanup)++;
 						break;
 					default:
@@ -1343,9 +1341,9 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 
 		if (op_code == EXP_QUOTE) {
 			// Quoted list literal: validate now, and count it if it needs
-			// canonicalization so a cleanup slot gets reserved for
-			// build_canonicalize_cdt(). Consumes the one static param (the
-			// quoted list), matching the generic path below.
+			// canonicalization so a cleanup slot gets reserved. Consumes the
+			// one static param (the quoted list), matching the generic path
+			// below.
 			const uint8_t* q_start = mp->buf + mp->offset;
 			uint32_t q_sz = msgpack_sz(mp);
 
@@ -1359,7 +1357,7 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 			switch (build_check_cdt_literal(q_start, q_sz)) {
 			case CDT_LITERAL_INVALID:
 				return false;
-			case CDT_LITERAL_NEEDS_SORT:
+			case CDT_LITERAL_NEEDS_REWRITE:
 				(*literal_cleanup)++;
 				break;
 			default:
@@ -1493,21 +1491,24 @@ build_find_var_entry(build_args* args, const uint8_t* name, uint32_t name_sz)
 	return NULL;
 }
 
-// Sizing-pass validation of a CDT literal (quoted list or bare map). Corrupt
-// or non-compact input is invalid. A compact literal whose map keys arrive
-// unsorted is legal client input (e.g. a language-level unordered map) -
-// report NEEDS_SORT so build_internal() reserves a cleanup slot and
-// build_canonicalize_cdt() sorts it into an exp-owned copy at build.
+// Sizing-pass validation of a CDT literal (quoted list or bare map). Invalid
+// is whatever the walk refuses - corrupt msgpack, or a marker in a position
+// that can never hold one. Unsorted keys and wide headers are legal client
+// input, and a literal can be a compare parameter, so markers pass anywhere
+// else - keeping those out of a particle is the storage-bound consumer's job.
 static cdt_literal_status
 build_check_cdt_literal(const uint8_t* buf, uint32_t buf_sz)
 {
-	// has_toplvl false strips any top-level persist-index flag, so the rewrite
-	// only reorders/compactifies and can never exceed buf_sz.
-	// Need more options for cdt_untrusted_rewrite() if we want to support
-	// PERSIST_INDEX in exp literals in the future.
+	// The literal entry point fixes has_toplvl false, which strips a top-level
+	// persist-index flag - so the rewrite only reorders and compacts, and can
+	// never exceed buf_sz. Supporting PERSIST_INDEX in exp literals would mean
+	// taking that as a parameter.
 	uint8_t* temp = cf_malloc(buf_sz);
-	uint32_t new_sz = cdt_untrusted_rewrite(temp, buf, buf_sz, false);
+	uint32_t new_sz = cdt_untrusted_rewrite_literal(temp, buf, buf_sz, NULL);
 	DEFER_FREE(temp);
+
+	cf_assert(new_sz <= buf_sz, AS_EXP, "literal rewrite grew %u -> %u", buf_sz,
+			new_sz);
 
 	if (new_sz == 0) {
 		cf_warning(AS_EXP, "build_check_cdt_literal - error %u invalid cdt",
@@ -1516,20 +1517,16 @@ build_check_cdt_literal(const uint8_t* buf, uint32_t buf_sz)
 	}
 
 	if (new_sz != buf_sz) {
-		cf_warning(AS_EXP,
-				"build_check_cdt_literal - error %u cdt not compactified",
-				AS_ERR_PARAMETER);
-		return CDT_LITERAL_INVALID;
+		return CDT_LITERAL_NEEDS_REWRITE;
 	}
 
 	return memcmp(buf, temp, buf_sz) == 0 ? CDT_LITERAL_OK
-										  : CDT_LITERAL_NEEDS_SORT;
+										  : CDT_LITERAL_NEEDS_REWRITE;
 }
 
-// Build-pass companion to build_check_cdt_literal(). The sizing pass counted
-// the literals needing canonicalization into literal_cleanup and
-// build_internal() reserved a cleanup slot for each, so a zero count means
-// every literal already aliases canonical source bytes.
+// Build-pass companion to the sizing check. The count says nothing about THIS
+// op - it means only that some literal here needs the walk, so an expression
+// with none skips it.
 // The two passes must agree, which relies on the source bytes being immutable
 // between them - guaranteed because nothing writes parse-source bytes after
 // demarshal. Do not "optimize" this into an in-place rewrite: batch repeat
@@ -1544,16 +1541,23 @@ build_canonicalize_cdt(build_args* args, op_value_blob* op)
 
 	uint8_t* mem = cf_malloc(op->value_sz);
 
-	cdt_untrusted_rewrite(mem, op->value, op->value_sz, false);
+	uint32_t new_sz =
+			cdt_untrusted_rewrite_literal(mem, op->value, op->value_sz, NULL);
 
-	if (memcmp(mem, op->value, op->value_sz) == 0) {
+	cf_assert(new_sz != 0, AS_EXP, "cdt literal rewrite disagrees with sizing");
+	cf_assert(new_sz <= op->value_sz, AS_EXP, "literal rewrite grew %u -> %u",
+			op->value_sz, new_sz);
+
+	if (new_sz == op->value_sz && memcmp(mem, op->value, new_sz) == 0) {
 		cf_free(mem); // already canonical - keep aliasing the source
 		return true;
 	}
 
 	// Retain the canonicalized copy - the op owns it and as_exp_destroy()
-	// frees it via the cleanup stack.
+	// frees it via the cleanup stack. The rewrite only strips and compacts, so
+	// value_sz can only shrink.
 	op->value = mem;
+	op->value_sz = new_sz;
 	args->exp->cleanup_stack[args->exp->cleanup_stack_ix++] = op;
 	args->literal_cleanup--;
 
@@ -5093,6 +5097,12 @@ msgpack_to_bin(runtime* rt, as_bin* to, rt_value* from, cf_ll_buf* ll_buf)
 		p_type = AS_PARTICLE_TYPE_BLOB;
 		break;
 	default:
+		return false;
+	}
+
+	msgpack_in mp = { .buf = from->r_bytes.contents, .buf_sz = from->r_bytes.sz };
+
+	if (msgpack_sz(&mp) == 0 || mp.has_nonstorage) {
 		return false;
 	}
 

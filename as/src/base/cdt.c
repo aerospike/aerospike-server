@@ -221,6 +221,8 @@ typedef struct {
 	uint32_t ilevel;
 	msgpack_type toplvl_type;
 	bool has_toplvl;
+	bool allow_nonstorage; // in - for compare parameters
+	bool saw_nonstorage; // out
 } cdt_stack;
 
 // clang-format off
@@ -4891,12 +4893,14 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 			ele_count /= 2;
 		}
 
-		if (has_nonstorage || next_b == NULL) {
+		if ((has_nonstorage && ! cs->allow_nonstorage) || next_b == NULL) {
 			cf_detail(AS_PARTICLE,
 					"untrusted_rewrite() has_nonstorage %d b %p sz %u i %u",
 					has_nonstorage, b, (uint32_t)(end - b), i);
 			return 0;
 		}
+
+		cs->saw_nonstorage = cs->saw_nonstorage || has_nonstorage;
 
 		cdt_stack_entry* pe = cdt_stack_get_entry(cs);
 		bool do_incr_ix = (i != 0);
@@ -4969,9 +4973,31 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 					msgpack_type next_type;
 					uint32_t temp_count = 0;
 
+					// Its own flag - the shared one latches, and an earlier
+					// element's marker would read as this meta value's.
+					bool meta_nonstorage = false;
+
 					count--;
 					next_b = msgpack_parse(next_b, end, &temp_count, &next_type,
-							&has_nonstorage, &not_compact);
+							&meta_nonstorage, &not_compact);
+
+					if (next_b == NULL) {
+						return 0;
+					}
+
+					if (meta_nonstorage) {
+						// A marker can never ride in a meta value. Storage
+						// leans on the latched flag at the next element
+						// check, which a meta-pair-only map never reaches.
+						if (cs->allow_nonstorage) {
+							cf_detail(AS_PARTICLE,
+									"untrusted_rewrite() meta has_nonstorage");
+							return 0;
+						}
+
+						has_nonstorage = true;
+					}
+
 					tail_sz = (uint32_t)(end - next_b);
 					ext.type &= AS_PACKED_MAP_FLAG_KV_ORDERED |
 							AS_PACKED_PERSIST_INDEX;
@@ -5283,9 +5309,9 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 	return wptr - dest;
 }
 
-uint32_t
-cdt_untrusted_rewrite(uint8_t* dest, const uint8_t* src, uint32_t src_sz,
-		bool has_toplvl)
+static uint32_t
+untrusted_rewrite(uint8_t* dest, const uint8_t* src, uint32_t src_sz,
+		bool has_toplvl, bool allow_nonstorage, bool* marker_r)
 {
 	cdt_stack cs;
 
@@ -5295,6 +5321,8 @@ cdt_untrusted_rewrite(uint8_t* dest, const uint8_t* src, uint32_t src_sz,
 	cs.entries->n_msgpack = 1;
 	cs.entries->ix = 0;
 	cs.has_toplvl = has_toplvl;
+	cs.allow_nonstorage = allow_nonstorage;
+	cs.saw_nonstorage = false;
 
 	uint32_t ret = cdt_stack_untrusted_rewrite(&cs, dest, src, src_sz);
 
@@ -5302,7 +5330,25 @@ cdt_untrusted_rewrite(uint8_t* dest, const uint8_t* src, uint32_t src_sz,
 		cf_free(cs.entries);
 	}
 
+	if (marker_r != NULL) {
+		*marker_r = cs.saw_nonstorage;
+	}
+
 	return ret;
+}
+
+uint32_t
+cdt_untrusted_rewrite(uint8_t* dest, const uint8_t* src, uint32_t src_sz,
+		bool has_toplvl)
+{
+	return untrusted_rewrite(dest, src, src_sz, has_toplvl, false, NULL);
+}
+
+uint32_t
+cdt_untrusted_rewrite_literal(uint8_t* dest, const uint8_t* src,
+		uint32_t src_sz, bool* has_marker_r)
+{
+	return untrusted_rewrite(dest, src, src_sz, false, true, has_marker_r);
 }
 
 //==========================================================
