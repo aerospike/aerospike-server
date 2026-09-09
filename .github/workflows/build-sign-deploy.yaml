@@ -724,7 +724,7 @@ jobs:
         with:
           repository: aerospike/aerospike-server.docker
           path: pkg/docker
-          ref: 4176ec9b44e882cf4b4b99a49118462aad4f3350
+          ref: 76d714ee55389b9c379261968f5bb20bccb4b1b2
           fetch-depth: 1
 
       - name: Set up QEMU
