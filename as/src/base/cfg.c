@@ -220,7 +220,7 @@ cfg_set_defaults()
 	// Mod-lua defaults.
 	c->mod_lua.server_mode = true;
 	c->mod_lua.cache_enabled = true;
-	c->mod_lua.unsafe_lua_disabled = false;
+	c->mod_lua.unsafe_lua_disabled = true;
 	strcpy(c->mod_lua.user_path, "/opt/aerospike/usr/udf/lua");
 
 	// TODO - security set default config API?
@@ -4521,9 +4521,10 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_MOD_LUA_ALLOW_UNSAFE_LUA:
 				// User-facing knob is positive ("allow unsafe Lua"); the
-				// internal flag is negative ("unsafe Lua disabled") so
-				// embedders that zero-init the mod_lua_config struct get the
-				// legacy permissive default.
+				// internal flag is negative ("unsafe Lua disabled"). Note the
+				// server now defaults the flag to true (sandbox on), so an
+				// embedder that zero-inits mod_lua_config gets the legacy
+				// permissive behavior rather than the server default.
 				c->mod_lua.unsafe_lua_disabled = ! cfg_bool(&line);
 				break;
 			case CASE_MOD_LUA_USER_PATH:
@@ -5034,9 +5035,9 @@ as_config_post_process(as_config* c, const char* config_file)
 	if (! c->mod_lua.unsafe_lua_disabled) {
 		cf_warning(AS_CFG,
 				"mod-lua: allow-unsafe-lua is true - Lua UDFs have "
-				"access to os/io/debug and can load native .so modules; set "
-				"allow-unsafe-lua false in the mod-lua stanza to harden the "
-				"UDF sandbox");
+				"access to os/io/debug and can load native .so modules; "
+				"remove allow-unsafe-lua from the mod-lua stanza to restore "
+				"the hardened default");
 	}
 
 	// Check the configured file descriptor limit against the system limit.
