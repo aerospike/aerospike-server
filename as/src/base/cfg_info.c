@@ -1077,6 +1077,8 @@ cfg_set_service(const char* cmd)
 						"bad cgroup-mem-tracking value '%s' - ignoring", v);
 				return false;
 			}
+
+			as_config_check_memory_budget();
 		}
 	}
 	else if (as_info_parameter_get(cmd, "cluster-name", v, &v_len) == 0) {
@@ -2222,6 +2224,7 @@ cfg_set_namespace(const char* cmd, as_namespace* ns)
 				"Changing value of indexes-memory-budget of ns %s from %lu to %lu",
 				ns->name, ns->indexes_memory_budget, val);
 		ns->indexes_memory_budget = val;
+		as_config_check_memory_budget();
 	}
 	else if (as_info_parameter_get(cmd, "inline-short-queries", v, &v_len) == 0) {
 		if (strcmp(v, "true") == 0) {
@@ -2518,6 +2521,7 @@ cfg_set_namespace(const char* cmd, as_namespace* ns)
 				"Changing value of stop-writes-sys-memory-pct memory of ns %s from %u to %d ",
 				ns->name, ns->stop_writes_sys_memory_pct, val);
 		ns->stop_writes_sys_memory_pct = (uint32_t)val;
+		as_config_check_memory_budget();
 	}
 	else if (as_info_parameter_get(cmd, "strong-consistency-allow-expunge", v,
 					 &v_len) == 0) {
@@ -2986,6 +2990,7 @@ cfg_set_namespace(const char* cmd, as_namespace* ns)
 		ns->storage_max_write_cache = val_u64;
 		ns->storage_max_write_q = (uint32_t)(as_namespace_device_count(ns) *
 				ns->storage_max_write_cache / WBLOCK_SZ);
+		as_config_check_memory_budget();
 	}
 	else if (as_info_parameter_get(cmd, "post-write-cache", v, &v_len) == 0) {
 		if (ns->storage_type != AS_STORAGE_ENGINE_SSD) {
@@ -3006,6 +3011,7 @@ cfg_set_namespace(const char* cmd, as_namespace* ns)
 		ns->storage_post_write_cache = val_u64;
 		ns->post_write_q_limit =
 				(uint32_t)(ns->storage_post_write_cache / WBLOCK_SZ);
+		as_config_check_memory_budget();
 	}
 	else if (as_info_parameter_get(cmd, "read-page-cache", v, &v_len) == 0) {
 		if (ns->storage_type != AS_STORAGE_ENGINE_SSD) {

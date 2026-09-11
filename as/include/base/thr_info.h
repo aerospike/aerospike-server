@@ -82,6 +82,9 @@ extern cf_dyn_buf g_bad_practices;
 // Public API.
 //
 
+void as_bad_practices_lock(void);
+void as_bad_practices_unlock(void);
+
 void as_info_init();
 void as_info(as_info_transaction* it);
 info_param_result as_info_parameter_get(const char* param_str,

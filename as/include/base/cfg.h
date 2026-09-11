@@ -269,6 +269,7 @@ as_config* as_config_init_yaml(const char* config_file,
 		const char* schema_file); // preview
 as_config* as_config_init(const char* config_file);
 void as_config_post_process(as_config* c, const char* config_file);
+void as_config_check_memory_budget(void);
 
 void as_config_cluster_name_get(char* cluster_name);
 bool as_config_cluster_name_set(const char* cluster_name);

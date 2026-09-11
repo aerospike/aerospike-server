@@ -1033,7 +1033,7 @@ sys_mem_pct(void)
 
 	// TODO - the `cgroup_mem_tracking` should be false by default until 9.0.
 	get_mem_info(g_config.cgroup_mem_tracking, &free_mem_kbytes, &free_mem_pct,
-			&host_free_mem_kbytes, &host_free_mem_pct, &thp_mem_kbytes);
+			&host_free_mem_kbytes, &host_free_mem_pct, &thp_mem_kbytes, NULL);
 	return 100 - free_mem_pct;
 }
 

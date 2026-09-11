@@ -263,7 +263,7 @@ log_line_system()
 	uint32_t host_free_mem_pct;
 
 	get_mem_info(g_config.cgroup_mem_tracking, &free_mem_kbytes, &free_mem_pct,
-			&host_free_mem_kbytes, &host_free_mem_pct, &thp_mem_kbytes);
+			&host_free_mem_kbytes, &host_free_mem_pct, &thp_mem_kbytes, NULL);
 
 	cf_info(AS_INFO,
 			"   system: total-cpu-pct %u user-cpu-pct %u kernel-cpu-pct %u free-mem-kbytes %lu free-mem-pct %d thp-mem-kbytes %lu host-free-mem-kbytes %lu host-free-mem-pct %d",

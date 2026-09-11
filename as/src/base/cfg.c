@@ -88,6 +88,18 @@
 #include "storage/storage.h"
 
 //==========================================================
+// Typedefs & constants.
+//
+
+typedef struct cfg_memory_budget_measurement_s {
+	uint64_t ns_mem;
+	uint64_t sys_mem;
+	uint64_t stop_writes_budget;
+	uint32_t stop_writes_pct;
+	bool over_budget;
+} cfg_memory_budget_measurement;
+
+//==========================================================
 // Globals.
 //
 
@@ -121,6 +133,13 @@ static void cfg_create_all_histograms();
 static void cfg_init_serv_spec(cf_serv_spec* spec_p);
 static void cfg_keep_cap(bool keep, bool* what, int32_t cap);
 static void cfg_best_practices_check(void);
+static void cfg_memory_budget_check(void);
+static cfg_memory_budget_measurement cfg_memory_budget_measure(bool runtime);
+static uint64_t cfg_ns_memory_budget(const as_namespace* ns,
+		uint64_t min_device_sz, bool runtime);
+static void cfg_bad_practices_append_token(cf_dyn_buf* db, const char* tok);
+static uint64_t cfg_sys_mem_limit_bytes(void);
+static void cfg_bad_practices_remove_token(cf_dyn_buf* db, const char* tok);
 
 //==========================================================
 // Inlines & macros.
@@ -129,9 +148,12 @@ static void cfg_best_practices_check(void);
 #define check_failed(_db, _name, _msg, ...)                                    \
 	do {                                                                       \
 		cf_warning(AS_CFG, "failed " _name " check - " _msg, ##__VA_ARGS__);   \
-		cf_dyn_buf_append_string(_db, _name);                                  \
-		cf_dyn_buf_append_char(_db, ',');                                      \
+		cfg_bad_practices_append_token(_db, _name);                            \
 	} while (false)
+
+// Legacy text note: over_budget now set based on stop_writes_budget, not sys_mem.
+#define CFG_MEMORY_BUDGET_FAIL_MSG                                             \
+	"data & indexes memory spec for all namespaces (%lu) exceeds system memory (%lu)"
 
 //==========================================================
 // Helper - set as_config defaults.
@@ -6219,6 +6241,9 @@ cfg_keep_cap(bool keep, bool* what, int32_t cap)
 	}
 }
 
+// Called single-threaded from as_config_post_process() before the info thread
+// starts, so g_bad_practices mutations here omit g_bad_practices_lock. Runtime
+// updates use as_config_check_memory_budget(), which acquires the lock.
 static void
 cfg_best_practices_check(void)
 {
@@ -6238,64 +6263,261 @@ cfg_best_practices_check(void)
 				"admin section is not configured");
 	}
 
-	uint64_t ns_mem = 0;
+	cfg_memory_budget_check();
+}
+
+static void
+cfg_memory_budget_check(void)
+{
+	cfg_memory_budget_measurement m = cfg_memory_budget_measure(false);
+
+	if (m.over_budget) {
+		check_failed(&g_bad_practices, "memory", CFG_MEMORY_BUDGET_FAIL_MSG,
+				m.ns_mem, m.stop_writes_budget);
+	}
+}
+
+static cfg_memory_budget_measurement
+cfg_memory_budget_measure(bool runtime)
+{
+	cfg_memory_budget_measurement m = { 0 };
 	uint32_t margin = WBLOCK_SZ;
 
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_namespace* ns = g_config.namespaces[ns_ix];
 
-		uint64_t max_sz = 0;
-		uint64_t min_sz = UINT64_MAX;
+		uint32_t ns_pct = ns->stop_writes_sys_memory_pct;
 
-		for (uint32_t i = 0; i < ns->n_storage_devices; i++) {
-			int fd = open(ns->storage_devices[i], O_RDWR | O_DIRECT);
-
-			if (fd == -1) {
-				cf_crash(AS_CFG, "{%s} unable to open device %s: %s", ns->name,
-						ns->storage_devices[i], cf_strerror(errno));
-			}
-
-			uint64_t sz = 0;
-
-			ioctl(fd, BLKGETSIZE64, &sz); // gets the number of bytes
-			close(fd);
-
-			if (sz > max_sz) {
-				max_sz = sz;
-			}
-
-			if (sz < min_sz) {
-				min_sz = sz;
-			}
+		if (ns_pct != 0 &&
+				(m.stop_writes_pct == 0 || ns_pct < m.stop_writes_pct)) {
+			m.stop_writes_pct = ns_pct;
 		}
 
-		if (max_sz != 0 && max_sz - min_sz > margin) {
-			check_failed(&g_bad_practices, "device",
-					"{%s} 'device' sizes must match to within %u bytes",
-					ns->name, margin);
+		uint64_t min_device_sz = 0;
+
+		if (! runtime) {
+			uint64_t max_sz = 0;
+			uint64_t min_sz = UINT64_MAX;
+
+			for (uint32_t i = 0; i < ns->n_storage_devices; i++) {
+				int fd = open(ns->storage_devices[i], O_RDWR | O_DIRECT);
+
+				if (fd == -1) {
+					cf_crash(AS_CFG, "{%s} unable to open device %s: %s",
+							ns->name, ns->storage_devices[i], cf_strerror(errno));
+				}
+
+				uint64_t sz = 0;
+
+				ioctl(fd, BLKGETSIZE64, &sz); // gets the number of bytes
+				close(fd);
+
+				if (sz > max_sz) {
+					max_sz = sz;
+				}
+
+				if (sz < min_sz) {
+					min_sz = sz;
+				}
+			}
+
+			if (max_sz != 0 && max_sz - min_sz > margin) {
+				check_failed(&g_bad_practices, "device",
+						"{%s} 'device' sizes must match to within %u bytes",
+						ns->name, margin);
+			}
+
+			min_device_sz = min_sz != UINT64_MAX ? min_sz : 0;
 		}
 
-		ns_mem += ns->indexes_memory_budget;
+		m.ns_mem += cfg_ns_memory_budget(ns, min_device_sz, runtime);
+	}
 
-		if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY) {
-			if (ns->storage_data_size != 0) {
-				ns_mem += ns->storage_data_size;
+	m.sys_mem = cfg_sys_mem_limit_bytes();
+	m.stop_writes_budget = m.sys_mem * m.stop_writes_pct / 100;
+
+	// A zero 'stop-writes-sys-memory-pct' means the operator disabled the
+	// sys-memory trigger - see eval_stop_writes(), where 0 switches it off.
+	// With no namespace arming it there is no sys-memory threshold to measure
+	// against; the other stop-writes triggers are unaffected.
+	m.over_budget = m.stop_writes_pct != 0 && m.ns_mem > m.stop_writes_budget;
+
+	return m;
+}
+
+static uint64_t
+cfg_ns_memory_budget(const as_namespace* ns, uint64_t min_device_sz, bool runtime)
+{
+	uint64_t ns_mem = ns->indexes_memory_budget;
+	uint32_t n_devs = as_namespace_device_count(ns);
+
+	if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY) {
+		if (ns->storage_data_size != 0) {
+			ns_mem += ns->storage_data_size;
+		}
+		else if (ns->n_storage_files != 0) {
+			ns_mem += ns->storage_filesize * ns->n_storage_files;
+		}
+		else if (runtime ? ns->drives_size != 0 : n_devs != 0) {
+			// The two paths measure the same devices differently: at startup
+			// storage is not yet initialized, so only the raw BLKGETSIZE64
+			// probe is available, while at runtime drives_size is the size each
+			// device was rounded down to - the header is kept, only the
+			// leftover past the last whole wblock is dropped. So the startup
+			// figure is the larger, by under one wblock per device, and a
+			// namespace within that margin of the budget can be flagged at boot
+			// and cleared by a later set-config. Accepted - the boot verdict is
+			// the conservative one.
+			ns_mem += runtime ? ns->drives_size : min_device_sz * n_devs;
+		}
+	}
+
+	// Only SSD allocates DRAM write buffers (swb->buf = cf_valloc()). MEM and
+	// PMEM write buffers are offsets into the stripes / pmem mapping - the
+	// former is already counted above, the latter is not system RAM at all.
+	// The exception is an encrypted MEM namespace, which stages every shadow
+	// flush through a cf_valloc(WBLOCK_SZ) bounce buffer. PMEM encrypts in
+	// place, so it gets nothing even when encrypted.
+	//
+	// Note - this charges one buffer per queue slot, which under-counts an
+	// encrypted SSD namespace with shadows: there swb->encrypted_buf is
+	// allocated by the wblock encryption step on the device-flush side and
+	// freed on the post-write side, on opposite sides of swb_shadow_q, so every
+	// queued swb holds two. Deliberately not modelled - the check errs low
+	// rather than manufacturing false positives.
+	//
+	// Also unmodelled - one buffer per current-write slot when encrypting,
+	// which is device-lifetime rather than transient.
+	bool wc_is_dram = ns->storage_type == AS_STORAGE_ENGINE_SSD ||
+			(ns->storage_type == AS_STORAGE_ENGINE_MEMORY &&
+					ns->storage_encryption_key_file != NULL);
+
+	if (wc_is_dram && n_devs != 0) {
+		ns_mem += (uint64_t)n_devs * ns->storage_max_write_cache;
+	}
+
+	if (ns->storage_type == AS_STORAGE_ENGINE_SSD && n_devs != 0) {
+		ns_mem += (uint64_t)n_devs * ns->storage_post_write_cache;
+	}
+
+	return ns_mem;
+}
+
+static void
+cfg_bad_practices_append_token(cf_dyn_buf* db, const char* tok)
+{
+	if (db->used_sz > 0 && db->buf[db->used_sz - 1] != (uint8_t)',') {
+		cf_dyn_buf_append_char(db, ',');
+	}
+
+	cf_dyn_buf_append_string(db, tok);
+	cf_dyn_buf_append_char(db, ',');
+}
+
+static uint64_t
+cfg_sys_mem_limit_bytes(void)
+{
+	uint64_t free_mem_kbytes = 0;
+	uint32_t free_mem_pct = 0;
+	uint64_t thp_mem_kbytes = 0;
+	uint64_t host_free_mem_kbytes = 0;
+	uint32_t host_free_mem_pct = 0;
+	uint64_t mem_limit_kbytes = 0;
+
+	get_mem_info(g_config.cgroup_mem_tracking, &free_mem_kbytes, &free_mem_pct,
+			&host_free_mem_kbytes, &host_free_mem_pct, &thp_mem_kbytes,
+			&mem_limit_kbytes);
+
+	// get_mem_info() always writes mem_limit_kbytes when the pointer is
+	// non-NULL - the cgroup limit when one governs, else host MemTotal - so
+	// this is the normal answer. It is 0 only when a total could not be
+	// established - /proc/meminfo unreadable, or read with no MemTotal line -
+	// and the same guard forces free_mem_pct and host_free_mem_pct to 0 in
+	// that case, so there is nothing to back-compute a total from. Hence the
+	// sysconf fall-back below rather than a percentage tier.
+	if (mem_limit_kbytes != 0) {
+		return mem_limit_kbytes * 1024;
+	}
+
+	long phys_pages = sysconf(_SC_PHYS_PAGES);
+	long page_size = sysconf(_SC_PAGESIZE);
+
+	if (phys_pages <= 0 || page_size <= 0) {
+		cf_warning(AS_CFG, "failed to determine system memory");
+		return 0;
+	}
+
+	return (uint64_t)phys_pages * (uint64_t)page_size;
+}
+
+static void
+cfg_bad_practices_remove_token(cf_dyn_buf* db, const char* tok)
+{
+	// g_bad_practices is comma-delimited with an optional trailing comma.
+	if (db->used_sz == 0) {
+		return;
+	}
+
+	size_t tok_len = strlen(tok);
+	uint8_t* buf = db->buf;
+	uint8_t* out = buf;
+	uint8_t* end = buf + db->used_sz;
+	uint8_t* p = buf;
+
+	while (p < end) {
+		uint8_t* comma = memchr(p, ',', (size_t)(end - p));
+		size_t cur_len = comma ? (size_t)(comma - p) : (size_t)(end - p);
+		bool remove = cur_len == tok_len && memcmp(p, tok, tok_len) == 0;
+
+		if (! remove) {
+			if (out != p) {
+				memmove(out, p, cur_len);
 			}
-			else if (ns->n_storage_files != 0) {
-				ns_mem += ns->storage_filesize * ns->n_storage_files;
+
+			out += cur_len;
+
+			if (comma != NULL) {
+				*out++ = ',';
+				p = comma + 1;
 			}
 			else {
-				ns_mem += min_sz * ns->n_storage_devices;
+				break;
 			}
+		}
+		else {
+			p = comma ? comma + 1 : end;
 		}
 	}
 
-	uint64_t sys_mem =
-			(uint64_t)sysconf(_SC_PHYS_PAGES) * (uint64_t)sysconf(_SC_PAGESIZE);
+	db->used_sz = (size_t)(out - buf);
+}
 
-	if (ns_mem > sys_mem) {
-		check_failed(&g_bad_practices, "memory",
-				"data & indexes memory spec for all namespaces (%lu) exceeds system memory (%lu)",
-				ns_mem, sys_mem);
+void
+as_config_check_memory_budget(void)
+{
+	cfg_memory_budget_measurement m = cfg_memory_budget_measure(true);
+
+	as_bad_practices_lock();
+	cfg_bad_practices_remove_token(&g_bad_practices, "memory");
+
+	// Same macro as the startup path, so the message text and the token have
+	// one definition. cf_warning() runs under g_bad_practices_lock here - it
+	// does not touch g_bad_practices, and this is the set-config path, not a
+	// hot one.
+	if (m.over_budget) {
+		check_failed(&g_bad_practices, "memory", CFG_MEMORY_BUDGET_FAIL_MSG,
+				m.ns_mem, m.stop_writes_budget);
+
+		// The same condition is only advisory here but fatal at startup - the
+		// enforce gate in as_config_post_process() crashes on any token. Say so,
+		// or an operator mirrors the set-config value into the conf file and
+		// discovers at the next restart that the node will not come back.
+		if (g_config.enforce_best_practices) {
+			cf_warning(AS_CFG,
+					"'enforce-best-practices' is true - a node will not start with this configuration");
+		}
 	}
+
+	cf_dyn_buf_chomp_char(&g_bad_practices, ',');
+	as_bad_practices_unlock();
 }

@@ -142,6 +142,7 @@ typedef struct rack_node_s {
 
 as_stats g_stats = { 0 }; // separate .c file not worth it
 cf_dyn_buf g_bad_practices = { 0 };
+static cf_mutex g_bad_practices_lock = CF_MUTEX_INIT;
 uint64_t g_start_sec; // start time of the server
 static cf_queue g_info_work_q;
 static cf_shash* g_specs;
@@ -503,6 +504,18 @@ static const uint32_t N_SPECS = sizeof(SPECS) / sizeof(SPECS[0]);
 //==========================================================
 // Public API.
 //
+
+void
+as_bad_practices_lock(void)
+{
+	cf_mutex_lock(&g_bad_practices_lock);
+}
+
+void
+as_bad_practices_unlock(void)
+{
+	cf_mutex_unlock(&g_bad_practices_lock);
+}
 
 void
 as_info_init()
@@ -1196,12 +1209,16 @@ cmd_best_practices(as_info_cmd_args* args)
 
 	cf_dyn_buf_append_string(db, "failed_best_practices=");
 
+	as_bad_practices_lock();
+
 	if (g_bad_practices.used_sz == 0) {
 		cf_dyn_buf_append_string(db, "none");
 	}
 	else {
 		cf_dyn_buf_append_buf(db, g_bad_practices.buf, g_bad_practices.used_sz);
 	}
+
+	as_bad_practices_unlock();
 }
 
 static void
@@ -3421,7 +3438,11 @@ cmd_statistics(as_info_cmd_args* args)
 
 	uint64_t now_sec = cf_get_seconds();
 
-	info_append_bool(db, "failed_best_practices", g_bad_practices.used_sz != 0);
+	as_bad_practices_lock();
+	bool failed_best_practices = g_bad_practices.used_sz != 0;
+	as_bad_practices_unlock();
+
+	info_append_bool(db, "failed_best_practices", failed_best_practices);
 
 	as_exchange_cluster_info(db);
 	info_append_uint32(db, "cluster_min_compatibility_id",

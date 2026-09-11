@@ -863,13 +863,18 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 	}
 
 	if (cg_stats != NULL) {
+		// A real, finite limit was resolved - the "max"/0/sentinel cases were
+		// rejected above. Store it once, so the value has a single writer
+		// regardless of which exit is taken. Every consumer gates on 'usable'
+		// or 'limit_governs' before reading it.
+		cg_stats->limit_bytes = stats.limit_bytes;
+
 		if (stats.used_bytes <= stats.limit_bytes) {
 			cg_stats->usable = true;
 			// Reports raw cgroup RSS (memory.current). The throttle path below
 			// acts on the inactive-file-adjusted value (cg_used_bytes); this
 			// stat intentionally mirrors the kernel's reported usage.
 			cg_stats->used_bytes = stats.used_bytes;
-			cg_stats->limit_bytes = stats.limit_bytes;
 		}
 		else {
 			// Rate-limited - this sits on the statistics poll path. Keep only
@@ -918,6 +923,7 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 				cg_limit_bytes);
 		*free_mem_pct = 0;
 		*free_mem_kbytes = 0;
+
 		return true;
 	}
 
@@ -956,14 +962,23 @@ get_mem_info_with_cgroup_stats(bool cgroup_mode, uint64_t* free_mem_kbytes,
 {
 	uint64_t host_thp_kbytes = 0;
 
-	sys_mem_info(host_free_mem_kbytes, host_free_mem_pct,
-			host_total_mem_kbytes, &host_thp_kbytes);
+	sys_mem_info(host_free_mem_kbytes, host_free_mem_pct, host_total_mem_kbytes,
+			&host_thp_kbytes);
 
 	uint64_t cgroup_free_mem_kbytes = 0;
 	uint32_t cgroup_free_mem_pct = 0;
 
 	bool cgroup_usable = cgroup_mem_info(*host_free_mem_kbytes,
 			&cgroup_free_mem_kbytes, &cgroup_free_mem_pct, cg_stats);
+
+	// Set here rather than at cgroup_mem_info()'s exits: the flag is exactly
+	// "a cgroup limit supplied the cgroup free-memory numbers", which is what
+	// that function's return value already says - note this is independent of
+	// cgroup_mode, so consumers must gate on both. One assignment, so a future
+	// exit cannot silently diverge from it.
+	if (cg_stats != NULL) {
+		cg_stats->limit_governs = cgroup_usable;
+	}
 
 	if (cgroup_mode && ! cgroup_usable) {
 		cf_detail(CF_OS,
@@ -982,15 +997,33 @@ get_mem_info_with_cgroup_stats(bool cgroup_mode, uint64_t* free_mem_kbytes,
 }
 
 void
-get_mem_info(bool cgroup_mode, uint64_t* free_mem_kbytes,
-		uint32_t* free_mem_pct, uint64_t* host_free_mem_kbytes,
-		uint32_t* host_free_mem_pct, uint64_t* thp_mem_kbytes)
+get_mem_info(bool cgroup_mode, uint64_t* free_mem_kbytes, uint32_t* free_mem_pct,
+		uint64_t* host_free_mem_kbytes, uint32_t* host_free_mem_pct,
+		uint64_t* thp_mem_kbytes, uint64_t* mem_limit_kbytes)
 {
-	uint64_t host_total_mem_kbytes;
+	uint64_t host_total_mem_kbytes = 0;
+	cf_os_cgroup_mem_stats cg_stats = { 0 };
 
 	get_mem_info_with_cgroup_stats(cgroup_mode, free_mem_kbytes, free_mem_pct,
 			host_free_mem_kbytes, host_free_mem_pct, &host_total_mem_kbytes,
-			thp_mem_kbytes, NULL);
+			thp_mem_kbytes, mem_limit_kbytes != NULL ? &cg_stats : NULL);
+
+	if (mem_limit_kbytes == NULL) {
+		return;
+	}
+
+	// Gate on limit_governs, and keep the cgroup_mode conjunct: 'usable' only
+	// says the kernel's raw used was within the limit, while limit_governs says
+	// a cgroup limit supplied the cgroup free-memory numbers - and it is set the
+	// same way whether or not cgroup_mode is on. Both together mean the numbers
+	// above came from that limit, which keeps this budget's denominator
+	// identical to the one the stop-writes trigger enforces.
+	if (cgroup_mode && cg_stats.limit_governs) {
+		*mem_limit_kbytes = cg_stats.limit_bytes / 1024;
+		return;
+	}
+
+	*mem_limit_kbytes = host_total_mem_kbytes;
 }
 
 uint64_t

@@ -48,10 +48,27 @@ typedef enum {
 typedef cf_os_file_res (*cf_os_test_read_file_fn)(const char* path, void* buf,
 		size_t* limit);
 
-// Filled as a group - used_bytes and limit_bytes are only valid when usable
-// is true.
+// 'usable' covers used_bytes - it is set only when the kernel's raw used is
+// within the limit, and gates the published cgroup_memory_* statistics.
+//
+// 'limit_governs' says this call derived its cgroup free-memory numbers from
+// limit_bytes - the same denominator the stop-writes trigger will use. It is
+// NOT "am I in a limited cgroup": a real limit can be resolved into limit_bytes
+// and this still be false, because cgroup accounting failed (adjusted usage
+// over the limit). Consumers wanting the budget to agree with what stop-writes
+// enforces want this flag; it falls back to host MemTotal on exactly the paths
+// where the trigger does too.
+//
+// The two flags differ: the inactive-file adjustment can bring usage back under
+// the limit, so a cgroup can supply the numbers while 'usable' is false.
+//
+// 'limit_bytes' is set whenever a real, finite cgroup limit was resolved -
+// which either flag being true implies, but neither flag reports on its own.
+// With both flags false it holds either nothing or a real limit, and the
+// caller cannot tell which: read it only behind one of them.
 typedef struct cf_os_cgroup_mem_stats_s {
 	bool usable;
+	bool limit_governs;
 	uint64_t used_bytes;
 	uint64_t limit_bytes;
 } cf_os_cgroup_mem_stats;
@@ -95,7 +112,8 @@ cf_os_log_perms(void)
 
 void get_mem_info(bool cgroup_mode, uint64_t* free_mem_kbytes,
 		uint32_t* free_mem_pct, uint64_t* host_free_mem_kbytes,
-		uint32_t* host_free_mem_pct, uint64_t* thp_mem_kbytes);
+		uint32_t* host_free_mem_pct, uint64_t* thp_mem_kbytes,
+		uint64_t* mem_limit_kbytes);
 
 void get_mem_info_with_cgroup_stats(bool cgroup_mode, uint64_t* free_mem_kbytes,
 		uint32_t* free_mem_pct, uint64_t* host_free_mem_kbytes,
