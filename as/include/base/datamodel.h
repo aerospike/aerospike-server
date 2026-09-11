@@ -1684,6 +1684,15 @@ typedef struct as_namespace_s {
 	// stripes (no cold-start index rebuild). Cleared/ignored after startup.
 	bool ckpt_warm_from_shadow;
 
+	// Startup-transient: set during hydrate when this boot actually CONSUMED the on-disk
+	// checkpoint folder - recreated its data (shadowless) or index (durably-backed) segments
+	// from it - and RETRACTED if drv_mem_find_stripes then rejects the recreated set (RF>=2),
+	// so the folder is kept, not deleted (i.e. it is NOT write-once). The go-live delete removes
+	// ONLY folders still flagged here (delete-on-consume); what a retained un-consumed folder is
+	// worth differs by namespace class - see as_index_checkpoint_delete_on_startup(). A consumed
+	// folder is renamed away before we serve (anti-rollback).
+	bool ckpt_hydrated;
+
 	// Observed nodes - relevant only for enterprise edition.
 	uint32_t observed_cluster_size;
 	cf_node observed_succession[AS_CLUSTER_SZ];

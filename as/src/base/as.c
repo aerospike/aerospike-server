@@ -443,7 +443,9 @@ as_run(int argc, char** argv)
 	validate_smd_directory();
 
 	// The euid-dependent index-checkpoint-path checks (writable by / owned by the service
-	// uid) must run here, after privsep - not in cfg_post_process, which is still root.
+	// uid) run here, after privsep, with the other directory validations. (cfg_post_process
+	// also runs after privsep - as the service uid, not root - so either site would see the
+	// right euid; this is just the natural home next to validate_directory().)
 	as_index_checkpoint_validate_path_writable();
 
 	// Initialize subsystems. At this point we're allocating local resources,
@@ -458,6 +460,12 @@ as_run(int argc, char** argv)
 
 	// Set up namespaces. Each namespace decides here whether it will do a warm
 	// or cold start. Index arenas, set and bin name vmaps are initialized.
+	// Index-checkpoint (EE): the boot verdict runs INSIDE here (drv_mem_find_stripes and the
+	// CKPT_* fail-stops). It MUST stay ahead of as_storage_init() below - the durably-backed
+	// gate peeks the backing's 'random', which storage init REGENERATES on open, so a reorder
+	// would silently stop every device namespace from ever hydrating (no serve, no error) - and
+	// ahead of the go-live delete further down, which would otherwise delete an un-decided
+	// checkpoint. (Nothing serves until as_service_start(), well below either step.)
 	as_namespaces_setup(cold_start_cmd, instance);
 
 	// These load SMD involving sets/bins, needed during storage init/load.
@@ -520,15 +528,17 @@ as_run(int argc, char** argv)
 	as_udf_init(); // user-defined functions
 	as_batch_init(); // batch transaction handling
 
-	// Delete every namespace's on-disk checkpoint NOW, durably - AFTER as_namespaces_setup()
-	// hydrated from it and storage is up, but BEFORE the node joins the cluster or serves any
-	// transaction (that begins in the *_start block just below: as_fabric_start /
-	// as_service_start). Defrag may already be relocating records at this point, but it never
-	// drops them and the node is not yet reachable, so nothing has diverged from the checkpoint.
-	// Once the node can take writes it diverges and must never re-adopt the checkpoint; deleting
-	// here - as late as possible, but before any divergence - closes the silent-rollback window
-	// (single-copy model). A boot that dies before this point re-hydrates the still-present
-	// checkpoint, which is correct: nothing was served, so nothing diverged.
+	// Delete every namespace's CONSUMED on-disk checkpoint NOW, durably - AFTER
+	// as_namespaces_setup() hydrated from it and storage is up, but BEFORE the node joins the
+	// cluster or serves any transaction (that begins in the *_start block just below:
+	// as_fabric_start / as_service_start). Delete-on-consume: a folder we did not hydrate from
+	// never went live, so it is left as a recovery fallback and the next checkpoint-save removes
+	// it. Defrag may already be relocating records at this point, but it never drops them and
+	// the node is not yet reachable, so nothing has diverged from the checkpoint. Once the node
+	// can take writes it diverges and must never re-adopt a folder it consumed; deleting that
+	// one here - as late as possible, but before any divergence - closes the silent-rollback
+	// window (single-copy model). A boot that dies before this point re-hydrates the
+	// still-present checkpoint, which is correct: nothing was served, so nothing diverged.
 	as_index_checkpoint_delete_on_startup();
 
 	// Start subsystems. At this point we may begin communicating with other

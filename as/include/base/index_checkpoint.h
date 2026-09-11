@@ -51,8 +51,9 @@ void as_index_checkpoint_status_cmd(struct as_info_cmd_args_s* args);
 
 // Called from as.c AFTER cf_process_privsep(), alongside the other post-privsep directory
 // checks. EE: if index-checkpoint-path is set, verify it is writable by, and owned by, the
-// effective (service) uid - the identity-dependent checks that cannot run in
-// cfg_post_process because that is still root. CE: no-op.
+// effective (service) uid - the identity-dependent checks, grouped in as.c with the work/lua/
+// smd dir validations (the identity-independent checks run in cfg_post_process, which also runs
+// after privsep - the split is co-location, not a privilege difference). CE: no-op.
 void as_index_checkpoint_validate_path_writable(void);
 
 // Called at the end of as.c's clean-shutdown sequence. EE: if a checkpoint was
@@ -96,8 +97,12 @@ void as_index_checkpoint_apply_skip(struct as_namespace_s* ns);
 
 // Called from as.c at go-live - AFTER as_namespaces_setup() hydrated the checkpoints and
 // BEFORE the node joins the cluster or serves any transaction (as_fabric_start /
-// as_service_start). EE: delete every namespace's on-disk checkpoint dir "<ns>" (single-copy
-// model) so a later restart can never re-adopt it over now-diverged live data; the delete is
-// durable before any write can be taken, and is FATAL if it cannot complete. CE: no-op (no
-// feature).
+// as_service_start). EE: delete-on-consume - delete the on-disk checkpoint dir "<ns>" of
+// every namespace that hydrated FROM it (ns->ckpt_hydrated), so a later restart can never
+// re-adopt it over now-diverged live data (single-copy model); that delete is durable before
+// any write can be taken, and is FATAL if it cannot complete. A folder we ignored or could
+// not use never went live, so it is left on disk: for a shadowless namespace a real recovery
+// fallback, re-decided on a later boot; for a durably-backed one only retained bytes, since
+// storage init regenerates the backing's 'random' and the stamped id can never match again.
+// Either way the next successful checkpoint-save removes it. CE: no-op (no feature).
 void as_index_checkpoint_delete_on_startup(void);

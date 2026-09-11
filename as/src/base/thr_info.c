@@ -388,8 +388,11 @@ static const as_info_cmd SPECS[] = {
 	{ .name="alumni-tls-alt",          .fn=as_service_list_dynamic,     .client_only=true,  .ee_only=true,  .perm=PERM_NONE           },
 	{ .name="alumni-tls-std",          .fn=as_service_list_dynamic,     .client_only=true,  .ee_only=true,  .perm=PERM_NONE           },
 	{ .name="best-practices",          .fn=cmd_best_practices,          .client_only=false, .ee_only=false, .perm=PERM_NONE           },
+	// checkpoint-save drives a graceful shutdown + park, so it is SERVICE_CTRL. checkpoint-status
+	// only REPORTS state (mutates nothing), so it is PERM_NONE like statistics/latencies/get-config
+	// - a monitoring exporter can poll it without holding the shutdown-capable privilege.
 	{ .name="checkpoint-save",         .fn=as_index_checkpoint_save_cmd,     .client_only=false, .ee_only=true,  .perm=PERM_SERVICE_CTRL   },
-	{ .name="checkpoint-status",       .fn=as_index_checkpoint_status_cmd,   .client_only=false, .ee_only=true,  .perm=PERM_SERVICE_CTRL   },
+	{ .name="checkpoint-status",       .fn=as_index_checkpoint_status_cmd,   .client_only=false, .ee_only=true,  .perm=PERM_NONE           },
 	{ .name="cluster-name",            .fn=cmd_cluster_name,            .client_only=false, .ee_only=false, .perm=PERM_NONE           },
 	{ .name="cluster-stable",          .fn=cmd_cluster_stable,          .client_only=false, .ee_only=false, .perm=PERM_NONE           },
 	{ .name="config-get",              .fn=as_cfg_info_cmd_get_config,  .client_only=true,  .ee_only=false, .perm=PERM_NONE           },
