@@ -6,6 +6,17 @@ on:
       version:
         description: Version of the artifact to deploy
         required: true
+      docker_mutable_tags:
+        description: >-
+          Update the mutable Docker tags. 'auto' applies w.x.y.z, w.x.y and w.x on master and
+          w.x.y.z, w.x.y on hotfix/**; 'force' applies the master set on any other ref; 'off'
+          leaves them untouched. A push-triggered run always behaves as 'auto'.
+        type: choice
+        options:
+          - auto
+          - force
+          - "off"
+        default: auto
   push:
     branches:
       - master
@@ -17,6 +28,12 @@ permissions:
 
 env:
   ARTIFACT_NAME: aerospike-server
+  # Pin for aerospike-server.docker, consumed by BOTH docker-context (which runs
+  # docker-build.sh -g to generate the contexts) and docker-test (which runs
+  # test.sh against them). Hoisted here because a partial bump -- three of the
+  # four checkouts updated, one missed -- would generate the Dockerfile from one
+  # commit and validate it with test.sh from another, and both jobs would pass.
+  DOCKER_IMAGE_REPO_REF: 76d714ee55389b9c379261968f5bb20bccb4b1b2
   AWS_ROLE: arn:aws:iam::360255567471:role/sso/assumed/iac/AerospikeDownloadArtifactsAutomation
   JFROG_PROJECT: database
   JFROG_URL: https://aerospike.jfrog.io
@@ -165,6 +182,13 @@ jobs:
     with:
       gh-artifact-name: signed-artifacts-${{ needs.setup.outputs.VERSION }}
       gh-unsigned-artifacts: unsigned-artifacts-${{ needs.setup.outputs.VERSION }}
+      # ubuntu-22.04 is not a preference, it is a hard requirement of this workflow:
+      # shared-workflows' setup-gpg action opens with
+      #   if [[ "$(cat /etc/os-release | grep VERSION_ID)" != *"22.04"* ]]; then exit 1
+      # so signing fails immediately on any newer image (verified on run 34413538405).
+      # Pinned rather than inherited so the constraint is visible here — when GitHub
+      # retires the 22.04 image this breaks and only a shared-workflows fix unblocks it.
+      runs-on: ubuntu-22.04
       gh-workflows-ref: "v3.7.0"
     secrets:
       gpg-private-key: ${{ secrets.GPG_SECRET_KEY }}
@@ -185,15 +209,28 @@ jobs:
       dry-run: false
       jf-build-id: ${{ needs.setup.outputs.VERSION }}
       jf-metadata-build-id: ${{ needs.setup.outputs.VERSION }}-metadata
+      # Pinned rather than inherited: these reusable workflows default runs-on to
+      # ubuntu-22.04, which would put the release path on the oldest hosted image by
+      # accident — and that is the next image GitHub retires. Unlike the sign job, nothing
+      # here requires 22.04.
+      #
+      # The version split is deliberate, not drift: the Docker jobs need v4.1.0 for
+      # gh-context-artifacts-json, which postdates v3.7.0. Bumping these three is
+      # SERVER-1672 — the v4.1.0 create-release-bundle rewrites its entrypoint and adds
+      # bundle-metadata annotation, so it wants its own push run to validate rather than
+      # riding along here.
+      runs-on: ubuntu-24.04
       gh-workflows-ref: "v3.7.0"
 
+  # docker-ready aggregates the whole Docker leg: a docker build or test failure blocks the
+  # artifact bundle too.
   create-release-bundle:
     permissions:
       contents: read
       id-token: write
       attestations: write
-    needs: [setup, download-artifacts, sign-artifacts, upload-artifacts-to-jfrog, docker-deploy]
-    if: always() && needs.upload-artifacts-to-jfrog.result == 'success' && needs.docker-deploy.result == 'success'
+    needs: [setup, download-artifacts, sign-artifacts, upload-artifacts-to-jfrog, docker-ready]
+    if: always() && needs.upload-artifacts-to-jfrog.result == 'success' && needs.docker-ready.result == 'success'
     uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.7.0
     with:
       jf-project: "database"
@@ -202,34 +239,292 @@ jobs:
       oidc-provider-name: gh-citrusleaf
       oidc-audience: citrusleaf
       version: ${{ needs.setup.outputs.BUNDLE_VERSION }}
+      runs-on: ubuntu-24.04
       gh-workflows-ref: "v3.7.0"
       dry-run: false
 
-  docker-deploy:
+  # Generate one standalone Docker build context per edition. docker-build.sh -g
+  # stops after Dockerfile generation, and a local -u path makes it stage the
+  # signed .deb alongside the Dockerfile and emit a COPY for it — turning each
+  # release directory into a context the reusable Docker workflow can pick up as
+  # a GitHub artifact (gh-context-artifacts-json).
+  #
+  # These images take the native .deb path, which carries no aerospike-tools bundle
+  # and therefore no asadm of its own, so the standalone aerospike-asadm package is
+  # installed explicitly. docker-build.sh treats an unresolved asadm as a warning,
+  # which would silently produce images without an administration shell, so
+  # prepare_docker_context.bash fails the build unless the resolved package actually
+  # lands in the generated Dockerfile.
+  #
+  # The SERVER package is not best-effort: the script fails the build if it
+  # resolves to a remote URL, because it must be the .deb this run just signed.
+  docker-context:
     needs: [setup, download-artifacts, sign-artifacts]
     if: always() && needs.sign-artifacts.result == 'success'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     outputs:
-      time: ${{ steps.timestamp.outputs.time }}
-      time_display: ${{ steps.timestamp.outputs.time_display }}
-      snyk_summary: ${{ steps.snyk_scan.outputs.summary }}
+      # Stamped onto every image as a label below, so the asadm version travels
+      # with the manifest into the release bundle rather than living only in this
+      # job's log. "none" when ASADM_SOURCE=none.
+      ASADM_VERSION: ${{ steps.contexts.outputs.asadm_version }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: audit
 
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - name: Checkout (for prepare_docker_context.bash)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          fetch-depth: 0
-          fetch-tags: true
+          sparse-checkout: .github/bin/prepare_docker_context.bash
+          sparse-checkout-cone-mode: false
 
-      - name: Download artifacts
+      - name: Download signed artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: signed-artifacts-${{ needs.setup.outputs.VERSION }}
           path: ./signed-artifacts
+
+      - name: Checkout aerospike-server.docker repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: aerospike/aerospike-server.docker
+          path: pkg/docker
+          ref: ${{ env.DOCKER_IMAGE_REPO_REF }}
+          fetch-depth: 1
+
+      - name: Generate per-edition build contexts
+        env:
+          PACKAGE_VERSION: ${{ needs.download-artifacts.outputs.PACKAGE_VERSION }}
+          ARTIFACTS_DIR: ${{ github.workspace }}/signed-artifacts
+          DOCKER_REPO_DIR: ${{ github.workspace }}/pkg/docker
+          OUT_DIR: ${{ github.workspace }}/docker-contexts
+          EDITIONS: community enterprise federal
+          DISTRO_FILTER: ubuntu
+          # Where aerospike-asadm comes from: a direct .deb URL pins an exact
+          # version, a local directory / .deb stages it via COPY, a JFrog repo
+          # URL resolves the newest published one, and "none" builds without it.
+          # A resolved remote package is SHA256-pinned into the Dockerfile and
+          # verified at image build time.
+          #
+          # This is docker-build.sh's own default repo, named explicitly so the
+          # source does not move if that default changes. It resolves the newest
+          # asadm published for the image's distro and arch, which is deliberate:
+          # asadm ships on its own release train, independent of the server
+          # version this run builds.
+          #
+          # "Newest per arch" is resolved independently for amd64 and arm64, so
+          # prepare_docker_context.bash requires that every arch an edition builds
+          # resolved an asadm AND that they agree on the version. A release that
+          # lands one arch first therefore fails the run -- re-runnable once the
+          # second arch publishes -- rather than shipping an index whose halves
+          # carry different asadm builds.
+          #
+          # Pinning a version is NOT just swapping in a direct .deb URL: -A applies
+          # a direct package only to the arch its filename names, so an amd64 URL
+          # leaves arm64 with no asadm and now fails the same check. A pin needs a
+          # source covering every arch the edition builds; SERVER-1671 asks
+          # aerospike-server.docker for a version selector that does this properly.
+          #
+          # Two runs of the same server version may therefore carry different asadm
+          # builds. That is accepted, on the condition that what shipped is
+          # recorded: the resolved version becomes the com.aerospike.asadm.version
+          # image label below, so it travels with the manifest into the release
+          # bundle. The image also carries a syft SBOM (the reusable workflow's
+          # sbom input defaults true), so the installed package list is queryable
+          # directly:
+          #   docker buildx imagetools inspect <ref> --format '{{ json .SBOM }}'
+          ASADM_SOURCE: https://aerospike.jfrog.io/artifactory/database-deb-prod-public-local
+          # Must match the `dest` of every gh-context-artifacts-json entry below:
+          # the script re-anchors the Dockerfile's COPY sources under this path.
+          CTX_DEST: docker-ctx
+        id: contexts
+        run: bash .github/bin/prepare_docker_context.bash
+
+      - name: Upload community build context
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: docker-ctx-community-${{ needs.setup.outputs.VERSION }}
+          path: docker-contexts/community
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload enterprise build context
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: docker-ctx-enterprise-${{ needs.setup.outputs.VERSION }}
+          path: docker-contexts/enterprise
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload federal build context
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: docker-ctx-federal-${{ needs.setup.outputs.VERSION }}
+          path: docker-contexts/federal
+          if-no-files-found: error
+          retention-days: 1
+
+  # The three edition images. Separate jobs rather than a matrix: each needs its
+  # own image-name/app-name, federal is amd64-only, and — unlike matrix legs —
+  # named jobs expose per-edition immutable-tag/digest outputs that the scan,
+  # bundle, and Slack jobs all consume.
+  #
+  # Each invocation publishes build-info as <jf-build-name>:${{ github.run_number }},
+  # so the build names MUST differ per edition: a shared name would have the three
+  # concurrent invocations overwrite each other at the same coordinate and the
+  # release bundle would reference only whichever landed last.
+  #
+  # The -sbd suffix keeps these coordinates disjoint from build-sign-deploy.yaml's
+  # -bsd ones. github.run_number is per-workflow-file, so two independent counters
+  # address one Artifactory namespace: without the suffix, whichever pipeline
+  # published last would win the coordinate and the other's release bundle would
+  # silently reference its images. "Only one pipeline runs at a time" is a process
+  # convention, not something the triggers enforce.
+  #
+  # v4.1.0, not the v3.7.0 pinned elsewhere in this file: gh-context-artifacts-json
+  # — the only way to get a generated Dockerfile plus its staged .deb into the build
+  # context — was added after v3.7.0.
+  docker-community:
+    needs: [setup, download-artifacts, docker-context]
+    if: always() && needs.docker-context.result == 'success'
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    uses: aerospike/shared-workflows/.github/workflows/reusable_docker-build-deploy.yaml@v4.1.0
+    with:
+      app-version: ${{ needs.download-artifacts.outputs.PACKAGE_VERSION }}
+      app-name: Aerospike Server
+      image-name: aerospike-server
+      # jf-project + repo-scope resolve to artifact.aerospike.io/database-docker-dev-local
+      # and also form the Artifactory repo key the docker build-info is created
+      # against, so do NOT replace them with an explicit jf-registry.
+      jf-project: database
+      repo-scope: -docker-dev-local
+      jf-build-name: aerospike-server-docker-community-sbd
+      oidc-provider-name: database-gh-citrusleaf
+      oidc-audience: database-gh-citrusleaf
+      gh-context-artifacts-json: '[{"name":"docker-ctx-community-${{ needs.setup.outputs.VERSION }}","dest":"docker-ctx"}]'
+      file: docker-ctx/Dockerfile
+      platforms: linux/amd64,linux/arm64
+      # versions-override is the only lever over the tag set and can only ADD to
+      # the always-present immutable tag; a blank entry is dropped. So a single
+      # blank leaves the immutable tag as the ONLY tag — no :latest / :<major> /
+      # :<version> for per-branch builds to fight over, and the release bundle
+      # references exactly one tag. The mutable w.x/w.x.y/w.x.y.z tags are applied
+      # by docker-mutable-tags once the images are tested and promoted.
+      versions-override: " "
+      # The reusable workflow stamps its own OCI labels over the generated
+      # Dockerfile's. Restore the ones that should keep pointing at the image
+      # definition's home rather than at this repo.
+      labels-json: '{"org.opencontainers.image.source":"https://github.com/aerospike/aerospike-server.docker","org.opencontainers.image.url":"https://github.com/aerospike/aerospike-server.docker","org.opencontainers.image.vendor":"Aerospike","org.opencontainers.image.documentation":"https://hub.docker.com/_/aerospike","com.aerospike.asadm.version":"${{ needs.docker-context.outputs.ASADM_VERSION }}"}'
+      # This pipeline exists to publish a release, so unlike build-sign-deploy.yaml
+      # it has no dry-run mode: reaching here means the images are pushed.
+      push: true
+
+  docker-enterprise:
+    needs: [setup, download-artifacts, docker-context]
+    if: always() && needs.docker-context.result == 'success'
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    uses: aerospike/shared-workflows/.github/workflows/reusable_docker-build-deploy.yaml@v4.1.0
+    with:
+      app-version: ${{ needs.download-artifacts.outputs.PACKAGE_VERSION }}
+      app-name: Aerospike Enterprise Server
+      image-name: aerospike-server-enterprise
+      jf-project: database
+      repo-scope: -docker-dev-local
+      jf-build-name: aerospike-server-docker-enterprise-sbd
+      oidc-provider-name: database-gh-citrusleaf
+      oidc-audience: database-gh-citrusleaf
+      gh-context-artifacts-json: '[{"name":"docker-ctx-enterprise-${{ needs.setup.outputs.VERSION }}","dest":"docker-ctx"}]'
+      file: docker-ctx/Dockerfile
+      platforms: linux/amd64,linux/arm64
+      versions-override: " "
+      labels-json: '{"org.opencontainers.image.source":"https://github.com/aerospike/aerospike-server.docker","org.opencontainers.image.url":"https://github.com/aerospike/aerospike-server.docker","org.opencontainers.image.vendor":"Aerospike","org.opencontainers.image.documentation":"https://hub.docker.com/_/aerospike","com.aerospike.asadm.version":"${{ needs.docker-context.outputs.ASADM_VERSION }}"}'
+      push: true
+
+  docker-federal:
+    needs: [setup, download-artifacts, docker-context]
+    if: always() && needs.docker-context.result == 'success'
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    uses: aerospike/shared-workflows/.github/workflows/reusable_docker-build-deploy.yaml@v4.1.0
+    with:
+      app-version: ${{ needs.download-artifacts.outputs.PACKAGE_VERSION }}
+      app-name: Aerospike Federal Server
+      image-name: aerospike-server-federal
+      jf-project: database
+      repo-scope: -docker-dev-local
+      jf-build-name: aerospike-server-docker-federal-sbd
+      oidc-provider-name: database-gh-citrusleaf
+      oidc-audience: database-gh-citrusleaf
+      gh-context-artifacts-json: '[{"name":"docker-ctx-federal-${{ needs.setup.outputs.VERSION }}","dest":"docker-ctx"}]'
+      file: docker-ctx/Dockerfile
+      # Federal ships amd64 only — there is no arm64 federal package to put in an image.
+      platforms: linux/amd64
+      versions-override: " "
+      labels-json: '{"org.opencontainers.image.source":"https://github.com/aerospike/aerospike-server.docker","org.opencontainers.image.url":"https://github.com/aerospike/aerospike-server.docker","org.opencontainers.image.vendor":"Aerospike","org.opencontainers.image.documentation":"https://hub.docker.com/_/aerospike","com.aerospike.asadm.version":"${{ needs.docker-context.outputs.ASADM_VERSION }}"}'
+      push: true
+
+  # The reusable workflow builds and pushes in one shot, so the functional tests and
+  # the Snyk scan move behind the push and run against the pushed immutable tags
+  # (test.sh -i works on any registry image). Nothing pushed is bundled or promoted
+  # unless this job passes: create-docker-release-bundle and create-release-bundle
+  # both sit behind docker-ready, which fails a run whose images reached the registry
+  # without a successful docker-test.
+  docker-test:
+    needs: [setup, docker-community, docker-enterprise, docker-federal]
+    if: >
+      always() &&
+      needs.docker-community.result == 'success' &&
+      needs.docker-enterprise.result == 'success' &&
+      needs.docker-federal.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      snyk_summary: ${{ steps.snyk_scan.outputs.summary }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout (for summarize_snyk_scan.sh)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: |
+            .github/bin/summarize_snyk_scan.sh
+            .github/bin/random_output_delimiter.sh
+          sparse-checkout-cone-mode: false
+
+      # push is unconditionally true above, so an empty tag or digest means the
+      # reusable workflow reported success without publishing a manifest. Stop here
+      # rather than let test.sh fail on an empty image reference.
+      - name: Verify the images reached the registry
+        env:
+          COMMUNITY_TAG: ${{ needs.docker-community.outputs.immutable-tag }}
+          ENTERPRISE_TAG: ${{ needs.docker-enterprise.outputs.immutable-tag }}
+          FEDERAL_TAG: ${{ needs.docker-federal.outputs.immutable-tag }}
+          ENTERPRISE_DIGEST: ${{ needs.docker-enterprise.outputs.digest }}
+        run: |
+          set -euo pipefail
+          for pair in "community=$COMMUNITY_TAG" "enterprise=$ENTERPRISE_TAG" "federal=$FEDERAL_TAG"; do
+            [[ -n "${pair#*=}" ]] || { echo "::error::no immutable tag for ${pair%%=*}"; exit 1; }
+          done
+          [[ -n "$ENTERPRISE_DIGEST" ]] || { echo "::error::no manifest digest; the images were not pushed"; exit 1; }
 
       - name: Install JFrog CLI
         id: jf
@@ -250,46 +545,51 @@ jobs:
           password: ${{ steps.jf.outputs.oidc-token }}
 
       - name: Checkout aerospike-server.docker repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: aerospike/aerospike-server.docker
           path: pkg/docker
-          ref: 76d714ee55389b9c379261968f5bb20bccb4b1b2
+          ref: ${{ env.DOCKER_IMAGE_REPO_REF }}
           fetch-depth: 1
 
+      # Running the pushed arm64 image on an amd64 runner needs binfmt handlers.
       - name: Set up QEMU
         uses: step-security/setup-qemu-action@fe44c529aab16157fc475f4991a7f926aa9a02a2 # v4.1.0
-
-      - name: Set up Docker Buildx
-        uses: step-security/setup-buildx-action@6997872a55d77391e51b87609556578131f44402 # v4.1.0
-
-      - name: Get current timestamp
-        id: timestamp
-        run: |
-          set -euo pipefail
-          ts_epoch=$(date -u +%s)
-          echo "time=$(date -u -d "@${ts_epoch}" '+%Y%m%d%H%M%S')" >> "$GITHUB_OUTPUT"
-          echo "time_display=$(date -u -d "@${ts_epoch}" '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_OUTPUT"
-
-      - name: Build Docker image
-        run: |
-          set -euo pipefail
-          cd pkg/docker
-          ./docker-build.sh -t ${{ needs.download-artifacts.outputs.PACKAGE_VERSION }} -d ubuntu -u ../../signed-artifacts -r artifact.aerospike.io/database-docker-dev-local --no-cache
 
       - name: Install Snyk CLI
         run: npm install -g snyk
 
-      - name: Test Docker images
+      - name: Test pushed Docker images
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          COMMUNITY_TAG: ${{ needs.docker-community.outputs.immutable-tag }}
+          ENTERPRISE_TAG: ${{ needs.docker-enterprise.outputs.immutable-tag }}
+          FEDERAL_TAG: ${{ needs.docker-federal.outputs.immutable-tag }}
         run: |
           set -euo pipefail
           cd pkg/docker
-          ./test.sh ${{ needs.download-artifacts.outputs.PACKAGE_VERSION }} -d ubuntu -a amd64 arm64 -c -s
+          status=0
+          # test.sh takes one image and one platform per call, and -c drops each
+          # image once its test passes so the runner disk survives all five.
+          test_one() {
+            echo "::group::test.sh -i $1 -e $2 -p $3"
+            ./test.sh -i "$1" -e "$2" -p "$3" -c -s || status=1
+            echo "::endgroup::"
+          }
+          test_one "$COMMUNITY_TAG"  community  linux/amd64
+          test_one "$COMMUNITY_TAG"  community  linux/arm64
+          test_one "$ENTERPRISE_TAG" enterprise linux/amd64
+          test_one "$ENTERPRISE_TAG" enterprise linux/arm64
+          test_one "$FEDERAL_TAG"    federal    linux/amd64
+          exit "$status"
 
       - name: Upload Snyk scan logs
         id: upload_snyk
+        # Diagnostics only, and it now runs AFTER the push: a flaky artifact upload must
+        # not fail docker-test, which would fail docker-ready and block both release
+        # bundles with the images already in the registry. summarize_snyk_scan.sh treats
+        # ARTIFACT_URL as optional, so the summary just omits the link.
+        continue-on-error: true
         if: always() && hashFiles('pkg/docker/*.snyk') != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
@@ -305,11 +605,113 @@ jobs:
           ARTIFACT_URL: ${{ steps.upload_snyk.outputs.artifact-url }}
         run: bash "${GITHUB_WORKSPACE}/.github/bin/summarize_snyk_scan.sh"
 
-      - name: Push Docker image
+  # Single gate the release tail hangs off, so create-release-bundle and
+  # notify-slack do not each have to reason about five Docker job results. Also
+  # the one place the Docker release bundle coordinate is derived.
+  docker-ready:
+    # setup is already an ancestor via docker-context, so naming it here adds no edge
+    # and no cycle. Without it this job's always() defeats skip propagation entirely and
+    # it boots a runner on every run where setup itself was skipped -- both nightly
+    # crons here, and every push in sign-build-deploy.yaml when its repo variable is
+    # unset -- reporting a green "docker-ready" for a run that did no Docker work.
+    needs: [setup, docker-context, docker-community, docker-enterprise, docker-federal, docker-test]
+    if: always() && github.repository_owner == 'citrusleaf' && needs.setup.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      PUSHED: ${{ steps.gate.outputs.pushed }}
+      BUNDLE_VERSION: ${{ steps.gate.outputs.bundle_version }}
+      TIME_DISPLAY: ${{ steps.gate.outputs.time_display }}
+      COMMUNITY_TAG: ${{ needs.docker-community.outputs.immutable-tag }}
+      ENTERPRISE_TAG: ${{ needs.docker-enterprise.outputs.immutable-tag }}
+      FEDERAL_TAG: ${{ needs.docker-federal.outputs.immutable-tag }}
+      COMMUNITY_DIGEST: ${{ needs.docker-community.outputs.digest }}
+      ENTERPRISE_DIGEST: ${{ needs.docker-enterprise.outputs.digest }}
+      FEDERAL_DIGEST: ${{ needs.docker-federal.outputs.digest }}
+      SNYK_SUMMARY: ${{ needs.docker-test.outputs.snyk_summary }}
+      ASADM_VERSION: ${{ needs.docker-context.outputs.ASADM_VERSION }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Gate
+        id: gate
+        env:
+          # 'skipped' covers the case where the release chain itself never ran (the
+          # setup gate), which leaves every job here skipped and must not fail this
+          # workflow. A run that DID build has a real docker-test result, and a
+          # failing one lands in this loop and blocks both release bundles.
+          RESULTS: >-
+            ${{ needs.docker-context.result }} ${{ needs.docker-community.result }}
+            ${{ needs.docker-enterprise.result }} ${{ needs.docker-federal.result }}
+            ${{ needs.docker-test.result }}
+          DOCKER_CONTEXT_RESULT: ${{ needs.docker-context.result }}
+          ENTERPRISE_TAG: ${{ needs.docker-enterprise.outputs.immutable-tag }}
+          COMMUNITY_DIGEST: ${{ needs.docker-community.outputs.digest }}
+          ENTERPRISE_DIGEST: ${{ needs.docker-enterprise.outputs.digest }}
+          FEDERAL_DIGEST: ${{ needs.docker-federal.outputs.digest }}
+          DOCKER_TEST_RESULT: ${{ needs.docker-test.result }}
         run: |
           set -euo pipefail
-          cd pkg/docker
-          ./docker-build.sh -p ${{ needs.download-artifacts.outputs.PACKAGE_VERSION }} -d ubuntu -u ../../signed-artifacts -r artifact.aerospike.io/database-docker-dev-local -T ${{ steps.timestamp.outputs.time }}
+          for result in $RESULTS; do
+            case "$result" in
+              success | skipped) ;;
+              *) echo "::error::Docker leg finished '${result}'; blocking the release tail."
+                 exit 1 ;;
+            esac
+          done
+
+          if [[ "$DOCKER_CONTEXT_RESULT" == "skipped" ]]; then
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            echo "Docker leg did not run; no Docker release bundle for this run."
+            exit 0
+          fi
+
+          # Unlike build-sign-deploy.yaml this workflow has no dry-run mode, so a
+          # build that ran and succeeded must have published manifests.
+          if [[ -z "$ENTERPRISE_DIGEST" ]]; then
+            echo "::error::the Docker builds succeeded but published no manifest digest."
+            exit 1
+          fi
+
+          # create-docker-release-bundle bundles all three editions' build-infos, so a
+          # partial publish must fail HERE -- before a bundle exists -- rather than at
+          # docker-mutable-tags, which is the first place the other two digests were
+          # otherwise checked and which runs after the bundle is created AND promoted.
+          # docker-test's verify step checks the three immutable TAGS, but v4.1.0 computes
+          # those even when nothing is pushed, so the digest is the only real signal.
+          for pair in "community=${COMMUNITY_DIGEST}" "federal=${FEDERAL_DIGEST}"; do
+            if [[ -z "${pair#*=}" ]]; then
+              echo "::error::${pair%%=*} published no manifest digest while enterprise did; refusing to bundle a partial set."
+              exit 1
+            fi
+          done
+
+          if [[ "$DOCKER_TEST_RESULT" != "success" ]]; then
+            echo "::error::images were pushed but docker-test finished '${DOCKER_TEST_RESULT}'; refusing to publish an untested build."
+            exit 1
+          fi
+
+          # Immutable tag: <registry>/<image>:<app-version>_<UTC timestamp>. The
+          # bundle version is that tag's version component. The reusable workflow
+          # stamps its own timestamp per invocation, so the three editions differ by
+          # a few seconds; enterprise is the canonical one for the bundle coordinate.
+          bundle_version="${ENTERPRISE_TAG##*:}"
+          if [[ ! "$bundle_version" =~ ^[^:/]+_[0-9]{8}T[0-9]{6}Z$ ]]; then
+            echo "::error::unexpected immutable tag '${ENTERPRISE_TAG}'; cannot derive a bundle version."
+            exit 1
+          fi
+          ts="${bundle_version##*_}"
+
+          {
+            echo "pushed=true"
+            echo "bundle_version=${bundle_version}"
+            echo "time_display=$(date -u -d "${ts:0:4}-${ts:4:2}-${ts:6:2} ${ts:9:2}:${ts:11:2}:${ts:13:2}" '+%Y-%m-%d %H:%M:%S UTC')"
+          } >> "$GITHUB_OUTPUT"
+          echo "Docker release bundle coordinate: aerospike-server-docker/${bundle_version}"
 
   promote-to-test:
     needs: [setup, create-release-bundle]
@@ -351,9 +753,341 @@ jobs:
             --sync=true \
             "${RELEASE_BUNDLE_NAME}" "${VERSION}" TEST
 
+  # The Docker images get their own release bundle, separate from the artifact
+  # bundle above. Its content is exactly the immutable-tagged manifests: the
+  # reusable workflow creates each edition's build-info against
+  # <immutable-tag>@<manifest-list digest>, and versions-override=" " means no
+  # other tag was ever pushed.
+  #
+  # The bundle version carries the immutable tag's UTC timestamp, which the reusable
+  # workflow stamps fresh per run, so the coordinate is new every time and cannot
+  # collide with an existing bundle.
+  #
+  # The images ship the same .deb packages as the artifact bundle, so bundling them —
+  # and, downstream, moving the w.x/w.x.y tags onto them — while the package bundle
+  # never reached TEST would advance the shared tags past the packages they contain.
+  create-docker-release-bundle:
+    needs: [setup, docker-ready, create-release-bundle, promote-to-test]
+    if: >
+      always() &&
+      needs.docker-ready.result == 'success' &&
+      needs.docker-ready.outputs.PUSHED == 'true' &&
+      needs.create-release-bundle.result == 'success' &&
+      needs.promote-to-test.result == 'success'
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.7.0
+    with:
+      jf-project: "database"
+      # One build-info per edition. The reusable Docker workflow publishes build-info
+      # as <jf-build-name>:${{ github.run_number }} — the build number is not an input,
+      # it is always this run's number.
+      jf-build-names: "aerospike-server-docker-community-sbd:${{ github.run_number }},aerospike-server-docker-enterprise-sbd:${{ github.run_number }},aerospike-server-docker-federal-sbd:${{ github.run_number }}"
+      jf-bundle-name: "aerospike-server-docker"
+      oidc-provider-name: gh-citrusleaf
+      oidc-audience: citrusleaf
+      version: ${{ needs.docker-ready.outputs.BUNDLE_VERSION }}
+      runs-on: ubuntu-24.04
+      gh-workflows-ref: "v3.7.0"
+      dry-run: false
+
+  promote-docker-to-test:
+    needs: [docker-ready, create-docker-release-bundle]
+    if: always() && needs.create-docker-release-bundle.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Setup JFrog CLI
+        uses: step-security/setup-jfrog-cli@3054b554c0fb4915b3d58847fb7730c593dbb934 # v5.0.0
+        env:
+          JF_URL: ${{ env.JFROG_URL }}
+          JF_PROJECT: ${{ env.JFROG_PROJECT }}
+        with:
+          oidc-provider-name: database-gh-citrusleaf
+          oidc-audience: database-gh-citrusleaf
+
+      - name: Promote Docker release bundle to TEST
+        env:
+          JFROG_PROJECT: ${{ env.JFROG_PROJECT }}
+          RELEASE_BUNDLE_NAME: aerospike-server-docker
+          JF_SIGNING_KEY: aerospike
+          VERSION: ${{ needs.docker-ready.outputs.BUNDLE_VERSION }}
+        run: |
+          set -euo pipefail
+          # Check if already promoted to TEST — the bundle version is unique per run,
+          # so this only guards a re-run of this job against the same coordinate.
+          status=$(jf rt curl -s -XGET "/lifecycle/api/v2/promotion/records/${RELEASE_BUNDLE_NAME}/${VERSION}?project=${JFROG_PROJECT}" | jq -r '.promotions[]? | select(.environment == "TEST") | .status' 2>/dev/null || true)
+          if [[ "$status" == "COMPLETED" ]]; then
+            echo "Release bundle '${RELEASE_BUNDLE_NAME}:${VERSION}' is already promoted to TEST — skipping."
+            exit 0
+          fi
+          echo "Promoting release bundle '${RELEASE_BUNDLE_NAME}:${VERSION}' to TEST environment..."
+          jf rbp \
+            --signing-key="${JF_SIGNING_KEY}" \
+            --project="${JFROG_PROJECT}" \
+            --sync=true \
+            "${RELEASE_BUNDLE_NAME}" "${VERSION}" TEST
+
+  # These tags are mutable: each points at the newest tested build of the line it names.
+  # master owns w.x as well as w.x.y and w.x.y.z, because the trunk is the newest build of
+  # the lineage; a hotfix line owns only its own w.x.y and w.x.y.z.
+  # They are applied here, not through the reusable workflow's versions-override, for two
+  # reasons: versions-override tags at build time, so a build that later fails docker-test
+  # would leave x.y pointing at a broken image, and the tag has to be written in both repos
+  # the image ends up in — promote-docker-to-test is what copies it into
+  # database-docker-test-local, so this has to run after it.
+  #
+  # Running last is also what keeps these tags out of every release bundle. Each bundle is
+  # assembled from build-info the reusable workflow published against <immutable-tag>@<digest>
+  # before this job starts, and a tag is its own repository path, so a bundle can only ever
+  # reference the immutable one. Nothing here runs a jf command that collects artifacts.
+  docker-mutable-tags:
+    needs: [setup, download-artifacts, docker-ready, promote-docker-to-test]
+    outputs:
+      # What each tag pointed at before this job moved it, so a bad cut can be put
+      # back with the same imagetools call. Also printed to the step summary.
+      PREVIOUS_DIGESTS: ${{ steps.apply.outputs.previous_digests }}
+    if: >
+      always() &&
+      needs.docker-ready.result == 'success' &&
+      needs.docker-ready.outputs.PUSHED == 'true' &&
+      needs.promote-docker-to-test.result == 'success' &&
+      github.event.inputs.docker_mutable_tags != 'off'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Install JFrog CLI
+        id: jf
+        uses: step-security/setup-jfrog-cli@3054b554c0fb4915b3d58847fb7730c593dbb934 # v5.0.0
+        env:
+          JF_URL: https://artifact.aerospike.io
+          JF_PROJECT: database
+        with:
+          version: 2.78.8
+          oidc-provider-name: database-gh-citrusleaf
+          oidc-audience: database-gh-citrusleaf
+
+      - name: Docker login to Artifactory
+        uses: step-security/docker-login-action@164e21d7e52229904128e2f946001cb88278c33d # v4.2.0
+        with:
+          registry: artifact.aerospike.io
+          username: ${{ steps.jf.outputs.oidc-user }}
+          password: ${{ steps.jf.outputs.oidc-token }}
+
+      - name: Set up Docker Buildx
+        uses: step-security/setup-buildx-action@6997872a55d77391e51b87609556578131f44402 # v4.1.0
+
+      - name: Resolve mutable tags
+        id: tags
+        env:
+          MODE: ${{ github.event.inputs.docker_mutable_tags }}
+          PACKAGE_VERSION: ${{ needs.download-artifacts.outputs.PACKAGE_VERSION }}
+        run: |
+          set -euo pipefail
+
+          # A trailing -<n> is the build number the packages carry (8.1.2.5-3, 8.1.3.0-88);
+          # anything else after w.x.y.z is a git descriptor (8.1.3.0-88-g0f294c425-1), which is
+          # what a preview build produces. Both forms still yield the tags, so 'force' can
+          # exercise this job on a preview ref.
+          if [[ "$PACKAGE_VERSION" =~ ^((([0-9]+\.[0-9]+)\.[0-9]+)\.[0-9]+)(-[0-9]+)?$ ]]; then
+            release_coordinate=true
+          elif [[ "$PACKAGE_VERSION" =~ ^((([0-9]+\.[0-9]+)\.[0-9]+)\.[0-9]+)-.*$ ]]; then
+            release_coordinate=false
+          else
+            echo "::error::cannot derive w.x.y.z from package version '${PACKAGE_VERSION}'."
+            exit 1
+          fi
+          wxyz="${BASH_REMATCH[1]}"
+          wxy="${BASH_REMATCH[2]}"
+          wx="${BASH_REMATCH[3]}"
+
+          # master is the newest build of the lineage, so it owns w.x on top of its own
+          # w.x.y/w.x.y.z. A hotfix line is an older patch line within that lineage and must
+          # not take w.x from the trunk.
+          case "$GITHUB_REF_NAME" in
+          master)
+            tags="${wxyz} ${wxy} ${wx}"
+            ;;
+          hotfix/*)
+            tags="${wxyz} ${wxy}"
+            ;;
+          *)
+            if [[ "$MODE" != "force" ]]; then
+              echo "::notice::'${GITHUB_REF_NAME}' is not master or a hotfix release line; leaving the mutable tags untouched (re-dispatch with docker_mutable_tags=force to override)."
+              echo "apply=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            tags="${wxyz} ${wxy} ${wx}"
+            ;;
+          esac
+
+          if [[ "$release_coordinate" != "true" ]]; then
+            if [[ "$MODE" == "force" ]]; then
+              # Deliberately not "re-run master to reclaim them": nothing reclaims these.
+              # A later master run computes w.x.y.z/w.x.y/w.x from ITS OWN version, so
+              # once master has moved to the next lineage these tags are never written
+              # again by any release, and a hotfix line never takes w.x at all. They stay
+              # on this build until someone repoints them by hand.
+              echo "::warning::docker_mutable_tags=force: pointing ${tags// /, } at ${PACKAGE_VERSION}, which is not a release-line build. NO later run reclaims these — a release writes only its own version's tags. Repoint them by hand (or delete them, if this run created them) using the pre-move digests printed by the next step."
+            else
+              # master and hotfix/** always publish a w.x.y.z-<n> coordinate. A descriptor here
+              # means the version derivation changed, and moving a shared tag on a guess is
+              # worse than stopping.
+              echo "::error::package version '${PACKAGE_VERSION}' carries a git descriptor, so it names no release coordinate."
+              exit 1
+            fi
+          fi
+
+          {
+            echo "apply=true"
+            echo "tags=${tags}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Mutable tags for ${PACKAGE_VERSION} on ${GITHUB_REF_NAME}: ${tags// /, }"
+
+      - name: Apply mutable tags
+        id: apply
+        if: steps.tags.outputs.apply == 'true'
+        env:
+          TAGS: ${{ steps.tags.outputs.tags }}
+          COMMUNITY_DIGEST: ${{ needs.docker-ready.outputs.COMMUNITY_DIGEST }}
+          ENTERPRISE_DIGEST: ${{ needs.docker-ready.outputs.ENTERPRISE_DIGEST }}
+          FEDERAL_DIGEST: ${{ needs.docker-ready.outputs.FEDERAL_DIGEST }}
+        run: |
+          set -euo pipefail
+          registry=artifact.aerospike.io
+
+          read -ra tags <<<"$TAGS"
+          [[ "${#tags[@]}" -gt 0 ]] || { echo "::error::no tags resolved"; exit 1; }
+
+          images=(
+            "aerospike-server=${COMMUNITY_DIGEST}"
+            "aerospike-server-enterprise=${ENTERPRISE_DIGEST}"
+            "aerospike-server-federal=${FEDERAL_DIGEST}"
+          )
+
+          # Every digest is checked before the first tag is written: a missing one
+          # discovered mid-loop would leave the editions on different builds.
+          for entry in "${images[@]}"; do
+            [[ -n "${entry#*=}" ]] || { echo "::error::no digest for ${entry%%=*}"; exit 1; }
+          done
+
+          # Record what each tag points at BEFORE moving it. These writes are the only
+          # ones in this pipeline that mutate a coordinate already published, and there
+          # is no supersede path: reverting this repo does not move a tag back. Without
+          # the previous digest written down, restoring one means finding it by hand.
+          # "absent" means the tag did not exist yet, i.e. rollback = delete it.
+          declare -a previous=()
+          for repo in database-docker-dev-local database-docker-test-local; do
+            for entry in "${images[@]}"; do
+              base="${registry}/${repo}/${entry%%=*}"
+              for tag in "${tags[@]}"; do
+                prev="$(docker buildx imagetools inspect "${base}:${tag}" \
+                  --format '{{json .Manifest}}' 2>/dev/null | jq -r '.digest' 2>/dev/null)" || prev=""
+                previous+=("${base}:${tag} ${prev:-absent}")
+              done
+            done
+          done
+
+          printf 'pre-move: %s\n' "${previous[@]}"
+          {
+            echo "### Mutable tags — digests before this run"
+            echo ""
+            echo "Restore by re-running \`imagetools create\` with the previous digest."
+            echo ""
+            echo "| tag | previous digest |"
+            echo "|---|---|"
+            for entry in "${previous[@]}"; do
+              echo "| \`${entry%% *}\` | \`${entry#* }\` |"
+            done
+          } >>"$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "${previous[@]}" | jq -Rs 'split("\n") | map(select(length>0) | split(" ") | {tag: .[0], previous: .[1]})' >/tmp/previous-tags.json
+          {
+            echo "previous_digests<<PREVDIGESTS"
+            cat /tmp/previous-tags.json
+            echo "PREVDIGESTS"
+          } >>"$GITHUB_OUTPUT"
+
+          # Retagging an existing index by digest: buildx copies the source manifest
+          # rather than rebuilding it, so every tag must resolve back to the same digest
+          # the release bundle references. Verified because a rebuilt index would still
+          # push cleanly under a different digest.
+          retag_and_verify() {
+            local base=$1 digest=$2 tag got
+            local -a tag_args=()
+            for tag in "${tags[@]}"; do
+              tag_args+=(-t "${base}:${tag}")
+            done
+            docker buildx imagetools create "${tag_args[@]}" "${base}@${digest}" || return 1
+            for tag in "${tags[@]}"; do
+              got="$(docker buildx imagetools inspect "${base}:${tag}" --format '{{json .Manifest}}' | jq -r '.digest')" || return 1
+              if [[ "$got" != "$digest" ]]; then
+                echo "::error::${base}:${tag} resolves to ${got}, expected ${digest}."
+                return 1
+              fi
+              echo "${base}:${tag} -> ${got}"
+            done
+          }
+
+          failed=()
+          for repo in database-docker-dev-local database-docker-test-local; do
+            for entry in "${images[@]}"; do
+              image="${entry%%=*}"
+              digest="${entry#*=}"
+              base="${registry}/${repo}/${image}"
+
+              echo "::group::${base} ${TAGS// /, } -> ${digest}"
+              ok=false
+              # Moving a mutable tag is idempotent, so a transient registry error is
+              # worth another attempt before giving up on this image.
+              for attempt in 1 2 3; do
+                [[ "$attempt" -eq 1 ]] || { echo "attempt ${attempt}/3..."; sleep 5; }
+                if retag_and_verify "$base" "$digest"; then
+                  ok=true
+                  break
+                fi
+              done
+              echo "::endgroup::"
+              # These tags are meant to move as a set, so keep going instead of
+              # bailing out: finishing the rest converges as much of the set as the
+              # registry allows, and the summary below names what stayed behind.
+              "$ok" || failed+=("$base")
+            done
+          done
+
+          if [[ "${#failed[@]}" -gt 0 ]]; then
+            echo "::error::mutable tags not applied for: ${failed[*]}. These images still point at their previous build while the others moved to this one; re-run this job to converge them."
+            exit 1
+          fi
+
+  # docker-mutable-tags is deliberately NOT required to have succeeded: it is
+  # 'skipped' whenever docker_mutable_tags=off, and a tagging failure still leaves
+  # the packages and images promoted to TEST — QE needs to hear about that either
+  # way. Its result is reported in the message body instead.
+  # Neither create-docker-release-bundle nor promote-docker-to-test is required to
+  # have succeeded, for the same reason docker-mutable-tags is not: by the time they
+  # run, the packages are bundled and promoted to TEST and the images are pushed and
+  # tested. A JFrog Lifecycle failure in either is bookkeeping — QE still needs to
+  # hear that the release reached TEST. Both results are reported in the body.
   notify-slack:
-    needs: [setup, download-artifacts, promote-to-test, docker-deploy]
-    if: always() && needs.promote-to-test.result == 'success' && needs.docker-deploy.result == 'success'
+    needs: [setup, download-artifacts, docker-ready, promote-to-test, create-docker-release-bundle, promote-docker-to-test, docker-mutable-tags]
+    if: >
+      always() &&
+      needs.promote-to-test.result == 'success' &&
+      needs.docker-ready.result == 'success' &&
+      needs.docker-ready.outputs.PUSHED == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -364,8 +1098,12 @@ jobs:
       PACKAGE_VERSION: ${{ needs.download-artifacts.outputs.PACKAGE_VERSION }}
       FULL_PACKAGE_VERSION: ${{ needs.download-artifacts.outputs.FULL_PACKAGE_VERSION }}
       BRANCH: ${{ github.ref_name }}
-      TIME: ${{ needs.docker-deploy.outputs.time }}
-      TIME_DISPLAY: ${{ needs.docker-deploy.outputs.time_display }}
+      TIME_DISPLAY: ${{ needs.docker-ready.outputs.TIME_DISPLAY }}
+      DOCKER_BUNDLE_VERSION: ${{ needs.docker-ready.outputs.BUNDLE_VERSION }}
+      ASADM_VERSION: ${{ needs.docker-ready.outputs.ASADM_VERSION }}
+      COMMUNITY_TAG: ${{ needs.docker-ready.outputs.COMMUNITY_TAG }}
+      ENTERPRISE_TAG: ${{ needs.docker-ready.outputs.ENTERPRISE_TAG }}
+      FEDERAL_TAG: ${{ needs.docker-ready.outputs.FEDERAL_TAG }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -404,6 +1142,8 @@ jobs:
             *Build Id:* ${{ env.VERSION }}
             *Package Version:* ${{ env.FULL_PACKAGE_VERSION }}
             *Bundle Version:* ${{ env.BUNDLE_VERSION }}
+            *Docker Bundle Version:* ${{ env.DOCKER_BUNDLE_VERSION }}
+            *asadm:* ${{ env.ASADM_VERSION }}
         run: |
           set -euo pipefail
           random_delim() { bash "${GITHUB_WORKSPACE}/.github/bin/random_output_delimiter.sh" "$1"; }
@@ -418,9 +1158,8 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           # Slack linkifies URLs in mrkdwn (including fenced code). plain_text sections do not auto-link;
           # one block per docker pull keeps each command on its own line.
-          reg='artifact.aerospike.io/database-docker-dev-local'
-          pv="${PACKAGE_VERSION}"
-          ts="${TIME}"
+          # The immutable tag is the ONLY tag pushed (versions-override=" "), so print the
+          # reusable workflow's tags verbatim rather than reconstructing them.
 
           hd="$(random_delim DH)"
           {
@@ -432,19 +1171,19 @@ jobs:
           d1="$(random_delim DP1)"
           {
             echo "docker_pull_1<<${d1}"
-            printf 'docker pull %s/aerospike-server-enterprise:%s-%s\n' "$reg" "$pv" "$ts"
+            printf 'docker pull %s\n' "$ENTERPRISE_TAG"
             echo "${d1}"
           } >> "$GITHUB_OUTPUT"
           d2="$(random_delim DP2)"
           {
             echo "docker_pull_2<<${d2}"
-            printf 'docker pull %s/aerospike-server-federal:%s-%s\n' "$reg" "$pv" "$ts"
+            printf 'docker pull %s\n' "$FEDERAL_TAG"
             echo "${d2}"
           } >> "$GITHUB_OUTPUT"
           d3="$(random_delim DP3)"
           {
             echo "docker_pull_3<<${d3}"
-            printf 'docker pull %s/aerospike-server:%s-%s\n' "$reg" "$pv" "$ts"
+            printf 'docker pull %s\n' "$COMMUNITY_TAG"
             echo "${d3}"
           } >> "$GITHUB_OUTPUT"
           dwf="$(random_delim SLACK_WF)"
@@ -458,7 +1197,10 @@ jobs:
         id: slack_body
         env:
           BASE_BODY: ${{ steps.slack_text.outputs.body }}
-          SNYK_SUMMARY: ${{ needs.docker-deploy.outputs.snyk_summary }}
+          SNYK_SUMMARY: ${{ needs.docker-ready.outputs.SNYK_SUMMARY }}
+          MUTABLE_TAGS_RESULT: ${{ needs.docker-mutable-tags.result }}
+          DOCKER_BUNDLE_RESULT: ${{ needs.create-docker-release-bundle.result }}
+          DOCKER_PROMOTE_RESULT: ${{ needs.promote-docker-to-test.result }}
         run: |
           set -euo pipefail
           delimiter="$(bash "${GITHUB_WORKSPACE}/.github/bin/random_output_delimiter.sh" SLACK_BODY)"
@@ -472,6 +1214,18 @@ jobs:
             else
               echo "_scan did not run_"
             fi
+            # The Docker bundle leg runs after the packages are already in TEST, so a
+            # failure here degrades the message rather than suppressing it.
+            if [[ "$DOCKER_PROMOTE_RESULT" != "success" ]]; then
+              echo ""
+              echo ":warning: *Docker release bundle:* not promoted to TEST (bundle=${DOCKER_BUNDLE_RESULT}, promote=${DOCKER_PROMOTE_RESULT}) — the images above are in dev-local only, NOT in database-docker-test-local."
+            fi
+            # 'skipped' is the docker_mutable_tags=off case, which needs no callout.
+            case "$MUTABLE_TAGS_RESULT" in
+              success | skipped) ;;
+              *) echo ""
+                 echo ":warning: *Mutable tags:* not applied (${MUTABLE_TAGS_RESULT}) — the w.x/w.x.y tags may still point at the previous build." ;;
+            esac
             echo "${delimiter}"
           } >> "$GITHUB_OUTPUT"
 
