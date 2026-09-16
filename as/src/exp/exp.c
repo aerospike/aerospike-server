@@ -190,8 +190,9 @@ struct exp_build_args_s {
 
 	uint32_t depth; // build_next recursion depth, capped at EXP_MAX_DEPTH
 
-	// Count of CDT literals the sizing pass found out of canonical form --
-	// build_canonicalize_cdt() consumes one per literal it retains.
+	// Count of CDT literals the sizing pass found out of canonical form -- the
+	// build pass consumes one per literal it retains, and releases one per
+	// call parameter it hands to the op instead.
 	uint32_t literal_cleanup;
 	bool has_marker_literal;
 
@@ -401,6 +402,8 @@ static var_entry* build_find_var_entry(build_args* args, const uint8_t* name,
 		uint32_t name_sz);
 static cdt_literal_status build_check_cdt_literal(const uint8_t* buf,
 		uint32_t buf_sz, bool* marker_r);
+static bool build_count_literal(build_counts* bc, msgpack_in* mp,
+		msgpack_type literal_type);
 static bool build_canonicalize_cdt(build_args* args, op_value_blob* op);
 
 static bool build_default(build_args* args);
@@ -669,9 +672,8 @@ as_exp_destroy(as_exp* exp)
 			break;
 		case EXP_VOP_VALUE_LIST:
 		case EXP_VOP_VALUE_MSGPACK:
-			// A canonicalized CDT literal retained by
-			// build_canonicalize_cdt() - literals that arrived canonical
-			// alias the wire and are never on this stack.
+			// A canonicalized CDT literal retained at build - literals that
+			// arrived canonical alias the wire and are never on this stack.
 			cf_free((void*)((op_value_blob*)ob)->value);
 			break;
 		default:
@@ -1326,9 +1328,9 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 	cf_assert(args.exp->cleanup_stack_ix <= bc.cleanup_count, AS_EXP,
 			"cleanup_stack_ix (%u) not equal to cleanup_count (%u)",
 			args.exp->cleanup_stack_ix, bc.cleanup_count);
-	// Every literal the sizing pass counted as needing canonicalization must
-	// have been consumed by build_canonicalize_cdt() - a remainder means the
-	// passes disagreed and an unsorted literal may have aliased through.
+	// One-sided: a remainder proves the build pass skipped a literal it owed,
+	// but releasing one it never owed balances the books just as well and is
+	// invisible here - the literal it stole from aliases non-canonical.
 	cf_assert(args.literal_cleanup == 0, AS_EXP,
 			"literal_cleanup (%u) not consumed", args.literal_cleanup);
 
@@ -1545,33 +1547,8 @@ build_count_sz(msgpack_in* mp, build_counts* bc, uint32_t depth)
 				}
 			}
 			else {
-				const uint8_t* ele_start = mp->buf + mp->offset;
-				uint32_t ele_sz = msgpack_sz(mp);
-
-				if (ele_sz == 0) {
-					cf_warning(AS_EXP,
-							"build_count_sz - invalid instruction at offset %u",
-							mp->offset);
+				if (! build_count_literal(bc, mp, type)) {
 					return false;
-				}
-
-				// Map literals: validate now, and count any needing
-				// canonicalization so a cleanup slot gets reserved for
-				// build_canonicalize_cdt().
-				if (type == MSGPACK_TYPE_MAP) {
-					bool marker = false;
-
-					switch (build_check_cdt_literal(ele_start, ele_sz, &marker)) {
-					case CDT_LITERAL_INVALID:
-						return false;
-					case CDT_LITERAL_NEEDS_REWRITE:
-						bc->literal_cleanup++;
-						break;
-					default:
-						break;
-					}
-
-					bc->has_marker_literal |= marker;
 				}
 			}
 		}
@@ -1647,32 +1624,9 @@ build_count_sz(msgpack_in* mp, build_counts* bc, uint32_t depth)
 			break;
 		}
 		case EXP_QUOTE: {
-			// Quoted list literal: validate now, and count it if it needs
-			// canonicalization so a cleanup slot gets reserved for
-			// build_canonicalize_cdt().
-			const uint8_t* q_start = mp->buf + mp->offset;
-			uint32_t q_sz = msgpack_sz(mp);
-
-			if (q_sz == 0) {
-				cf_warning(AS_EXP,
-						"build_count_sz - invalid instruction at offset %u",
-						mp->offset);
+			if (! build_count_literal(bc, mp, MSGPACK_TYPE_MAP)) {
 				return false;
 			}
-
-			bool marker = false;
-
-			switch (build_check_cdt_literal(q_start, q_sz, &marker)) {
-			case CDT_LITERAL_INVALID:
-				return false;
-			case CDT_LITERAL_NEEDS_REWRITE:
-				bc->literal_cleanup++;
-				break;
-			default:
-				break;
-			}
-
-			bc->has_marker_literal |= marker;
 
 			break;
 		}
@@ -1743,15 +1697,18 @@ build_count_sz(msgpack_in* mp, build_counts* bc, uint32_t depth)
 				// TODO - Skip allocating space until we reach the first list.
 				// Non lists after the first list will result in over-allocation
 				// of op space. May want to improve accounting in the future.
-				if (msgpack_peek_type(mp) == MSGPACK_TYPE_LIST) {
+				msgpack_type p_type = msgpack_peek_type(mp);
+
+				if (p_type == MSGPACK_TYPE_LIST) {
 					bc->counter += param_count - i;
 					break;
 				}
 
-				if (msgpack_sz(mp) == 0) {
-					cf_warning(AS_EXP,
-							"build_count_sz - invalid instruction at offset %u",
-							mp->offset);
+				// A bare map before the first list never reaches the
+				// instruction loop, so nothing else counts it - and the call
+				// parser releases for every non-canonical parameter, wherever
+				// it sits.
+				if (! build_count_literal(bc, mp, p_type)) {
 					return false;
 				}
 			}
@@ -1868,6 +1825,44 @@ exp_build_get_or_add_bin_entry(build_bin_table* t, const exp_bin_name_entry* n)
 
 		t->table[t->n_bins++] = *n;
 	}
+
+	return true;
+}
+
+// literal_type says what counts as a literal here rather than describing the
+// element - a quoted payload is one whatever it holds, so that caller names
+// the map type outright.
+//
+// post: mp has stepped past the element, literal or not.
+static bool
+build_count_literal(build_counts* bc, msgpack_in* mp, msgpack_type literal_type)
+{
+	const uint8_t* buf = mp->buf + mp->offset;
+	uint32_t buf_sz = msgpack_sz(mp);
+
+	if (buf_sz == 0) {
+		cf_warning(AS_EXP, "build_count_sz - invalid instruction at offset %u",
+				mp->offset);
+		return false;
+	}
+
+	if (literal_type != MSGPACK_TYPE_MAP) {
+		return true;
+	}
+
+	bool marker = false;
+
+	switch (build_check_cdt_literal(buf, buf_sz, &marker)) {
+	case CDT_LITERAL_INVALID:
+		return false;
+	case CDT_LITERAL_NEEDS_REWRITE:
+		bc->literal_cleanup++;
+		break;
+	default:
+		break;
+	}
+
+	bc->has_marker_literal |= marker;
 
 	return true;
 }
@@ -3577,6 +3572,32 @@ parse_op_call(op_call* op, build_args* args)
 			op->vecs[idx].buf = mp->buf + mp->offset; // next vector
 			op->vecs[idx].buf_sz = 0;
 			break;
+		case MSGPACK_TYPE_MAP: {
+			const uint8_t* start = mp->buf + mp->offset;
+
+			sz = msgpack_sz(mp);
+
+			if (sz == 0) {
+				return false;
+			}
+
+			op->vecs[idx].buf_sz += sz;
+
+			// The sizing pass cannot tell a call parameter from an
+			// instruction, so a non-canonical one still holds a reservation
+			// nothing here consumes - release it. The op that takes the
+			// parameter rewrites it, so there is nothing to canonicalize.
+			if (args->literal_cleanup != 0) {
+				bool marker = false;
+
+				if (build_check_cdt_literal(start, sz, &marker) ==
+						CDT_LITERAL_NEEDS_REWRITE) {
+					args->literal_cleanup--;
+				}
+			}
+
+			break;
+		}
 		case MSGPACK_TYPE_ERROR:
 			return false;
 		default:
