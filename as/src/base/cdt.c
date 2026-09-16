@@ -1857,9 +1857,6 @@ cdt_process_state_get_params(cdt_process_state* state, size_t n, ...)
 			arg->ptr = msgpack_get_ele_vec(state->mv, &arg->sz);
 
 			if (arg->ptr == NULL) {
-				cf_warning(AS_PARTICLE,
-						"cdt_process_state_get_params() invalid payload at param %u",
-						i);
 				as_error_details_set_fmt(AS_SUB_NONE,
 						"%s: invalid payload at param %u", entry->name, i);
 				va_end(vl);
@@ -1868,9 +1865,6 @@ cdt_process_state_get_params(cdt_process_state* state, size_t n, ...)
 
 			if (entry->args[i] == AS_CDT_PARAM_STORAGE &&
 					state->mv->has_nonstorage) {
-				cf_warning(AS_PARTICLE,
-						"cdt_process_state_get_params() non-storable type in storage context at param %u",
-						i);
 				as_error_details_set_fmt(AS_SUB_NONE,
 						"%s: param %u contains a non-storable type"
 						" (wildcard or infinity) in a storage context",
@@ -2508,7 +2502,7 @@ cdt_select_list(select_ctx* sel, uint32_t level)
 
 			if (as_pack_list_header_get_size(ele_count) !=
 					sel->mp_in.offset - hdr_off) {
-				cf_warning(AS_PARTICLE,
+				cf_info(AS_PARTICLE,
 						"cdt_select_list() ele_count %u sz %u size mismatch",
 						ele_count, sel->mp_in.offset - hdr_off);
 				as_error_details_set_fmt(AS_SUB_NONE,
@@ -6284,7 +6278,7 @@ cdt_packed_modify(cdt_process_state* state, as_bin* b, as_bin* result,
 			cf_warning(AS_PARTICLE, "cdt_packed_modify() failed with no status");
 		}
 		else {
-			cf_warning(AS_PARTICLE, "cdt_packed_modify() failed: ret_code=%d",
+			cf_info(AS_PARTICLE, "cdt_packed_modify() failed: ret_code=%d",
 					com.ret_code);
 			as_error_details_set_fmt(AS_SUB_NONE,
 					"cdt modify failed with status %d", -com.ret_code);
