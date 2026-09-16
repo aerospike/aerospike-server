@@ -237,7 +237,8 @@ as_write_start(as_transaction* tr)
 
 	// Apply XDR filter.
 	if (! xdr_allows_write(tr)) {
-		as_error_details_set_fmt(AS_SUB_FORBID_XDR_FILTER_BLOCKED,
+		as_error_details_set_sub_fmt(AS_ERR_FORBIDDEN,
+				AS_SUB_FORBID_XDR_FILTER_BLOCKED,
 				"write blocked by XDR write filter");
 		tr->result_code = AS_ERR_FORBIDDEN;
 		send_write_response(tr, NULL);
@@ -761,7 +762,8 @@ write_master(rw_request* rw, as_transaction* tr)
 
 		// Don't write record if it would be truncated.
 		if (! is_mrt && as_truncate_now_is_truncated(ns, as_index_get_set_id(r))) {
-			as_error_details_set_fmt(AS_SUB_FORBID_TRUNCATED,
+			as_error_details_set_sub_fmt(AS_ERR_FORBIDDEN,
+					AS_SUB_FORBID_TRUNCATED,
 					"can't create record: namespace or set is truncated");
 			write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_FORBIDDEN);
 			return TRANS_DONE;
@@ -783,7 +785,8 @@ write_master(rw_request* rw, as_transaction* tr)
 	if (as_set_size_stop_writes(p_set)) {
 		cf_ticker_warning(AS_RW, "{%s|%s} at stop-writes-size - can't write",
 				ns->name, p_set->name);
-		as_error_details_set_fmt(AS_SUB_FORBID_SET_SIZE_STOP_WRITES,
+		as_error_details_set_sub_fmt(AS_ERR_FORBIDDEN,
+				AS_SUB_FORBID_SET_SIZE_STOP_WRITES,
 				"set %s is at stop-writes-size limit", p_set->name);
 		write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_FORBIDDEN);
 		return TRANS_DONE;
@@ -907,7 +910,7 @@ write_master(rw_request* rw, as_transaction* tr)
 
 	if (! is_valid_ttl(m->record_ttl)) {
 		cf_warning(AS_RW, "write_master: invalid ttl %u", m->record_ttl);
-		as_error_details_set_fmt(AS_SUB_PARAM_TTL_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER, AS_SUB_PARAM_TTL_INVALID,
 				"invalid record TTL %u", m->record_ttl);
 		write_master_failed(tr, &r_ref, tree, &rd, AS_ERR_PARAMETER);
 		return TRANS_DONE;
@@ -1042,7 +1045,8 @@ write_master_preprocessing(as_transaction* tr)
 
 	if (ns->clock_skew_stop_writes) {
 		// TODO - new error code?
-		as_error_details_set_fmt(AS_SUB_FORBID_CLOCK_SKEW_STOP_WRITES,
+		as_error_details_set_sub_fmt(AS_ERR_FORBIDDEN,
+				AS_SUB_FORBID_CLOCK_SKEW_STOP_WRITES,
 				"writes blocked due to clock skew");
 		write_master_failed(tr, NULL, NULL, NULL, AS_ERR_FORBIDDEN);
 		return false;
@@ -1545,7 +1549,8 @@ write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
 	}
 
 	if (rd->n_bins > RECORD_MAX_BINS) {
-		as_error_details_set_fmt(AS_SUB_PARAM_BIN_COUNT_TOO_LARGE,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_BIN_COUNT_TOO_LARGE,
 				"record has too many bins (%u > %u)", rd->n_bins,
 				RECORD_MAX_BINS);
 		as_bin_destroy_all(result_bins, n_result_bins);
@@ -1609,7 +1614,8 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 	uint64_t msg_lut = as_transaction_xdr_lut(tr);
 
 	if (forbid_resolve(tr, rd, msg_lut)) {
-		as_error_details_set_fmt(AS_SUB_FORBID_REPLACE_CONFLICT_RESOLVING,
+		as_error_details_set_sub_fmt(AS_ERR_FORBIDDEN,
+				AS_SUB_FORBID_REPLACE_CONFLICT_RESOLVING,
 				"can't apply ops during conflict resolution");
 		return AS_ERR_FORBIDDEN;
 	}

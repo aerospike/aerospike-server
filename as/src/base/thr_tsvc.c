@@ -203,7 +203,8 @@ as_tsvc_process_transaction(as_transaction* tr)
 		// (do not "unify" the two). AS_SUB_UNAVAIL (not AS_SUB_NONE): AS_ERR_UNAVAILABLE carries a subcode
 		// family and an SC client needs the fail-over-vs-backoff bit - this node is
 		// leaving, so fail over.
-		as_error_details_set_fmt(AS_SUB_UNAVAIL_NODE_SHUTTING_DOWN,
+		as_error_details_set_sub_fmt(AS_ERR_UNAVAILABLE,
+				AS_SUB_UNAVAIL_NODE_SHUTTING_DOWN,
 				"node is shutting down for an index checkpoint");
 		as_transaction_error(tr, NULL, AS_ERR_UNAVAILABLE);
 
@@ -220,7 +221,8 @@ as_tsvc_process_transaction(as_transaction* tr)
 		else {
 			cf_debug(AS_TSVC,
 					"rejecting transaction - initial partition balance unresolved");
-			as_error_details_set_fmt(AS_SUB_UNAVAIL_INITIAL_BALANCE_UNRESOLVED,
+			as_error_details_set_sub_fmt(AS_ERR_UNAVAILABLE,
+					AS_SUB_UNAVAIL_INITIAL_BALANCE_UNRESOLVED,
 					"initial partition balance unresolved");
 			as_transaction_error(tr, NULL, AS_ERR_UNAVAILABLE);
 			// Note that we forfeited namespace info above so query doesn't get

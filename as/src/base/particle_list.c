@@ -2073,7 +2073,8 @@ packed_list_get_remove_by_index_range(const packed_list* list, cdt_op_mem* com,
 		cf_warning(AS_PARTICLE,
 				"packed_list_get_remove_by_index_range() index %ld out of bounds for ele_count %u",
 				index, list->ele_count);
-		as_error_details_set_fmt(AS_SUB_OPNOT_CDT_INDEX_OUT_OF_BOUNDS,
+		as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+				AS_SUB_OPNOT_CDT_INDEX_OUT_OF_BOUNDS,
 				"list_get_remove_by_index_range: index %ld out of bounds for element count %u",
 				index, list->ele_count);
 		return -AS_ERR_OP_NOT_APPLICABLE;
@@ -2489,7 +2490,8 @@ packed_list_get_remove_by_rank_range(const packed_list* list, cdt_op_mem* com,
 		cf_warning(AS_PARTICLE,
 				"packed_list_get_remove_by_rank_range() rank %u out of bounds for ele_count %u",
 				urank, list->ele_count);
-		as_error_details_set_fmt(AS_SUB_OPNOT_CDT_RANK_OUT_OF_BOUNDS,
+		as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+				AS_SUB_OPNOT_CDT_RANK_OUT_OF_BOUNDS,
 				"list_get_remove_by_rank_range: rank %ld out of bounds for element count %u",
 				rank, list->ele_count);
 		return -AS_ERR_OP_NOT_APPLICABLE;
@@ -2978,7 +2980,8 @@ packed_string_list_join(const packed_list* list, cdt_op_mem* com,
 	if (max_u64 > UINT32_MAX) {
 		cf_ticker_warning(AS_PARTICLE,
 				"packed_string_list_join() result size overflow");
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"list_join: result size exceeds server limit");
 		return -AS_ERR_PARAMETER;
 	}
@@ -2997,7 +3000,8 @@ packed_string_list_join(const packed_list* list, cdt_op_mem* com,
 			cf_free(result);
 			cf_ticker_warning(AS_PARTICLE,
 					"packed_string_list_join() encountered non-string list element");
-			as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+			as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+					AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 					"list_join: list element %u is not a string", i);
 			return -AS_ERR_PARAMETER;
 		}
@@ -3079,7 +3083,8 @@ packed_list_insert(const packed_list* list, cdt_op_mem* com, int64_t index,
 		cf_warning(AS_PARTICLE,
 				"packed_list_insert() index %ld out of bounds for ele_count %d",
 				index > 0 ? index : index - list->ele_count, list->ele_count);
-		as_error_details_set_fmt(AS_SUB_OPNOT_CDT_INDEX_OUT_OF_BOUNDS,
+		as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+				AS_SUB_OPNOT_CDT_INDEX_OUT_OF_BOUNDS,
 				"list_insert: index %ld out of bounds for element count %u",
 				index > 0 ? index : index - list->ele_count, list->ele_count);
 		return -AS_ERR_OP_NOT_APPLICABLE;
@@ -3091,7 +3096,8 @@ packed_list_insert(const packed_list* list, cdt_op_mem* com, int64_t index,
 			return AS_OK; // no-op
 		}
 
-		as_error_details_set_fmt(AS_SUB_OPNOT_CDT_BOUNDED_LIST_OVERFLOW,
+		as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+				AS_SUB_OPNOT_CDT_BOUNDED_LIST_OVERFLOW,
 				"list_insert: index %u out of bounds for element count %u (bounded flag set)",
 				(uint32_t)index, list->ele_count);
 		return -AS_ERR_OP_NOT_APPLICABLE;
@@ -3544,7 +3550,8 @@ packed_list_replace_ordered(const packed_list* list, cdt_op_mem* com,
 		cf_warning(AS_PARTICLE,
 				"packed_list_replace_ordered() index %u > ele_count %u out of bounds not allowed for ORDERED lists",
 				index, list->ele_count);
-		as_error_details_set_fmt(AS_SUB_OPNOT_CDT_INDEX_OUT_OF_BOUNDS,
+		as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+				AS_SUB_OPNOT_CDT_INDEX_OUT_OF_BOUNDS,
 				"list_replace_ordered: index %u out of bounds for ordered list (element count %u)",
 				index, list->ele_count);
 		return -AS_ERR_OP_NOT_APPLICABLE;
@@ -4176,7 +4183,8 @@ list_set(cdt_op_mem* com, int64_t index, const cdt_payload* uval,
 		cf_warning(AS_PARTICLE,
 				"list_set() index %ld out of bounds for ele_count %d",
 				index > 0 ? index : index - ele_count, ele_count);
-		as_error_details_set_fmt(AS_SUB_OPNOT_CDT_INDEX_OUT_OF_BOUNDS,
+		as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+				AS_SUB_OPNOT_CDT_INDEX_OUT_OF_BOUNDS,
 				"list_set: index %ld out of bounds for element count %u",
 				index > 0 ? index : index - ele_count, ele_count);
 		return -AS_ERR_OP_NOT_APPLICABLE;
@@ -4266,7 +4274,8 @@ list_increment(cdt_op_mem* com, int64_t index, cdt_payload* delta_value,
 		cf_warning(AS_PARTICLE,
 				"list_increment() index %ld out of bounds for ele_count %d",
 				index > 0 ? index : index - list.ele_count, list.ele_count);
-		as_error_details_set_fmt(AS_SUB_OPNOT_CDT_INDEX_OUT_OF_BOUNDS,
+		as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+				AS_SUB_OPNOT_CDT_INDEX_OUT_OF_BOUNDS,
 				"list_increment: index %ld out of bounds for element count %u",
 				index > 0 ? index : index - list.ele_count, list.ele_count);
 		return -AS_ERR_OP_NOT_APPLICABLE;
@@ -4485,7 +4494,8 @@ string_list_join(cdt_op_mem* com, const cdt_payload* sep)
 
 	if (! packed_list_init_from_com(&list, com)) {
 		cf_ticker_warning(AS_PARTICLE, "string_list_join() invalid list");
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"list_join: bin is not a valid list");
 		return -AS_ERR_PARAMETER;
 	}

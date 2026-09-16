@@ -215,7 +215,8 @@ set_set_from_msg(as_record* r, as_namespace* ns, as_msg* m)
 	}
 
 	if (! as_mrt_monitor_check_set_name(ns, f->data, name_len)) {
-		as_error_details_set_fmt(AS_SUB_UNSUPP_FEAT_GENERIC,
+		as_error_details_set_sub_fmt(AS_ERR_UNSUPPORTED_FEATURE,
+				AS_SUB_UNSUPP_FEAT_GENERIC,
 				"MRT monitor set name not supported in availability (AP) mode");
 		return AS_ERR_UNSUPPORTED_FEATURE;
 	}

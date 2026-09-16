@@ -46,7 +46,8 @@ void as_batch_add_result(struct as_transaction_s* tr, uint16_t n_bins,
 void as_batch_add_made_result(as_batch_shared* shared, uint32_t index,
 		struct cl_msg_s* msgp, size_t msg_sz);
 void as_batch_add_ack(struct as_transaction_s* tr, struct as_record_version_s* v);
-void as_batch_add_error(as_batch_shared* shared, uint32_t index, int result_code);
+void as_batch_add_error(as_batch_shared* shared, uint32_t index,
+		uint32_t result_code);
 int as_batch_threads_resize(uint32_t threads);
 void as_batch_queues_info(cf_dyn_buf* db);
 uint32_t as_batch_unused_buffers();

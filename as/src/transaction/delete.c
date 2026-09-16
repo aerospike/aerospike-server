@@ -208,7 +208,8 @@ as_delete_start(as_transaction* tr)
 {
 	// Apply XDR filter.
 	if (! xdr_allows_write(tr)) {
-		as_error_details_set_fmt(AS_SUB_FORBID_XDR_FILTER_BLOCKED,
+		as_error_details_set_sub_fmt(AS_ERR_FORBIDDEN,
+				AS_SUB_FORBID_XDR_FILTER_BLOCKED,
 				"delete blocked by XDR write filter");
 		tr->result_code = AS_ERR_FORBIDDEN;
 		send_delete_response(tr);

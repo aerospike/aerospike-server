@@ -3951,7 +3951,8 @@ packed_map_get_remove_by_index_range(const packed_map* map, cdt_op_mem* com,
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_by_index_range() index %ld out of bounds for ele_count %u",
 				index, map->ele_count);
-		as_error_details_set_fmt(AS_SUB_OPNOT_CDT_INDEX_OUT_OF_BOUNDS,
+		as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+				AS_SUB_OPNOT_CDT_INDEX_OUT_OF_BOUNDS,
 				"map_get_remove_by_index_range: index %ld out of bounds for element count %u",
 				index, map->ele_count);
 		return -AS_ERR_OP_NOT_APPLICABLE;
@@ -4368,7 +4369,8 @@ packed_map_get_remove_by_rank_range(const packed_map* map, cdt_op_mem* com,
 		cf_warning(AS_PARTICLE,
 				"packed_map_get_remove_by_rank_range() rank %ld out of bounds for ele_count %u",
 				rank, map->ele_count);
-		as_error_details_set_fmt(AS_SUB_OPNOT_CDT_RANK_OUT_OF_BOUNDS,
+		as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+				AS_SUB_OPNOT_CDT_RANK_OUT_OF_BOUNDS,
 				"map_get_remove_by_rank_range: rank %ld out of bounds for element count %u",
 				rank, map->ele_count);
 		return -AS_ERR_OP_NOT_APPLICABLE;

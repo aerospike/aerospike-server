@@ -60,6 +60,15 @@ struct as_storage_rd_s;
 
 extern __thread uint32_t g_error_details_len;
 extern __thread bool g_error_details_set;
+// Parent status a staged subcode is bound to, or AS_ERROR_DETAILS_UNBOUND.
+// The sentinel must lie outside the result-code range so it can never equal
+// a status a site binds, and in particular must not be 0 - a thread that
+// never armed zero-inits and would read as bound to AS_OK. The assert pins
+// the range. Reply build also tests for the sentinel explicitly,
+// since as_error_msg_field_prep() takes a uint32_t, not the wire byte.
+#define AS_ERROR_DETAILS_UNBOUND UINT32_MAX
+COMPILER_ASSERT(AS_ERROR_DETAILS_UNBOUND > UINT8_MAX);
+extern __thread uint32_t g_error_details_bound_status;
 extern __thread uint8_t g_error_verbosity;
 struct as_error_exp_trace_s;
 extern __thread struct as_error_exp_trace_s g_error_exp_trace;
@@ -504,9 +513,18 @@ typedef struct as_error_exp_trace_s {
 
 // SUBCODE_STATUS_MAP - authoritative prefix-to-parent-status pairing.
 // Every AS_SUB_<PREFIX>_* constant pairs with exactly the status named
-// here, and an emit site must use a subcode whose prefix matches the
-// response status. Maintained by convention (there is no automated lint
-// pass); update this block whenever a new per-status enum is declared.
+// here. An emit site stages a subcode via as_error_details_set_sub_fmt,
+// passing the status its prefix names; reply build (as_error_msg_field_prep)
+// drops any subcode whose bound status doesn't match the transaction's
+// final status. Subcode integers are NOT unique across families, so the
+// pairing here is the only source of a subcode's parent status.
+// Maintained by convention (there is no automated lint pass),
+// and the two ways to breach it fail differently: a site that skips
+// as_error_details_set_sub_fmt is unbound and fails closed (warned at
+// stage time, subcode dropped); a site that binds the WRONG status
+// fails open and silently - the drop can't tell a mis-binding from an
+// intentional funnel. Update this block whenever a new per-status enum
+// is declared.
 //
 //   PARAM         -> AS_ERR_PARAMETER
 //   UNAVAIL       -> AS_ERR_UNAVAILABLE
@@ -1014,9 +1032,19 @@ size_t as_msg_send_fin_timeout(cf_socket* sock, uint32_t result_code,
 		int32_t timeout);
 
 // Error message response support.
-// Sets error details to a msgpack map payload (raw bytes).
+// Sets error details to a msgpack map payload (raw bytes). Message-only: a
+// dispatchable subcode must go through as_error_details_set_sub_fmt so it is
+// bound to its parent status - one staged here is warned about and suppressed
+// at reply build.
 void as_error_details_set_fmt(uint32_t subcode, const char* format, ...)
 		__attribute__((format(printf, 2, 3)));
+
+// As above, binding 'subcode' to 'status', the status it was raised for (per
+// SUBCODE_STATUS_MAP). The reply-build scoping drops the subcode - keeping
+// the message and trace - when the transaction's final status differs, so a
+// client never decodes the integer against the wrong per-status family.
+void as_error_details_set_sub_fmt(uint32_t status, uint32_t subcode,
+		const char* format, ...) __attribute__((format(printf, 3, 4)));
 
 // Stage a structured expression trace for field-45 key 3. First-set-wins and
 // verbosity-gated (top "all" tier only), mirroring as_error_details_set_fmt.
@@ -1030,6 +1058,7 @@ as_error_msg_clear(void)
 {
 	g_error_details_len = 0;
 	g_error_details_set = false;
+	g_error_details_bound_status = AS_ERROR_DETAILS_UNBOUND;
 	g_error_exp_trace.set = false;
 }
 
@@ -1050,79 +1079,33 @@ as_error_msg_disarm(void)
 // Error-details wire field - shared by the single-record response builders
 // (proto.c) and the per-row batch reply builders (batch.c). Both must fold the
 // armed thread-local detail into a sized buffer before writing it, so the
-// size/write idiom lives here rather than file-local to proto.c.
-typedef struct error_msg_field_s {
+// size/write pair is exported here rather than file-local to proto.c.
+typedef struct as_error_msg_field_s {
 	const uint8_t* msg;
 	uint32_t len;
 	bool add;
-} error_msg_field;
+} as_error_msg_field;
 
 // Decide whether the armed error detail (if any) belongs on this response and
 // hand back the bytes to emit. Error details ride only on error responses that
 // the client opted into: on a success response (is_error false), or when the
 // client didn't opt in, any armed detail is discarded here so it can't leak
-// onto this reply or a later one on the same thread. Pair with
-// error_msg_field_write(), which writes the field and clears.
+// onto this reply or a later one on the same thread. 'result_code' must be the
+// FINAL status going out on this response: a staged subcode bound to a
+// different status is dropped here, destructively, before the caller sizes the
+// field. Only the reply builders may call this, once, at reply build. Pair with
+// as_error_msg_field_write(), which writes the field and clears.
 //
 // The returned 'msg' ALIASES mutable thread-local storage and 'len' is a
 // snapshot of it, so nothing between this call and the matching write may stage
-// a detail or a trace: as_error_exp_trace_set() appends in place and bumps the
-// payload's map header, which would leave the write copying a header promising
-// one more entry than the snapshot length carries. The write asserts it.
-static inline error_msg_field
-error_msg_field_prep(bool include_error_msg, bool is_error)
-{
-	error_msg_field f = { 0 };
-	uint32_t len = 0;
-	const uint8_t* msg = as_error_msg_peek(&len);
-
-	if (len == 0) {
-		return f;
-	}
-
-	if (include_error_msg && is_error) {
-		f.msg = msg;
-		f.len = len;
-		f.add = true;
-
-		return f;
-	}
-
-	// Armed but not wanted on this response - discard so it can't ride out.
-	as_error_msg_clear();
-
-	return f;
-}
+// a detail or a trace. The write asserts it.
+as_error_msg_field as_error_msg_field_prep(bool include_error_msg,
+		bool is_error, uint32_t result_code);
 
 // Write the error-details field at the cursor (advancing it past the field) and
-// clear the armed detail. No-op when error_msg_field_prep() decided not to add.
-static inline void
-error_msg_field_write(uint8_t** at, const error_msg_field* f)
-{
-	if (! f->add) {
-		return;
-	}
-
-	// The prep-time snapshot must still describe the armed payload. A grown one
-	// is not a buffer overrun - the copy below is bounded by the snapshot - but
-	// the first byte it copies is a map header already bumped in the aliased
-	// thread-local, so the client would decode one more entry than the field
-	// carries and drop the whole detail. Server-internal invariant, reachable
-	// only by a future builder folding expression work between prep and write.
-	cf_assert(f->len == g_error_details_len, AS_PROTO,
-			"error-details payload changed between prep and write (%u -> %u)",
-			f->len, g_error_details_len);
-
-	as_msg_field* mf = (as_msg_field*)*at;
-
-	mf->field_sz = 1 + f->len;
-	mf->type = AS_MSG_FIELD_TYPE_ERROR_DETAILS;
-	memcpy(mf->data, f->msg, f->len);
-	as_msg_swap_field(mf);
-	*at += sizeof(as_msg_field) + f->len;
-
-	as_error_msg_clear();
-}
+// clear the armed detail. No-op when as_error_msg_field_prep() decided not to
+// add.
+void as_error_msg_field_write(uint8_t** at, const as_error_msg_field* f);
 
 static inline bool
 as_error_msg_is_set(void)

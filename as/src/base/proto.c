@@ -67,6 +67,9 @@ static const char FAILURE_BIN_NAME[] = "FAILURE";
 static __thread uint8_t g_error_details[AS_ERROR_DETAILS_MAX];
 __thread uint32_t g_error_details_len;
 __thread bool g_error_details_set;
+// A thread that never armed must read as unbound, and the sentinel is not 0 -
+// zero-init would read as bound to AS_OK.
+__thread uint32_t g_error_details_bound_status = AS_ERROR_DETAILS_UNBOUND;
 __thread uint8_t g_error_verbosity;
 __thread as_error_exp_trace g_error_exp_trace;
 
@@ -401,9 +404,10 @@ exp_trace_fit(const as_error_exp_trace* t, uint32_t budget, bool* include_path,
 // stages the trace. Subcode/message first-set-wins is untouched - the outer
 // map is always a fixmap (<= 3 entries) with the trace last when present, so
 // attaching = append key 3 at the end and bump the count byte. Safe because
-// the payload is only ever read at reply-build time (error_msg_field_prep),
-// never mid-eval - error_msg_field_write() asserts that, since prep hands out an
-// alias plus a length snapshot and this mutation would invalidate the pair.
+// the payload is only ever read at reply-build time (as_error_msg_field_prep),
+// never mid-eval - as_error_msg_field_write() asserts that, since prep hands
+// out an alias plus a length snapshot and this mutation would invalidate the
+// pair.
 static void
 error_details_append_trace(void)
 {
@@ -415,7 +419,7 @@ error_details_append_trace(void)
 		// set_fmt's nothing-to-convey arm claimed the slot without producing
 		// bytes - build a fresh trace-only map. If even the core won't fit
 		// (can't happen at today's sizes), emit nothing rather than an empty
-		// map: error_msg_field_prep relies on len > 0 <=> valid payload.
+		// map: as_error_msg_field_prep relies on len > 0 <=> valid payload.
 		if (! exp_trace_fit(&g_error_exp_trace, AS_ERROR_DETAILS_MAX - 1,
 					&include_path, &include_snippet, &include_operands)) {
 			return;
@@ -499,8 +503,13 @@ as_error_exp_trace_set(const as_error_exp_trace* t)
 	}
 }
 
-void
-as_error_details_set_fmt(uint32_t subcode, const char* format, ...)
+// Shared staging core for as_error_details_set_fmt (message-only) and
+// as_error_details_set_sub_fmt (subcode bound to its parent status). 'status'
+// is the parent status the subcode was raised for, or AS_ERROR_DETAILS_UNBOUND
+// (see proto.h) - an unbound subcode never ships.
+static void
+error_details_set_v(uint32_t status, uint32_t subcode, const char* format,
+		va_list ap)
 {
 	if (g_error_details_set || g_error_verbosity == AS_ERROR_VERBOSITY_OFF) {
 		return;
@@ -511,6 +520,7 @@ as_error_details_set_fmt(uint32_t subcode, const char* format, ...)
 	// bytes (see below), but it still claims the slot so that an outer
 	// fallback can't overwrite a deeper site's deliberate "no subcode".
 	g_error_details_set = true;
+	g_error_details_bound_status = status;
 
 	bool has_subcode = subcode != AS_SUB_NONE;
 
@@ -521,10 +531,7 @@ as_error_details_set_fmt(uint32_t subcode, const char* format, ...)
 	uint32_t message_len = 0;
 
 	if (g_error_verbosity >= AS_ERROR_VERBOSITY_MESSAGES) {
-		va_list ap;
-		va_start(ap, format);
 		int n = vsnprintf(message, sizeof(message), format, ap);
-		va_end(ap);
 
 		if (n > 0) {
 			message_len = (uint32_t)n;
@@ -594,6 +601,98 @@ as_error_details_set_fmt(uint32_t subcode, const char* format, ...)
 	g_error_details_len = pk.offset;
 }
 
+void
+as_error_details_set_fmt(uint32_t subcode, const char* format, ...)
+{
+	// Message-only entry point. A dispatchable subcode must be staged via
+	// as_error_details_set_sub_fmt, which binds it to its parent status. The
+	// subcode parameter is vestigial - AS_SUB_NONE is its only valid value;
+	// it remains only to spare the hundreds of message-only call sites a
+	// signature change. One staged here is unbound and gets suppressed at
+	// reply build - fail-closed for any unmigrated or future call site.
+	if (subcode != AS_SUB_NONE) {
+		cf_ticker_warning(AS_PROTO,
+				"subcode %u passed to the message-only setter - no parent status, will never ship",
+				subcode);
+	}
+
+	va_list ap;
+	va_start(ap, format);
+	error_details_set_v(AS_ERROR_DETAILS_UNBOUND, subcode, format, ap);
+	va_end(ap);
+}
+
+void
+as_error_details_set_sub_fmt(uint32_t status, uint32_t subcode,
+		const char* format, ...)
+{
+	va_list ap;
+	va_start(ap, format);
+	error_details_set_v(status, subcode, format, ap);
+	va_end(ap);
+}
+
+// A staged subcode may only ship under the parent status it was raised for -
+// the client decodes the integer against that status's family. When the
+// transaction's final status differs (a funnel replaced it - expression ops
+// flatten sub-op faults to OP_NOT_APPLICABLE, a faulted filter becomes
+// FILTERED_OUT - or a later stage overrode it), drop the subcode entry and
+// keep the message/trace, which still describe the true failure site.
+// Destructive and order-sensitive: 'result_code' must be the FINAL status, so
+// this runs once, from as_error_msg_field_prep(), before the caller sizes the
+// field.
+static void
+error_details_drop_mismatched_subcode(uint32_t result_code)
+{
+	// The subcode is always the map's first entry when present.
+	if (g_error_details_len == 0 ||
+			g_error_details[1] != AS_ERROR_DETAIL_KEY_SUBCODE) {
+		return;
+	}
+
+	// Explicit sentinel test - see AS_ERROR_DETAILS_UNBOUND in proto.h.
+	if (g_error_details_bound_status != AS_ERROR_DETAILS_UNBOUND &&
+			g_error_details_bound_status == result_code) {
+		return; // aligned - the subcode is meaningful under this status
+	}
+
+	// (0x80 | n) fixmap - same invariant error_details_append_trace() relies
+	// on.
+	cf_assert((g_error_details[0] & 0xf0) == 0x80, AS_PROTO,
+			"unexpected error-details map header 0x%x", g_error_details[0]);
+
+	if ((g_error_details[0] & 0x0f) == 1) {
+		// The subcode was the only entry (verbosity 1) - nothing left to
+		// ship. The slot stays claimed, matching set_fmt's nothing-to-convey
+		// arm (len == 0 <=> no field emitted).
+		g_error_details_len = 0;
+		g_error_details_bound_status = AS_ERROR_DETAILS_UNBOUND;
+		return;
+	}
+
+	// Width of the msgpack uint holding the subcode value - as_unpack_size()
+	// owns the tag-to-width mapping and bounds it against the buffer.
+	as_unpacker val_pk = { .buffer = &g_error_details[2],
+		.offset = 0,
+		.length = g_error_details_len - 2 };
+
+	int64_t val_sz = as_unpack_size(&val_pk);
+
+	// The payload is server-authored - only error_details_set_v() packs this
+	// entry, via as_pack_uint64().
+	cf_assert(val_sz > 0, AS_PROTO, "malformed staged subcode, tag 0x%x",
+			g_error_details[2]);
+
+	uint32_t entry_sz = 1 + (uint32_t)val_sz; // fixint key + uint value
+
+	memmove(&g_error_details[1], &g_error_details[1 + entry_sz],
+			g_error_details_len - 1 - entry_sz);
+
+	g_error_details[0]--;
+	g_error_details_len -= entry_sz;
+	g_error_details_bound_status = AS_ERROR_DETAILS_UNBOUND;
+}
+
 const uint8_t*
 as_error_msg_peek(uint32_t* len)
 {
@@ -602,6 +701,67 @@ as_error_msg_peek(uint32_t* len)
 	}
 
 	return g_error_details_len == 0 ? NULL : g_error_details;
+}
+
+as_error_msg_field
+as_error_msg_field_prep(bool include_error_msg, bool is_error,
+		uint32_t result_code)
+{
+	as_error_msg_field f = { 0 };
+
+	if (g_error_details_len == 0) {
+		return f;
+	}
+
+	if (! (include_error_msg && is_error)) {
+		// Armed but not wanted on this response - discard so it can't ride
+		// out.
+		as_error_msg_clear();
+
+		return f;
+	}
+
+	error_details_drop_mismatched_subcode(result_code);
+
+	if (g_error_details_len == 0) {
+		// Dropped a lone mismatched subcode (verbosity 1) - the slot stays
+		// claimed, nothing to emit on this response.
+		return f;
+	}
+
+	f.msg = g_error_details;
+	f.len = g_error_details_len;
+	f.add = true;
+
+	return f;
+}
+
+void
+as_error_msg_field_write(uint8_t** at, const as_error_msg_field* f)
+{
+	if (! f->add) {
+		return;
+	}
+
+	// The prep-time snapshot must still describe the armed payload. A grown one
+	// is not a buffer overrun - the copy below is bounded by the snapshot - but
+	// the first byte it copies is a map header already bumped in the aliased
+	// thread-local, so the client would decode one more entry than the field
+	// carries and drop the whole detail. Server-internal invariant, reachable
+	// only by a future builder folding expression work between prep and write.
+	cf_assert(f->len == g_error_details_len, AS_PROTO,
+			"error-details payload changed between prep and write (%u -> %u)",
+			f->len, g_error_details_len);
+
+	as_msg_field* mf = (as_msg_field*)*at;
+
+	mf->field_sz = 1 + f->len;
+	mf->type = AS_MSG_FIELD_TYPE_ERROR_DETAILS;
+	memcpy(mf->data, f->msg, f->len);
+	as_msg_swap_field(mf);
+	*at += sizeof(as_msg_field) + f->len;
+
+	as_error_msg_clear();
 }
 
 //==========================================================
@@ -667,8 +827,8 @@ as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 {
 	uint16_t n_fields = 0;
 	size_t msg_sz = sizeof(cl_msg);
-	error_msg_field err_field =
-			error_msg_field_prep(include_error_msg, result_code != AS_OK);
+	as_error_msg_field err_field = as_error_msg_field_prep(include_error_msg,
+			result_code != AS_OK, result_code);
 
 	if (v != NULL) {
 		n_fields++;
@@ -760,7 +920,7 @@ as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 		buf += sizeof(as_msg_field) + sizeof(uint32_t);
 	}
 
-	error_msg_field_write(&buf, &err_field);
+	as_error_msg_field_write(&buf, &err_field);
 
 	for (uint16_t i = 0; i < bin_count; i++) {
 		as_msg_op* op = (as_msg_op*)buf;
@@ -799,7 +959,8 @@ as_msg_make_response_bufbuilder(cf_buf_builder** bb_r, as_storage_rd* rd,
 	as_record* r = rd->r;
 	// This builder only ever emits a successful record read (result_code is
 	// always AS_OK), so error details never belong on it - is_error is false.
-	error_msg_field err_field = error_msg_field_prep(include_error_msg, false);
+	as_error_msg_field err_field =
+			as_error_msg_field_prep(include_error_msg, false, AS_OK);
 
 	size_t ns_len = strlen(ns->name);
 	const char* set_name = as_index_get_set_name(r, ns);
@@ -978,7 +1139,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder** bb_r, as_storage_rd* rd,
 		buf += sizeof(as_msg_field) + sizeof(bval);
 	}
 
-	error_msg_field_write(&buf, &err_field);
+	as_error_msg_field_write(&buf, &err_field);
 
 	if (no_bin_data) {
 		return (int32_t)msg_sz;
@@ -1095,8 +1256,8 @@ as_msg_make_no_val_response(uint32_t result_code, uint32_t generation,
 {
 	uint16_t n_fields = 0;
 	size_t msg_sz = sizeof(cl_msg);
-	error_msg_field err_field =
-			error_msg_field_prep(include_error_msg, result_code != AS_OK);
+	as_error_msg_field err_field = as_error_msg_field_prep(include_error_msg,
+			result_code != AS_OK, result_code);
 
 	if (v != NULL) {
 		n_fields++;
@@ -1145,7 +1306,7 @@ as_msg_make_no_val_response(uint32_t result_code, uint32_t generation,
 		buf += sizeof(as_msg_field) + sizeof(as_record_version);
 	}
 
-	error_msg_field_write(&buf, &err_field);
+	as_error_msg_field_write(&buf, &err_field);
 
 	*p_msg_sz = msg_sz;
 
@@ -1162,8 +1323,8 @@ as_msg_make_val_response(bool success, const as_val* val, uint32_t result_code,
 	// A FAILURE bin (success false) is the error response; a SUCCESS bin must
 	// not carry error details (e.g. a UDF that swallows a sub-error then
 	// returns success).
-	error_msg_field err_field =
-			error_msg_field_prep(include_error_msg, ! success);
+	as_error_msg_field err_field =
+			as_error_msg_field_prep(include_error_msg, ! success, result_code);
 
 	if (success) {
 		bin_name = SUCCESS_BIN_NAME;
@@ -1227,7 +1388,7 @@ as_msg_make_val_response(bool success, const as_val* val, uint32_t result_code,
 		buf += sizeof(as_msg_field) + sizeof(as_record_version);
 	}
 
-	error_msg_field_write(&buf, &err_field);
+	as_error_msg_field_write(&buf, &err_field);
 
 	as_msg_op* op = (as_msg_op*)buf;
 
@@ -1256,9 +1417,11 @@ as_msg_make_val_response_bufbuilder(const as_val* val, cf_buf_builder** bb_r,
 	const char* bin_name;
 	size_t bin_name_len;
 	// A FAILURE bin (success false) is the error response; a SUCCESS bin must
-	// not carry error details.
-	error_msg_field err_field =
-			error_msg_field_prep(include_error_msg, ! success);
+	// not carry error details. AS_OK is a placeholder, not a real outgoing
+	// status: the sole caller passes include_error_msg false (background /
+	// aggregation path), and a bound subcode can't match it anyway.
+	as_error_msg_field err_field =
+			as_error_msg_field_prep(include_error_msg, ! success, AS_OK);
 
 	if (success) {
 		bin_name = SUCCESS_BIN_NAME;
@@ -1297,7 +1460,7 @@ as_msg_make_val_response_bufbuilder(const as_val* val, cf_buf_builder** bb_r,
 
 	uint8_t* dbuf = m->data;
 
-	error_msg_field_write(&dbuf, &err_field);
+	as_error_msg_field_write(&dbuf, &err_field);
 
 	as_msg_op* op = (as_msg_op*)dbuf;
 

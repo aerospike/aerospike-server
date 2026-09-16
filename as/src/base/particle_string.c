@@ -826,11 +826,13 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 				AS_ERR_PARAMETER);
 
 		if (is_expr) {
-			as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+			as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+					AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 					"string op has insufficient args or malformed request");
 		}
 		else {
-			as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+			as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+					AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 					"string op on bin %.*s has insufficient args or malformed request",
 					(int)bin_name_sz, bin_name);
 		}
@@ -847,11 +849,13 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 				AS_ERR_PARAMETER);
 
 		if (is_expr) {
-			as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_INVALID,
+			as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+					AS_SUB_PARAM_STRING_OP_INVALID,
 					"string op has unreadable op code");
 		}
 		else {
-			as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_INVALID,
+			as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+					AS_SUB_PARAM_STRING_OP_INVALID,
 					"string op on bin %.*s has unreadable op code",
 					(int)bin_name_sz, bin_name);
 		}
@@ -869,12 +873,14 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 					AS_ERR_PARAMETER);
 
 			if (is_expr) {
-				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_MALFORMED,
+				as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+						AS_SUB_PARAM_STRING_CTX_MALFORMED,
 						"string context op requires [0xFF, ctx, [op, args...]]; got %u outer elements",
 						ele_count);
 			}
 			else {
-				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_MALFORMED,
+				as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+						AS_SUB_PARAM_STRING_CTX_MALFORMED,
 						"string context op on bin %.*s requires [0xFF, ctx, [op, args...]]; got %u outer elements",
 						(int)bin_name_sz, bin_name, ele_count);
 			}
@@ -891,11 +897,13 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 					AS_ERR_PARAMETER);
 
 			if (is_expr) {
-				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_MALFORMED,
+				as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+						AS_SUB_PARAM_STRING_CTX_MALFORMED,
 						"string context op has no context list");
 			}
 			else {
-				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_MALFORMED,
+				as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+						AS_SUB_PARAM_STRING_CTX_MALFORMED,
 						"string context op on bin %.*s has no context list",
 						(int)bin_name_sz, bin_name);
 			}
@@ -913,11 +921,13 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 					AS_ERR_PARAMETER);
 
 			if (is_expr) {
-				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_MALFORMED,
+				as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+						AS_SUB_PARAM_STRING_CTX_MALFORMED,
 						"string op has malformed context path");
 			}
 			else {
-				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_MALFORMED,
+				as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+						AS_SUB_PARAM_STRING_CTX_MALFORMED,
 						"string op on bin %.*s has malformed context path",
 						(int)bin_name_sz, bin_name);
 			}
@@ -932,11 +942,13 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 					AS_ERR_PARAMETER);
 
 			if (is_expr) {
-				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_MALFORMED,
+				as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+						AS_SUB_PARAM_STRING_CTX_MALFORMED,
 						"string context op requires [0xFF, ctx, [op, args...]]; inner element is not a list");
 			}
 			else {
-				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_MALFORMED,
+				as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+						AS_SUB_PARAM_STRING_CTX_MALFORMED,
 						"string context op on bin %.*s requires [0xFF, ctx, [op, args...]]; inner element is not a list",
 						(int)bin_name_sz, bin_name);
 			}
@@ -949,11 +961,13 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 					AS_ERR_PARAMETER);
 
 			if (is_expr) {
-				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_MALFORMED,
+				as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+						AS_SUB_PARAM_STRING_CTX_MALFORMED,
 						"string context op requires [0xFF, ctx, [op, args...]]; inner list holds no op");
 			}
 			else {
-				as_error_details_set_fmt(AS_SUB_PARAM_STRING_CTX_MALFORMED,
+				as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+						AS_SUB_PARAM_STRING_CTX_MALFORMED,
 						"string context op on bin %.*s requires [0xFF, ctx, [op, args...]]; inner list holds no op",
 						(int)bin_name_sz, bin_name);
 			}
@@ -969,11 +983,13 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 					AS_ERR_PARAMETER);
 
 			if (is_expr) {
-				as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_INVALID,
+				as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+						AS_SUB_PARAM_STRING_OP_INVALID,
 						"string op has unreadable inner op code");
 			}
 			else {
-				as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_INVALID,
+				as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+						AS_SUB_PARAM_STRING_OP_INVALID,
 						"string op on bin %.*s has unreadable inner op code",
 						(int)bin_name_sz, bin_name);
 			}
@@ -990,12 +1006,14 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 					AS_ERR_PARAMETER);
 
 			if (is_expr) {
-				as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_INVALID,
+				as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+						AS_SUB_PARAM_STRING_OP_INVALID,
 						"string op %u is not a valid read op (max is %u)",
 						state->op_type, AS_STRING_READ_OP_END - 1);
 			}
 			else {
-				as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_INVALID,
+				as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+						AS_SUB_PARAM_STRING_OP_INVALID,
 						"string op %u on bin %.*s is not a valid read op (max is %u)",
 						state->op_type, (int)bin_name_sz, bin_name,
 						AS_STRING_READ_OP_END - 1);
@@ -1013,13 +1031,15 @@ string_state_init(string_state* state, const uint8_t* bin_name,
 					AS_ERR_PARAMETER);
 
 			if (is_expr) {
-				as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_INVALID,
+				as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+						AS_SUB_PARAM_STRING_OP_INVALID,
 						"string op %u is not a valid modify op (range %u-%u)",
 						state->op_type, AS_STRING_MODIFY_OP_START,
 						AS_STRING_MODIFY_OP_END - 1);
 			}
 			else {
-				as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_INVALID,
+				as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+						AS_SUB_PARAM_STRING_OP_INVALID,
 						"string op %u on bin %.*s is not a valid modify op (range %u-%u)",
 						state->op_type, (int)bin_name_sz, bin_name,
 						AS_STRING_MODIFY_OP_START, AS_STRING_MODIFY_OP_END - 1);
@@ -1572,7 +1592,8 @@ string_parse_op(string_state* state, string_op* op)
 		cf_ticker_warning(AS_PARTICLE,
 				"string_parse_op - error %u op %s(%u) unexpected number of args",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s has %u args, expected %u to %u", state->def->name,
 				state->n_args, def->min_args, def->max_args);
 		return false;
@@ -1607,7 +1628,8 @@ string_parse_int1(string_state* state, string_op* op)
 		cf_ticker_warning(AS_PARTICLE,
 				"string_parse_int1 - error %u op %s (%u) unable to parse int1",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s: first integer arg is not a valid integer", state->def->name);
 		return false;
 	}
@@ -1617,7 +1639,8 @@ string_parse_int1(string_state* state, string_op* op)
 				"string_parse_int1 - error %u op %s (%u) int1 larger than max (%d)",
 				AS_ERR_PARAMETER, state->def->name, state->op_type,
 				PROTO_SIZE_MAX);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s: first integer arg %ld exceeds max %d", state->def->name,
 				val, PROTO_SIZE_MAX);
 		return false;
@@ -1653,12 +1676,14 @@ string_parse_regex_flags(string_state* state, string_op* op, uint64_t accepted)
 	// GLOBAL can only land here on compare - replace accepts it - so name it
 	// rather than leave the caller to decode a bit mask.
 	if ((bad & AS_STRING_REGEX_GLOBAL) != 0) {
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s: regex flag GLOBAL is valid only for string_regex_replace",
 				state->def->name);
 	}
 	else {
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s: unsupported regex flag bits 0x%lx", state->def->name, bad);
 	}
 
@@ -1705,7 +1730,8 @@ string_check_regex_pattern(string_state* state, const uint8_t* pattern,
 	// is the identical client mistake reported by the next layer down, and the
 	// detector is best-effort by design, so the two must not be told apart on
 	// the wire. The guidance text is what distinguishes them.
-	as_error_details_set_fmt(AS_SUB_PARAM_STRING_REGEX_INVALID,
+	as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+			AS_SUB_PARAM_STRING_REGEX_INVALID,
 			"%s: %s is not valid ICU regex syntax - %s", state->def->name,
 			idiom->spelling, idiom->guidance);
 
@@ -1767,7 +1793,8 @@ string_parse_int2(string_state* state, string_op* op)
 		cf_ticker_warning(AS_PARTICLE,
 				"string_parse_int2 - error %u op %s (%u) unable to parse int2",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s: second integer arg is not a valid integer",
 				state->def->name);
 		return false;
@@ -1778,7 +1805,8 @@ string_parse_int2(string_state* state, string_op* op)
 				"string_parse_int2 - error %u op %s (%u) int2 larger than max (%d)",
 				AS_ERR_PARAMETER, state->def->name, state->op_type,
 				PROTO_SIZE_MAX);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s: second integer arg %ld exceeds max %d", state->def->name,
 				val, PROTO_SIZE_MAX);
 		return false;
@@ -1801,7 +1829,8 @@ string_validate_utf8_arg(const uint8_t* buf, uint32_t sz, const char* op_name,
 	cf_ticker_warning(AS_PARTICLE,
 			"string_validate_utf8_arg - error %u op %s: %s is not valid UTF-8",
 			AS_ERR_PARAMETER, op_name, arg_label);
-	as_error_details_set_fmt(AS_SUB_PARAM_STRING_UTF8_INVALID,
+	as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+			AS_SUB_PARAM_STRING_UTF8_INVALID,
 			"%s: %s arg contains non-UTF-8 bytes", op_name, arg_label);
 
 	return false;
@@ -1822,7 +1851,8 @@ string_parse_buf(string_state* state, string_op* op)
 		cf_ticker_warning(AS_PARTICLE,
 				"string_parse_buf - error %u op %s (%u) parsed invalid buffer",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s: string argument is missing or empty", state->def->name);
 		return false;
 	}
@@ -1850,7 +1880,8 @@ string_parse_list(string_state* state, string_op* op)
 		cf_ticker_warning(AS_PARTICLE,
 				"string_parse_list - error %u op %s (%u) invalid string list",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s: string list arg is missing or empty", state->def->name);
 		return false;
 	}
@@ -1867,7 +1898,8 @@ string_parse_flags(string_state* state, string_op* op)
 		cf_ticker_warning(AS_PARTICLE,
 				"string_parse_flags - error %u op %s (%u) unable to parse flags",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s: flags arg is not a valid integer", state->def->name);
 		return false;
 	}
@@ -1876,7 +1908,8 @@ string_parse_flags(string_state* state, string_op* op)
 		cf_ticker_warning(AS_PARTICLE,
 				"string_parse_flags - error %u op %s (%u) invalid flags",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s: flags 0x%lx not valid for this op", state->def->name,
 				op->flags);
 		return false;
@@ -1887,7 +1920,8 @@ string_parse_flags(string_state* state, string_op* op)
 		cf_ticker_warning(AS_PARTICLE,
 				"string_parse_flags - error %u op %s (%u) invalid flags combination",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s: CREATE_ONLY and UPDATE_ONLY flags are mutually exclusive",
 				state->def->name);
 		return false;
@@ -1897,7 +1931,8 @@ string_parse_flags(string_state* state, string_op* op)
 		cf_ticker_warning(AS_PARTICLE,
 				"string_parse_flags - error %u op %s (%u) CREATE_ONLY not supported with context",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s: CREATE_ONLY flag not supported with context",
 				state->def->name);
 		return false;
@@ -2001,7 +2036,8 @@ string_prepare_read_op(string_state* state, string_op* op)
 			op->int_arg1 = 1; // default to first occurrence when not provided
 		}
 		if (op->int_arg1 == 0) {
-			as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+			as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+					AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 					"%s: occurrence must be non-zero (1=first, -1=last)",
 					state->def->name);
 			return -AS_ERR_PARAMETER;
@@ -2030,7 +2066,8 @@ string_parse_needle_replacement(const string_op* op, const string_state* state,
 		cf_ticker_warning(AS_PARTICLE,
 				"string_parse_needle_replacement - error parsing args for op %s (%u)",
 				state->def->name, state->op_type);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s: needle/replacement arg is not a valid list",
 				state->def->name);
 		return -AS_ERR_PARAMETER;
@@ -2039,7 +2076,8 @@ string_parse_needle_replacement(const string_op* op, const string_state* state,
 		cf_ticker_warning(AS_PARTICLE,
 				"string_parse_needle_replacement - %s expects exactly 2 string arguments",
 				state->def->name);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s: expects exactly 2 string arguments, got %u",
 				state->def->name, argc);
 		return -AS_ERR_PARAMETER;
@@ -2052,7 +2090,8 @@ string_parse_needle_replacement(const string_op* op, const string_state* state,
 		cf_ticker_warning(AS_PARTICLE,
 				"string_parse_needle_replacement - %s needle is missing or empty",
 				state->def->name);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s: needle is missing or empty", state->def->name);
 		return -AS_ERR_PARAMETER;
 	}
@@ -2072,7 +2111,8 @@ string_parse_needle_replacement(const string_op* op, const string_state* state,
 		cf_ticker_warning(AS_PARTICLE,
 				"string_parse_needle_replacement - %s failed to parse replacement size",
 				state->def->name);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s: replacement is missing or not a string", state->def->name);
 		return -AS_ERR_PARAMETER;
 	}
@@ -2096,7 +2136,8 @@ string_modify_set_estimated_size(string_state* state, uint64_t v)
 		cf_ticker_warning(AS_PARTICLE,
 				"string_prepare_modify_op - error %u op %s - estimated output size exceeds maximum %u",
 				AS_ERR_PARAMETER, state->def->name, STRING_REPLACE_ALL_MAX);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"%s: estimated result size exceeds server limit",
 				state->def->name);
 		return -AS_ERR_PARAMETER;
@@ -2111,7 +2152,8 @@ string_modify_estimated_size_overflow(string_state* state)
 	cf_ticker_warning(AS_PARTICLE,
 			"string_prepare_modify_op - error %u op %s - estimated output size arithmetic overflow",
 			AS_ERR_PARAMETER, state->def->name);
-	as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+	as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+			AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 			"%s: estimated result size overflow", state->def->name);
 	return -AS_ERR_PARAMETER;
 }
@@ -2258,7 +2300,8 @@ string_prepare_modify_op(string_state* state, string_op* op)
 			cf_ticker_warning(AS_PARTICLE,
 					"string_prepare_modify_op - error %u op %s - invalid overwrite index",
 					AS_ERR_PARAMETER, state->def->name);
-			as_error_details_set_fmt(AS_SUB_PARAM_STRING_INDEX_OUT_OF_BOUNDS,
+			as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+					AS_SUB_PARAM_STRING_INDEX_OUT_OF_BOUNDS,
 					"%s: index %ld out of bounds for string length %u",
 					state->def->name, requested_idx, state->old_cp_len);
 			return -AS_ERR_PARAMETER;
@@ -2293,7 +2336,8 @@ string_prepare_modify_op(string_state* state, string_op* op)
 			cf_ticker_warning(AS_PARTICLE,
 					"string_prepare_modify_op - error %u op %s - invalid padding",
 					AS_ERR_PARAMETER, state->def->name);
-			as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+			as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+					AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 					"%s: target length %ld must be non-negative and pad string must not be empty",
 					state->def->name, op->int_arg1);
 			return -AS_ERR_PARAMETER;
@@ -2316,7 +2360,8 @@ string_prepare_modify_op(string_state* state, string_op* op)
 			cf_ticker_warning(AS_PARTICLE,
 					"string_prepare_modify_op - error %u op %s - unexpected negative repeat count",
 					AS_ERR_PARAMETER, state->def->name);
-			as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+			as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+					AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 					"%s: repeat count %ld must be non-negative",
 					state->def->name, op->int_arg1);
 			return -AS_ERR_PARAMETER;
@@ -2357,9 +2402,14 @@ string_prepare_modify_op(string_state* state, string_op* op)
 		cf_ticker_warning(AS_PARTICLE,
 				"string_prepare_modify_op - error %u op %s - unexpected read op type %u",
 				AS_ERR_OP_NOT_APPLICABLE, state->def->name, state->op_type);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_INVALID,
-				"%s: op type %u is not a modify op", state->def->name,
-				state->op_type);
+		// Unreachable while two things hold: string_state_init range-checks
+		// op_type against the modify table before def is set, AND every op in
+		// that range has a case above. A new modify op must add its case here
+		// or this arm goes live. Message-only: no OPNOT subcode is minted for
+		// a can't-happen arm, and a PARAM one would be dropped at reply build
+		// for not matching the returned status.
+		as_error_details_set_fmt(AS_SUB_NONE, "%s: op type %u is not a modify op",
+				state->def->name, state->op_type);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -2492,7 +2542,8 @@ icu_uerror_to_as_err(UErrorCode status)
 		// caller's error. The only producer of this subcode: a PCRE2 budget
 		// failure falls through instead of refusing, so every budget refusal
 		// a client sees is authored here.
-		as_error_details_set_fmt(AS_SUB_OPNOT_STRING_REGEX_LIMIT_EXCEEDED,
+		as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+				AS_SUB_OPNOT_STRING_REGEX_LIMIT_EXCEEDED,
 				"regex exceeded resource limit; pattern too complex for input");
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	default:
@@ -2899,7 +2950,8 @@ string_modify_op_concatenate(const string_op* op, uint8_t* to,
 		cf_ticker_warning(AS_PARTICLE,
 				"string_modify_op_concatenate - error %u invalid msgpack list",
 				AS_ERR_PARAMETER);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"string_concatenate: arg is not a valid list");
 		return -AS_ERR_PARAMETER;
 	}
@@ -2914,7 +2966,8 @@ string_modify_op_concatenate(const string_op* op, uint8_t* to,
 			cf_ticker_warning(AS_PARTICLE,
 					"string_modify_op_concatenate - error %u invalid msgpack string element",
 					AS_ERR_PARAMETER);
-			as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+			as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+					AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 					"string_concatenate: list element %u is not a string", i);
 			*new_sz = old_sz;
 			return -AS_ERR_PARAMETER;
@@ -2926,7 +2979,8 @@ string_modify_op_concatenate(const string_op* op, uint8_t* to,
 			cf_ticker_warning(AS_PARTICLE,
 					"string_modify_op_concatenate - error %u empty or missing string element",
 					AS_ERR_PARAMETER);
-			as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+			as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+					AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 					"string_concatenate: list element %u is empty or missing", i);
 			*new_sz = old_sz;
 			return -AS_ERR_PARAMETER;
@@ -2939,7 +2993,8 @@ string_modify_op_concatenate(const string_op* op, uint8_t* to,
 			cf_ticker_warning(AS_PARTICLE,
 					"string_modify_op_concatenate - error %u invalid UTF-8 in element",
 					AS_ERR_PARAMETER);
-			as_error_details_set_fmt(AS_SUB_PARAM_STRING_UTF8_INVALID,
+			as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+					AS_SUB_PARAM_STRING_UTF8_INVALID,
 					"string_concatenate: list element %u contains non-UTF-8 bytes",
 					i);
 			*new_sz = old_sz;
@@ -3550,7 +3605,8 @@ string_modify_op_replace_K(const string_op* op, uint8_t* to,
 		cf_ticker_warning(AS_PARTICLE,
 				"string_modify_op_replace_K - error %u - needle is not a string",
 				AS_ERR_PARAMETER);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"string replace: needle is not a string");
 		return -AS_ERR_PARAMETER;
 	}
@@ -3561,7 +3617,8 @@ string_modify_op_replace_K(const string_op* op, uint8_t* to,
 		cf_ticker_warning(AS_PARTICLE,
 				"string_modify_op_replace_K - error %u - needle cannot be empty",
 				AS_ERR_PARAMETER);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"string replace: needle cannot be empty");
 		return -AS_ERR_PARAMETER;
 	}
@@ -3573,7 +3630,8 @@ string_modify_op_replace_K(const string_op* op, uint8_t* to,
 		cf_ticker_warning(AS_PARTICLE,
 				"string_modify_op_replace_K - error %u - replacement is not a string",
 				AS_ERR_PARAMETER);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"string replace: replacement is not a string");
 		return -AS_ERR_PARAMETER;
 	}
@@ -4164,7 +4222,8 @@ string_read_op_to_integer(const string_op* op, const uint8_t* from, uint32_t sz,
 	(void)op;
 
 	if (sz == 0 || sz > INT64_MAX_STRLEN) {
-		as_error_details_set_fmt(AS_SUB_OPNOT_STRING_CONVERSION_FAILED,
+		as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+				AS_SUB_OPNOT_STRING_CONVERSION_FAILED,
 				"string_to_integer: string length %u is invalid (must be 1-%d)",
 				sz, INT64_MAX_STRLEN);
 		return -AS_ERR_OP_NOT_APPLICABLE;
@@ -4173,7 +4232,8 @@ string_read_op_to_integer(const string_op* op, const uint8_t* from, uint32_t sz,
 	// Reject the leading whitespace strtoll() would silently skip. (Trailing
 	// whitespace already fails the endptr check below.)
 	if (isspace(from[0])) {
-		as_error_details_set_fmt(AS_SUB_OPNOT_STRING_CONVERSION_FAILED,
+		as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+				AS_SUB_OPNOT_STRING_CONVERSION_FAILED,
 				"string_to_integer: string is not a valid integer");
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
@@ -4188,7 +4248,8 @@ string_read_op_to_integer(const string_op* op, const uint8_t* from, uint32_t sz,
 
 	// No digits parsed, trailing non-numeric chars, or overflow.
 	if (endptr == buf || endptr != buf + sz || errno == ERANGE) {
-		as_error_details_set_fmt(AS_SUB_OPNOT_STRING_CONVERSION_FAILED,
+		as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+				AS_SUB_OPNOT_STRING_CONVERSION_FAILED,
 				"string_to_integer: string is not a valid integer");
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
@@ -4209,7 +4270,8 @@ string_read_op_to_double(const string_op* op, const uint8_t* from, uint32_t sz,
 	(void)op;
 
 	if (sz == 0 || sz > DOUBLE_MAX_STRLEN) {
-		as_error_details_set_fmt(AS_SUB_OPNOT_STRING_CONVERSION_FAILED,
+		as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+				AS_SUB_OPNOT_STRING_CONVERSION_FAILED,
 				"string_to_double: string length %u is invalid (must be 1-%d)",
 				sz, DOUBLE_MAX_STRLEN);
 		return -AS_ERR_OP_NOT_APPLICABLE;
@@ -4235,7 +4297,8 @@ string_read_op_to_double(const string_op* op, const uint8_t* from, uint32_t sz,
 	}
 
 	if (bad_form) {
-		as_error_details_set_fmt(AS_SUB_OPNOT_STRING_CONVERSION_FAILED,
+		as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+				AS_SUB_OPNOT_STRING_CONVERSION_FAILED,
 				"string_to_double: string is not a valid double");
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
@@ -4250,7 +4313,8 @@ string_read_op_to_double(const string_op* op, const uint8_t* from, uint32_t sz,
 
 	// No digits parsed, trailing non-numeric chars, or overflow.
 	if (endptr == buf || endptr != buf + sz || errno == ERANGE) {
-		as_error_details_set_fmt(AS_SUB_OPNOT_STRING_CONVERSION_FAILED,
+		as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+				AS_SUB_OPNOT_STRING_CONVERSION_FAILED,
 				"string_to_double: string is not a valid double");
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
@@ -4467,7 +4531,8 @@ string_read_op_is_numeric(const string_op* op, const uint8_t* from, uint32_t sz,
 		result = is_valid_float_string(from, sz);
 		break;
 	default:
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"string_is_numeric: unrecognized numeric_type %d",
 				(int)op->int_arg1);
 		return -AS_ERR_PARAMETER;
@@ -4548,7 +4613,8 @@ string_read_op_b64_decode(const string_op* op, const uint8_t* from, uint32_t sz,
 			! cf_b64_validate_and_decode((const char*)from, sz, answer->data,
 					&decoded_sz)) {
 		cf_free(answer);
-		as_error_details_set_fmt(AS_SUB_OPNOT_STRING_B64_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+				AS_SUB_OPNOT_STRING_B64_INVALID,
 				"string_b64_decode: value is not valid base64");
 		cf_ticker_warning(AS_PARTICLE,
 				"string_read_op_b64_decode - error %u - invalid base64",
@@ -6009,7 +6075,8 @@ string_read_op_regex_compare(const string_op* op, const uint8_t* from,
 		// Same as string_modify_op_regex_replace: NULL from utext_openUTF8 or
 		// uregex_openUText (bad pattern / UText failure) — not storage quota.
 		// get_cached_regex ticker-warned the specific cause.
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_REGEX_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_REGEX_INVALID,
 				"string_regex_compare: regex pattern is invalid or could not be compiled");
 		return -AS_ERR_PARAMETER;
 	}
@@ -6089,7 +6156,8 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 		cf_ticker_warning(AS_PARTICLE,
 				"string_modify_op_regex_replace - error %u arg is not a list",
 				AS_ERR_PARAMETER);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"string_regex_replace: arg is not a 2-element list");
 		return -AS_ERR_PARAMETER;
 	}
@@ -6098,7 +6166,8 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 		cf_ticker_warning(AS_PARTICLE,
 				"string_modify_op_regex_replace - error %u expected 2 list elements",
 				AS_ERR_PARAMETER);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"string_regex_replace: expects 2 list elements, got %u", argc);
 		return -AS_ERR_PARAMETER;
 	}
@@ -6106,7 +6175,8 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 	if (msgpack_peek_type(&mp) != MSGPACK_TYPE_STRING) {
 		cf_ticker_warning(AS_PARTICLE,
 				"string_modify_op_regex_replace - pattern is not a string");
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"string_regex_replace: pattern is not a string");
 		return -AS_ERR_PARAMETER;
 	}
@@ -6118,7 +6188,8 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 		cf_ticker_warning(AS_PARTICLE,
 				"string_modify_op_regex_replace - error %u empty or missing pattern",
 				AS_ERR_PARAMETER);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"string_regex_replace: pattern is empty or missing");
 		return -AS_ERR_PARAMETER;
 	}
@@ -6130,7 +6201,8 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 		cf_ticker_warning(AS_PARTICLE,
 				"string_modify_op_regex_replace - error %u: pattern is not valid UTF-8",
 				AS_ERR_PARAMETER);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_UTF8_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_UTF8_INVALID,
 				"string_regex_replace: pattern contains non-UTF-8 bytes");
 		return -AS_ERR_PARAMETER;
 	}
@@ -6138,7 +6210,8 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 	if (msgpack_peek_type(&mp) != MSGPACK_TYPE_STRING) {
 		cf_ticker_warning(AS_PARTICLE,
 				"string_modify_op_regex_replace - replacement is not a string");
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"string_regex_replace: replacement is not a string");
 		return -AS_ERR_PARAMETER;
 	}
@@ -6150,7 +6223,8 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 		cf_ticker_warning(AS_PARTICLE,
 				"string_modify_op_regex_replace - error %u empty or missing replacement",
 				AS_ERR_PARAMETER);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_OP_PARAMS_INVALID,
 				"string_regex_replace: replacement is empty or missing");
 		return -AS_ERR_PARAMETER;
 	}
@@ -6162,7 +6236,8 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 		cf_ticker_warning(AS_PARTICLE,
 				"string_modify_op_regex_replace - error %u: replacement is not valid UTF-8",
 				AS_ERR_PARAMETER);
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_UTF8_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_UTF8_INVALID,
 				"string_regex_replace: replacement contains non-UTF-8 bytes");
 		return -AS_ERR_PARAMETER;
 	}
@@ -6282,7 +6357,8 @@ string_modify_op_regex_replace(const string_op* op, uint8_t* to,
 
 	if (regex == NULL) {
 		// get_cached_regex ticker-warned the specific cause.
-		as_error_details_set_fmt(AS_SUB_PARAM_STRING_REGEX_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_STRING_REGEX_INVALID,
 				"string_regex_replace: regex pattern is invalid or could not be compiled");
 		return -AS_ERR_PARAMETER;
 	}

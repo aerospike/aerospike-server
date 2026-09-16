@@ -362,7 +362,8 @@ as_namespace_set_set_w_len(as_namespace* ns, const char* set_name, size_t len,
 		cf_ticker_warning(AS_NAMESPACE,
 				"{%s|%s} at stop-writes-count - can't add record", ns->name,
 				p_set->name);
-		as_error_details_set_fmt(AS_SUB_FORBID_SET_COUNT_STOP_WRITES,
+		as_error_details_set_sub_fmt(AS_ERR_FORBIDDEN,
+				AS_SUB_FORBID_SET_COUNT_STOP_WRITES,
 				"set %s is at stop-writes-count; can't assign set", p_set->name);
 		return AS_ERR_FORBIDDEN;
 	}

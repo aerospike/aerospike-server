@@ -1214,7 +1214,8 @@ bits_parse_byte_offset(bits_state* state, bits_op* op)
 				"bits_parse_byte_offset - error %u op %s (%u) offset (%ld) larger than max (%d)",
 				AS_ERR_PARAMETER, state->def->name, state->op_type, offset,
 				PROTO_SIZE_MAX);
-		as_error_details_set_fmt(AS_SUB_PARAM_BITS_OFFSET_OUT_OF_RANGE,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_BITS_OFFSET_OUT_OF_RANGE,
 				"bits %s: byte offset %ld larger than max %d", state->def->name,
 				offset, PROTO_SIZE_MAX);
 		return false;
@@ -1242,7 +1243,8 @@ bits_parse_offset(bits_state* state, bits_op* op)
 				"bits_parse_offset - error %u op %s (%u) offset (%ld) is larger than max (%d)",
 				AS_ERR_PARAMETER, state->def->name, state->op_type, offset,
 				PROTO_SIZE_MAX * 8);
-		as_error_details_set_fmt(AS_SUB_PARAM_BITS_OFFSET_OUT_OF_RANGE,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_BITS_OFFSET_OUT_OF_RANGE,
 				"bits %s: bit offset %ld larger than max %d", state->def->name,
 				offset, PROTO_SIZE_MAX * 8);
 		return false;
@@ -1269,7 +1271,8 @@ bits_parse_integer_size(bits_state* state, bits_op* op)
 		cf_warning(AS_PARTICLE,
 				"bits_parse_integer_size - error %u op %s (%u) size may not be 0",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
-		as_error_details_set_fmt(AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
 				"bits %s: integer size may not be 0", state->def->name);
 		return false;
 	}
@@ -1278,7 +1281,8 @@ bits_parse_integer_size(bits_state* state, bits_op* op)
 		cf_warning(AS_PARTICLE,
 				"bits_parse_integer_size - error %u op %s (%u) size (%lu) larger than max (64)",
 				AS_ERR_PARAMETER, state->def->name, state->op_type, size);
-		as_error_details_set_fmt(AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
 				"bits %s: integer size %lu larger than max 64",
 				state->def->name, size);
 		return false;
@@ -1305,7 +1309,8 @@ bits_parse_byte_size(bits_state* state, bits_op* op)
 		cf_warning(AS_PARTICLE,
 				"bits_parse_byte_size - error %u op %s (%u) size may not be 0",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
-		as_error_details_set_fmt(AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
 				"bits %s: byte size may not be 0", state->def->name);
 		return false;
 	}
@@ -1315,7 +1320,8 @@ bits_parse_byte_size(bits_state* state, bits_op* op)
 				"bits_parse_byte_size - error %u op %s (%u) size (%lu) larger than max (%d)",
 				AS_ERR_PARAMETER, state->def->name, state->op_type, size,
 				PROTO_SIZE_MAX);
-		as_error_details_set_fmt(AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
 				"bits %s: byte size %lu larger than max %d", state->def->name,
 				size, PROTO_SIZE_MAX);
 		return false;
@@ -1343,7 +1349,8 @@ bits_parse_byte_size_allow_zero(bits_state* state, bits_op* op)
 				"bits_parse_byte_size_allow_zero - error %u op %s (%u) size (%lu) larger than max (%d)",
 				AS_ERR_PARAMETER, state->def->name, state->op_type, size,
 				PROTO_SIZE_MAX);
-		as_error_details_set_fmt(AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
 				"bits %s: byte size %lu larger than max %d", state->def->name,
 				size, PROTO_SIZE_MAX);
 		return false;
@@ -1395,7 +1402,8 @@ bits_parse_size(bits_state* state, bits_op* op)
 		cf_warning(AS_PARTICLE,
 				"bits_parse_size - error %u op %s (%u) size may not be 0",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
-		as_error_details_set_fmt(AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
 				"bits %s: bit size may not be 0", state->def->name);
 		return false;
 	}
@@ -1405,7 +1413,8 @@ bits_parse_size(bits_state* state, bits_op* op)
 				"bits_parse_size - error %u op %s (%u) size (%lu) is larger than max (%d)",
 				AS_ERR_PARAMETER, state->def->name, state->op_type, size,
 				PROTO_SIZE_MAX * 8);
-		as_error_details_set_fmt(AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
 				"bits %s: bit size %lu larger than max %d", state->def->name,
 				size, PROTO_SIZE_MAX * 8);
 		return false;
@@ -1445,7 +1454,8 @@ bits_parse_n_bits_value(bits_state* state, bits_op* op)
 				"bits_parse_n_bits_value - error %u op %s (%u) n_bits value (%lu) is larger than max (%d)",
 				AS_ERR_PARAMETER, state->def->name, state->op_type, op->value,
 				PROTO_SIZE_MAX * 8);
-		as_error_details_set_fmt(AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_BITS_SIZE_OUT_OF_RANGE,
 				"bits %s: n_bits value %lu larger than max %d",
 				state->def->name, op->value, PROTO_SIZE_MAX * 8);
 		return false;
@@ -1651,7 +1661,8 @@ bits_prepare_modify(bits_state* state, bits_op* op, const as_bin* b)
 				"bits_prepare_op - error %u op %s (%u) result blob size %u is larger than max %u",
 				AS_ERR_PARAMETER, state->def->name, state->op_type,
 				state->new_size, PROTO_SIZE_MAX);
-		as_error_details_set_fmt(AS_SUB_PARAM_BITS_RESIZE_EXCEEDED,
+		as_error_details_set_sub_fmt(AS_ERR_PARAMETER,
+				AS_SUB_PARAM_BITS_RESIZE_EXCEEDED,
 				"bits %s: resulting blob size %u exceeds max %u",
 				state->def->name, state->new_size, PROTO_SIZE_MAX);
 		return -AS_ERR_PARAMETER;
@@ -2732,7 +2743,8 @@ blob_to_string(const as_bin* b, as_bin* rb)
 	blob_mem* bm = (blob_mem*)b->particle;
 
 	if (! cf_str_is_valid_utf8(bm->data, bm->sz)) {
-		as_error_details_set_fmt(AS_SUB_OPNOT_STRING_UTF8_INVALID,
+		as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+				AS_SUB_OPNOT_STRING_UTF8_INVALID,
 				"blob_to_string: blob contains non-UTF-8 bytes");
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}

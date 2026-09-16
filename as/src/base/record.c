@@ -222,7 +222,8 @@ as_record_replace_if_better(as_remote_record* rr)
 	}
 
 	if (! is_create && record_replace_check(r, ns) < 0) {
-		as_error_details_set_fmt(AS_SUB_FORBID_REPLACE_CONFLICT_RESOLVING,
+		as_error_details_set_sub_fmt(AS_ERR_FORBIDDEN,
+				AS_SUB_FORBID_REPLACE_CONFLICT_RESOLVING,
 				"can't replace record during conflict resolution");
 		record_replace_failed(rr, &r_ref, NULL);
 		return AS_ERR_FORBIDDEN;

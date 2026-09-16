@@ -345,7 +345,8 @@ execute_updates(udf_record* urecord)
 	}
 
 	if (ns->clock_skew_stop_writes) {
-		as_error_details_set_fmt(AS_SUB_FORBID_CLOCK_SKEW_STOP_WRITES,
+		as_error_details_set_sub_fmt(AS_ERR_FORBIDDEN,
+				AS_SUB_FORBID_CLOCK_SKEW_STOP_WRITES,
 				"UDF execute blocked: clock skew stop-writes active");
 		execute_failed(urecord, AS_ERR_FORBIDDEN);
 		return -1;
@@ -361,7 +362,8 @@ execute_updates(udf_record* urecord)
 	if (as_set_size_stop_writes(p_set)) {
 		cf_ticker_warning(AS_UDF, "{%s|%s} at stop-writes-size - can't execute",
 				ns->name, p_set->name);
-		as_error_details_set_fmt(AS_SUB_FORBID_SET_SIZE_STOP_WRITES,
+		as_error_details_set_sub_fmt(AS_ERR_FORBIDDEN,
+				AS_SUB_FORBID_SET_SIZE_STOP_WRITES,
 				"UDF execute blocked: set '%s' at stop-writes-size", p_set->name);
 		execute_failed(urecord, AS_ERR_FORBIDDEN);
 		return -1;
@@ -469,7 +471,8 @@ execute_set_bin(udf_record* urecord, const char* name, const as_val* val)
 
 	if (rd->n_bins == UDF_BIN_LIMIT && eb == NULL) {
 		cf_warning(AS_UDF, "exceeded UDF max bins %d", UDF_BIN_LIMIT);
-		as_error_details_set_fmt(AS_SUB_BIN_NAME_COUNT_TOO_LARGE,
+		as_error_details_set_sub_fmt(AS_ERR_BIN_NAME,
+				AS_SUB_BIN_NAME_COUNT_TOO_LARGE,
 				"UDF exceeded max bins per record (%d)", UDF_BIN_LIMIT);
 		return AS_ERR_BIN_NAME;
 	}

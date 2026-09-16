@@ -1142,7 +1142,8 @@ hll_modify_prepare_init_op(hll_op* op, const as_particle* old_p)
 			cf_warning(AS_PARTICLE,
 					"hll_modify_prepare_init_op - error %u cannot create when n_index_bits is unset",
 					AS_ERR_OP_NOT_APPLICABLE);
-			as_error_details_set_fmt(AS_SUB_OPNOT_HLL_INDEX_BITS_UNSET,
+			as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+					AS_SUB_OPNOT_HLL_INDEX_BITS_UNSET,
 					"hll_init: cannot create when index_bits is unset");
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
@@ -1186,7 +1187,8 @@ hll_modify_prepare_add_op(hll_op* op, const as_particle* old_p)
 			cf_warning(AS_PARTICLE,
 					"hll_modify_prepare_add_op - error %u cannot create when n_index_bits is unset",
 					AS_ERR_OP_NOT_APPLICABLE);
-			as_error_details_set_fmt(AS_SUB_OPNOT_HLL_INDEX_BITS_UNSET,
+			as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+					AS_SUB_OPNOT_HLL_INDEX_BITS_UNSET,
 					"hll_add: cannot create when index_bits is unset");
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
@@ -1244,7 +1246,8 @@ hll_modify_prepare_union_op(hll_op* op, const as_particle* old_p)
 			cf_warning(AS_PARTICLE,
 					"hll_modify_prepare_union_op - error %u cannot reduce n_index_bits",
 					AS_ERR_OP_NOT_APPLICABLE);
-			as_error_details_set_fmt(AS_SUB_OPNOT_HLL_CANNOT_REDUCE_INDEX_BITS,
+			as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+					AS_SUB_OPNOT_HLL_CANNOT_REDUCE_INDEX_BITS,
 					"hll_set_union: cannot reduce index_bits from %u to %u without ALLOW_FOLD",
 					old_hll->n_index_bits, min_n_index_bits);
 			return -AS_ERR_OP_NOT_APPLICABLE;
@@ -1255,7 +1258,8 @@ hll_modify_prepare_union_op(hll_op* op, const as_particle* old_p)
 			cf_warning(AS_PARTICLE,
 					"hll_modify_prepare_union_op - error %u cannot reduce n_minhash_bits to zero",
 					AS_ERR_OP_NOT_APPLICABLE);
-			as_error_details_set_fmt(AS_SUB_OPNOT_HLL_CANNOT_REDUCE_MINHASH_BITS,
+			as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+					AS_SUB_OPNOT_HLL_CANNOT_REDUCE_MINHASH_BITS,
 					"hll_set_union: cannot reduce minhash_bits from %u to zero",
 					old_hll->n_minhash_bits);
 			return -AS_ERR_OP_NOT_APPLICABLE;
@@ -1284,7 +1288,8 @@ hll_modify_prepare_count_op(hll_op* op, const as_particle* old_p)
 		cf_warning(AS_PARTICLE,
 				"hll_modify_prepare_count_op - error %u cannot create bin with count op",
 				AS_ERR_BIN_NOT_FOUND);
-		as_error_details_set_fmt(AS_SUB_BIN_NOT_FOUND_HLL_CANNOT_CREATE_WITH_OP,
+		as_error_details_set_sub_fmt(AS_ERR_BIN_NOT_FOUND,
+				AS_SUB_BIN_NOT_FOUND_HLL_CANNOT_CREATE_WITH_OP,
 				"hll_refresh_count: cannot create bin with count op");
 		return -AS_ERR_BIN_NOT_FOUND;
 	}
@@ -1305,7 +1310,8 @@ hll_modify_prepare_fold_op(hll_op* op, const as_particle* old_p)
 		cf_warning(AS_PARTICLE,
 				"hll_modify_prepare_fold_op - error %u cannot create bin with fold op",
 				AS_ERR_BIN_NOT_FOUND);
-		as_error_details_set_fmt(AS_SUB_BIN_NOT_FOUND_HLL_CANNOT_CREATE_WITH_OP,
+		as_error_details_set_sub_fmt(AS_ERR_BIN_NOT_FOUND,
+				AS_SUB_BIN_NOT_FOUND_HLL_CANNOT_CREATE_WITH_OP,
 				"hll_fold: cannot create bin with fold op");
 		return -AS_ERR_BIN_NOT_FOUND;
 	}
@@ -1316,7 +1322,8 @@ hll_modify_prepare_fold_op(hll_op* op, const as_particle* old_p)
 		cf_warning(AS_PARTICLE,
 				"hll_modify_prepare_fold_op - error %u cannot fold an HLL containing minhash bits",
 				AS_ERR_OP_NOT_APPLICABLE);
-		as_error_details_set_fmt(AS_SUB_OPNOT_HLL_CANNOT_FOLD_MINHASH,
+		as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+				AS_SUB_OPNOT_HLL_CANNOT_FOLD_MINHASH,
 				"hll_fold: cannot fold HLL containing minhash bits");
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
@@ -1326,7 +1333,8 @@ hll_modify_prepare_fold_op(hll_op* op, const as_particle* old_p)
 				"hll_modify_prepare_fold_op - error %u existing HLL has less or equal n_index_bits (%u) than (%u)",
 				AS_ERR_OP_NOT_APPLICABLE, old_hll->n_index_bits,
 				op->n_index_bits);
-		as_error_details_set_fmt(AS_SUB_OPNOT_HLL_FOLD_INDEX_BITS_TOO_LARGE,
+		as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+				AS_SUB_OPNOT_HLL_FOLD_INDEX_BITS_TOO_LARGE,
 				"hll_fold: existing index_bits (%u) less than requested (%u)",
 				old_hll->n_index_bits, op->n_index_bits);
 		return -AS_ERR_OP_NOT_APPLICABLE;
@@ -1366,7 +1374,8 @@ hll_read_prepare_intersect(hll_op* op, const as_particle* old_p)
 		cf_warning(AS_PARTICLE,
 				"hll_read_prepare - error %u received %u HLLs - cannot intersect > 2 HLLs with the local HLL when n_minhash_bits do not match",
 				AS_ERR_OP_NOT_APPLICABLE, op->n_elements);
-		as_error_details_set_fmt(AS_SUB_OPNOT_HLL_INTERSECT_MINHASH_MISMATCH,
+		as_error_details_set_sub_fmt(AS_ERR_OP_NOT_APPLICABLE,
+				AS_SUB_OPNOT_HLL_INTERSECT_MINHASH_MISMATCH,
 				"hll_intersect: cannot intersect %u HLLs when minhash_bits do not match (existing %u, input %u)",
 				op->n_elements, old_hll->n_minhash_bits, n_minhash_bits);
 		return -AS_ERR_OP_NOT_APPLICABLE;
