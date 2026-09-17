@@ -305,6 +305,8 @@ typedef struct {
 	uint32_t ilevel;
 	msgpack_type toplvl_type;
 	bool has_toplvl;
+	bool allow_nonstorage; // in - for compare parameters
+	bool saw_nonstorage; // out
 } cdt_stack;
 
 // clang-format off
@@ -1776,16 +1778,32 @@ select_apply_undo_entry(select_apply* a)
 	a->tail->idx--;
 }
 
+// pre:  every surviving result entry has had its sz set, so sz == 0 identifies a
+//       hdr entry -- whose union holds no result to destroy.
+// post: each result entry's as_exp_result is destroyed and the overflow pages are
+//       freed. A result whose variant is AS_EXP_RESULT_BIN owns the particle the
+//       modify produced, so the pack pass reading it is not the end of its life.
 static void
-select_apply_free_mem(select_apply* a)
+select_apply_destroy(select_apply* a)
 {
-	apply_page* p = a->page0.next;
+	apply_page* p = &a->page0;
 
 	while (p != NULL) {
-		apply_page* pp = p;
+		for (uint32_t i = 0; i < p->idx; i++) {
+			apply_result_entry* e = &p->results[i];
 
-		p = p->next;
-		cf_free(pp);
+			if (e->sz != 0) {
+				as_exp_result_destroy(&e->res);
+			}
+		}
+
+		apply_page* next = p->next;
+
+		if (p != &a->page0) {
+			cf_free(p);
+		}
+
+		p = next;
 	}
 }
 
@@ -3032,6 +3050,11 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 {
 	uint32_t n_pairs = *n;
 	uint32_t i = 0;
+	// How many entries are initialized, which is not where i points. An AND
+	// attaches to the preceding entry, so it steps i back onto one already built,
+	// and the array arrives as uninitialized memory -- so i bounds neither what
+	// is safe to destroy nor what needs destroying.
+	uint32_t n_init = 0;
 	int ret = AS_OK;
 
 	for (uint32_t j = 0; j < n_pairs; j++, i++) {
@@ -3083,6 +3106,7 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 		}
 		else {
 			stack[i] = (select_stack_entry){ .ctx_type = (uint32_t)ctx_type };
+			n_init = i + 1;
 		}
 
 		uint32_t buf_sz;
@@ -3167,7 +3191,7 @@ select_stack_init(select_stack_entry* stack, uint32_t* n, msgpack_in_vec* mv)
 	}
 
 	if (ret != AS_OK) {
-		select_stack_destroy(stack, i);
+		select_stack_destroy(stack, n_init);
 	}
 
 	*n = i;
@@ -3385,7 +3409,7 @@ cdt_process_state_select(cdt_process_state* state, cdt_op_mem* com)
 		cdt_select_apply(&sel, exp, &com->ctx);
 
 		as_exp_destroy(exp);
-		select_apply_free_mem(&apply);
+		select_apply_destroy(&apply);
 	}
 	else {
 		// Allocate the resuilt size as the bin msgpack size.
@@ -6813,6 +6837,7 @@ cdt_untrusted_get_size(const uint8_t* buf, uint32_t buf_sz, msgpack_type* ptype,
 	uint8_t top_flags = 0;
 	uint32_t ret_sz = 0;
 	uint32_t top_ele_count = 0; // set to 0 to shut the compiler up
+	uint32_t top_content_raw_sz = 0;
 	msgpack_type dummy_type;
 
 	if (ptype == NULL) {
@@ -6911,22 +6936,27 @@ cdt_untrusted_get_size(const uint8_t* buf, uint32_t buf_sz, msgpack_type* ptype,
 				ret_sz += as_pack_ext_header_get_size(0);
 			}
 		}
+
+		// The persisted offset-index width is chosen from the top-level content
+		// size. cdt_stack_untrusted_rewrite sizes it from the raw
+		// (un-compacted) content (est_content_sz = end - next_b); size it here
+		// from the same raw span so the allocation can never be smaller than
+		// the layout.
+		if (i == 0) {
+			top_content_raw_sz = (uint32_t)(end - next_b);
+		}
 	}
 
 	if (flags_is_persist(top_flags)) {
-		uint32_t content_sz = ret_sz - as_pack_ext_header_get_size(0);
 		uint32_t ext_content_sz;
 
 		if (*ptype == MSGPACK_TYPE_MAP) {
-			content_sz -= as_pack_map_header_get_size(top_ele_count);
-			content_sz -= as_pack_nil_size();
 			ext_content_sz = map_calc_ext_content_sz(top_flags,
-					top_ele_count - 1, content_sz);
+					top_ele_count - 1, top_content_raw_sz);
 		}
 		else { // LIST
-			content_sz -= as_pack_list_header_get_size(top_ele_count);
 			ext_content_sz = list_calc_ext_content_sz(top_flags,
-					top_ele_count - 1, content_sz);
+					top_ele_count - 1, top_content_raw_sz);
 		}
 
 		ret_sz -= as_pack_ext_header_get_size(0);
@@ -7005,12 +7035,14 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 			ele_count /= 2;
 		}
 
-		if (has_nonstorage || next_b == NULL) {
+		if ((has_nonstorage && ! cs->allow_nonstorage) || next_b == NULL) {
 			cf_detail(AS_PARTICLE,
 					"untrusted_rewrite() has_nonstorage %d b %p sz %u i %u",
 					has_nonstorage, b, (uint32_t)(end - b), i);
 			return 0;
 		}
+
+		cs->saw_nonstorage = cs->saw_nonstorage || has_nonstorage;
 
 		cdt_stack_entry* pe = cdt_stack_get_entry(cs);
 		bool do_incr_ix = (i != 0);
@@ -7083,9 +7115,31 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 					msgpack_type next_type;
 					uint32_t temp_count = 0;
 
+					// Its own flag - the shared one latches, and an earlier
+					// element's marker would read as this meta value's.
+					bool meta_nonstorage = false;
+
 					count--;
 					next_b = msgpack_parse(next_b, end, &temp_count, &next_type,
-							&has_nonstorage, &not_compact);
+							&meta_nonstorage, &not_compact);
+
+					if (next_b == NULL) {
+						return 0;
+					}
+
+					if (meta_nonstorage) {
+						// A marker can never ride in a meta value. Storage
+						// leans on the latched flag at the next element
+						// check, which a meta-pair-only map never reaches.
+						if (cs->allow_nonstorage) {
+							cf_detail(AS_PARTICLE,
+									"untrusted_rewrite() meta has_nonstorage");
+							return 0;
+						}
+
+						has_nonstorage = true;
+					}
+
 					tail_sz = (uint32_t)(end - next_b);
 					ext.type &= AS_PACKED_MAP_FLAG_KV_ORDERED |
 							AS_PACKED_PERSIST_INDEX;
@@ -7390,9 +7444,9 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest, const uint8_t* src,
 	return wptr - dest;
 }
 
-uint32_t
-cdt_untrusted_rewrite(uint8_t* dest, const uint8_t* src, uint32_t src_sz,
-		bool has_toplvl)
+static uint32_t
+untrusted_rewrite(uint8_t* dest, const uint8_t* src, uint32_t src_sz,
+		bool has_toplvl, bool allow_nonstorage, bool* marker_r)
 {
 	cdt_stack cs;
 
@@ -7402,6 +7456,8 @@ cdt_untrusted_rewrite(uint8_t* dest, const uint8_t* src, uint32_t src_sz,
 	cs.entries->n_msgpack = 1;
 	cs.entries->ix = 0;
 	cs.has_toplvl = has_toplvl;
+	cs.allow_nonstorage = allow_nonstorage;
+	cs.saw_nonstorage = false;
 
 	uint32_t ret = cdt_stack_untrusted_rewrite(&cs, dest, src, src_sz);
 
@@ -7409,7 +7465,25 @@ cdt_untrusted_rewrite(uint8_t* dest, const uint8_t* src, uint32_t src_sz,
 		cf_free(cs.entries);
 	}
 
+	if (marker_r != NULL) {
+		*marker_r = cs.saw_nonstorage;
+	}
+
 	return ret;
+}
+
+uint32_t
+cdt_untrusted_rewrite(uint8_t* dest, const uint8_t* src, uint32_t src_sz,
+		bool has_toplvl)
+{
+	return untrusted_rewrite(dest, src, src_sz, has_toplvl, false, NULL);
+}
+
+uint32_t
+cdt_untrusted_rewrite_literal(uint8_t* dest, const uint8_t* src,
+		uint32_t src_sz, bool* has_marker_r)
+{
+	return untrusted_rewrite(dest, src, src_sz, false, true, has_marker_r);
 }
 
 //==========================================================

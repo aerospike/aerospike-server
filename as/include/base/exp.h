@@ -141,6 +141,11 @@ as_exp_result_is_remove(const as_exp_result* res)
 	return res->type == AS_EXP_RESULT_REMOVE;
 }
 
+// post: true and res holds the value, which the caller must hand to
+//       as_exp_result_destroy once done -- an AS_EXP_RESULT_BIN variant owns its
+//       particle. Destroy only after true: a false return may leave res untouched,
+//       so a caller that has not zeroed it would read a stale variant, and false
+//       never leaves res owning anything.
 bool as_exp_eval_to_result(const as_exp* exp, const as_exp_ctx* ctx,
 		as_exp_result* res);
 void as_exp_result_destroy(as_exp_result* res);

@@ -71,7 +71,17 @@ jobs:
           submodules: true
           path: aerospike-server
           fetch-depth: 0
+          fetch-tags: true
           token: ${{ steps.app-token.outputs.token }}
+
+      - name: Verify version scripts (build/version, build/gen_version)
+        working-directory: aerospike-server
+        run: |
+          set -euo pipefail
+          # Enforces the bare-vs-full version invariant in CI: the compiled aerospike_build_id
+          # stays bare w.x.y.z (gen_version -v), while build-sign-deploy.yaml's jf-build-id uses
+          # the full w.x.y.z-n. Needs tags — the checkout above sets fetch-depth: 0 + fetch-tags.
+          bash build/version_test.sh
 
       - name: Install required packages
         run: |

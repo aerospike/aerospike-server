@@ -1765,6 +1765,9 @@
         "^[a-zA-Z0-9_\\-$]+$": {
           "type": "object",
           "additionalProperties": false,
+          "required": [
+            "storage-engine"
+          ],
           "properties": {
             "active-rack": {
               "type": "integer",
@@ -2961,6 +2964,11 @@
                       ]
                     }
                   ],
+                  "dependencies": {
+                    "files": [
+                      "filesize"
+                    ]
+                  },
                   "properties": {
                     "type": {
                       "type": "string",
@@ -3283,6 +3291,11 @@
                       ]
                     }
                   ],
+                  "dependencies": {
+                    "files": [
+                      "filesize"
+                    ]
+                  },
                   "properties": {
                     "type": {
                       "type": "string",
@@ -3634,6 +3647,11 @@
                     "type",
                     "files"
                   ],
+                  "dependencies": {
+                    "files": [
+                      "filesize"
+                    ]
+                  },
                   "properties": {
                     "type": {
                       "type": "string",

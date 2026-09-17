@@ -9,9 +9,9 @@ BUILD_ROOT = $(SOURCE_ROOT)/BUILD
 OPT_AS = $(BUILD_ROOT)/opt/aerospike
 
 EXT ?=
-REV := $(shell $(DEPTH)/build/version)
+REV := $(shell $(DEPTH)/build/version -v)
 OS := $(shell $(DEPTH)/build/os_version)
-BUILD_NUMBER := $(shell $(DEPTH)/build/build_number)
+BUILD_NUMBER := $(shell $(DEPTH)/build/version -r)
 SIZE := $(shell du -k $(BIN_DIR)/asd | cut -f1)
 DEPS =
 

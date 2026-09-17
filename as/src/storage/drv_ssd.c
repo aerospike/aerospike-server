@@ -2846,6 +2846,12 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 		ssd->record_add_unique_counter++;
 	}
 	else {
+		// Before the update, so its set stats and set index use the new set-id.
+		if (opt_meta.set_name != NULL) {
+			drv_cold_start_adopt_set(AS_DRV_SSD, ns, flat, &opt_meta,
+					p_partition->tree, &r_ref);
+		}
+
 		ssd_cold_start_record_update(ssds, flat, &opt_meta, p_partition->tree,
 				&r_ref);
 
