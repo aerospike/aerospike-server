@@ -339,6 +339,7 @@ typedef struct op_value_bytes_s {
 	op_base_mem base;
 	const uint8_t* value;
 	uint32_t value_sz;
+	bool has_nonstorage; // CDT literals only
 } op_value_blob;
 
 typedef struct op_value_int_s {
@@ -368,6 +369,7 @@ typedef struct rt_value_s {
 		struct r_bytes_s {
 			uint32_t sz;
 			const uint8_t* contents;
+			bool has_nonstorage;
 		} r_bytes;
 
 		struct r_geo_const_s {
@@ -436,8 +438,21 @@ typedef struct build_args_s {
 	uint32_t max_var_idx;
 	var_scope* current;
 
+	// Count of CDT literals the sizing pass found out of canonical form - the
+	// build pass consumes one per literal it retains.
+	uint32_t literal_cleanup;
+	// Gate, not a reservation - a marker literal that is already canonical
+	// retains nothing, so it must not be counted above.
+	bool has_marker_literal;
+
 	cf_vector* bins_info_r; // only valid for secondary index expressions
 } build_args;
+
+typedef enum {
+	CDT_LITERAL_OK,
+	CDT_LITERAL_NEEDS_REWRITE,
+	CDT_LITERAL_INVALID
+} cdt_literal_status;
 
 typedef bool (*op_table_build_cb)(build_args* args);
 typedef void (*op_table_eval_cb)(runtime* rt, const op_base_mem* ob,
@@ -490,10 +505,13 @@ static as_exp* build_internal(const uint8_t* buf, uint32_t buf_sz,
 static bool build_next(build_args* args);
 static const op_table_entry* build_get_entry(result_type type);
 static bool build_count_sz(msgpack_in* mp, uint32_t* total_sz,
-		uint32_t* cleanup_count, uint32_t* counter_r);
+		uint32_t* cleanup_count, uint32_t* literal_cleanup, bool* marker_lit_r,
+		uint32_t* counter_r);
 static var_entry* build_find_var_entry(build_args* args, const uint8_t* name,
 		uint32_t name_sz);
-static bool build_check_cdt(const uint8_t* buf, uint32_t buf_sz);
+static cdt_literal_status build_check_cdt_literal(const uint8_t* buf,
+		uint32_t buf_sz, bool* marker_r);
+static bool build_canonicalize_cdt(build_args* args, op_value_blob* op);
 static bool build_default(build_args* args);
 static bool build_meta_default(build_args* args);
 static bool build_compare(build_args* args);
@@ -1351,6 +1369,13 @@ as_exp_destroy(as_exp* exp)
 		case EXP_CMP_REGEX:
 			regfree(&((op_cmp_regex*)ob)->regex);
 			break;
+		case VOP_VALUE_LIST:
+		case VOP_VALUE_MSGPACK:
+			// A canonicalized CDT literal retained by
+			// build_canonicalize_cdt() - literals that arrived canonical
+			// alias the wire and are never on this stack.
+			cf_free((void*)((op_value_blob*)ob)->value);
+			break;
 		default:
 			break;
 		}
@@ -1378,9 +1403,12 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 
 	uint32_t total_sz = 0;
 	uint32_t cleanup_count = 0;
+	uint32_t literal_cleanup = 0;
+	bool marker_lit = false;
 	uint32_t counter = 1;
 
-	if (! build_count_sz(&mp, &total_sz, &cleanup_count, &counter)) {
+	if (! build_count_sz(&mp, &total_sz, &cleanup_count, &literal_cleanup,
+				&marker_lit, &counter)) {
 		return NULL;
 	}
 
@@ -1403,6 +1431,10 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 		return NULL;
 	}
 
+	// CDT literals found out of canonical form are rewritten into retained
+	// allocations at build - reserve a cleanup slot for each.
+	cleanup_count += literal_cleanup;
+
 	uint32_t cleanup_offset = total_sz;
 
 	total_sz += cleanup_count * (uint32_t)sizeof(void*);
@@ -1412,6 +1444,8 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 	}
 
 	build_args args = { .exp = cf_calloc(1, sizeof(as_exp) + total_sz),
+		.literal_cleanup = literal_cleanup,
+		.has_marker_literal = marker_lit,
 		.bins_info_r = bins_info_r };
 
 	args.mem = args.exp->mem;
@@ -1441,6 +1475,11 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 	cf_assert(args.exp->cleanup_stack_ix <= cleanup_count, AS_EXP,
 			"cleanup_stack_ix (%u) not equal to cleanup_count (%u)",
 			args.exp->cleanup_stack_ix, cleanup_count);
+	// Every literal the sizing pass counted as needing canonicalization must
+	// have been consumed by build_canonicalize_cdt() - a remainder means the
+	// passes disagreed and an unsorted literal may have aliased through.
+	cf_assert(args.literal_cleanup == 0, AS_EXP,
+			"literal_cleanup (%u) not consumed", args.literal_cleanup);
 
 	args.exp->max_var_count = args.max_var_idx;
 
@@ -1539,7 +1578,7 @@ build_get_entry(result_type type)
 
 static bool
 build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
-		uint32_t* counter_r)
+		uint32_t* literal_cleanup, bool* marker_lit_r, uint32_t* counter_r)
 {
 	while (mp->offset < mp->buf_sz) {
 		msgpack_type type = msgpack_peek_type(mp);
@@ -1600,11 +1639,34 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 					return false;
 				}
 			}
-			else if (msgpack_sz(mp) == 0) {
-				cf_warning(AS_EXP,
-						"build_count_sz - invalid instruction at offset %u",
-						mp->offset);
-				return false;
+			else {
+				const uint8_t* ele_start = mp->buf + mp->offset;
+				uint32_t ele_sz = msgpack_sz(mp);
+
+				if (ele_sz == 0) {
+					cf_warning(AS_EXP,
+							"build_count_sz - invalid instruction at offset %u",
+							mp->offset);
+					return false;
+				}
+
+				// Map literals: validate now, and count any needing
+				// canonicalization so a cleanup slot gets reserved.
+				if (type == MSGPACK_TYPE_MAP) {
+					bool marker = false;
+
+					switch (build_check_cdt_literal(ele_start, ele_sz, &marker)) {
+					case CDT_LITERAL_INVALID:
+						return false;
+					case CDT_LITERAL_NEEDS_REWRITE:
+						(*literal_cleanup)++;
+						break;
+					default:
+						break;
+					}
+
+					*marker_lit_r = *marker_lit_r || marker;
+				}
 			}
 		}
 		else {
@@ -1639,7 +1701,36 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 			return false;
 		}
 
-		if (entry->static_param_count != 0 &&
+		if (op_code == EXP_QUOTE) {
+			// Quoted list literal: validate now, and count it if it needs
+			// canonicalization so a cleanup slot gets reserved. Consumes the
+			// one static param (the quoted list), matching the generic path
+			// below.
+			const uint8_t* q_start = mp->buf + mp->offset;
+			uint32_t q_sz = msgpack_sz(mp);
+
+			if (q_sz == 0) {
+				cf_warning(AS_EXP,
+						"build_count_sz - invalid instruction at offset %u",
+						mp->offset);
+				return false;
+			}
+
+			bool marker = false;
+
+			switch (build_check_cdt_literal(q_start, q_sz, &marker)) {
+			case CDT_LITERAL_INVALID:
+				return false;
+			case CDT_LITERAL_NEEDS_REWRITE:
+				(*literal_cleanup)++;
+				break;
+			default:
+				break;
+			}
+
+			*marker_lit_r = *marker_lit_r || marker;
+		}
+		else if (entry->static_param_count != 0 &&
 				msgpack_sz_rep(mp, entry->static_param_count) == 0) {
 			cf_warning(AS_EXP,
 					"build_count_sz - invalid instruction at offset %u",
@@ -1747,7 +1838,8 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 					return false;
 				}
 
-				if (! build_count_sz(&mp_var, total_sz, cleanup_count, counter_r)) {
+				if (! build_count_sz(&mp_var, total_sz, cleanup_count,
+							literal_cleanup, marker_lit_r, counter_r)) {
 					cf_warning(AS_EXP,
 							"build_count_sz - invalid 'let' value at offset %u",
 							mp->offset);
@@ -1787,30 +1879,78 @@ build_find_var_entry(build_args* args, const uint8_t* name, uint32_t name_sz)
 	return NULL;
 }
 
-static bool
-build_check_cdt(const uint8_t* buf, uint32_t buf_sz)
+// Sizing-pass validation of a CDT literal (quoted list or bare map). Invalid
+// is whatever the walk refuses - corrupt msgpack, or a marker in a position
+// that can never hold one. Unsorted keys and wide headers are legal client
+// input, and a literal can be a compare parameter, so markers pass anywhere
+// else - keeping those out of a particle is the storage-bound consumer's job.
+//
+// post: *marker_r on OK and NEEDS_REWRITE alike - a literal can be both.
+static cdt_literal_status
+build_check_cdt_literal(const uint8_t* buf, uint32_t buf_sz, bool* marker_r)
 {
-	// has_toplvl false strips any top-level persist-index flag, so the rewrite
-	// only reorders/compactifies and can never exceed buf_sz.
-	// Need more options for cdt_untrusted_rewrite() if we want to support
-	// PERSIST_INDEX in exp literals in the future.
+	// The literal entry point fixes has_toplvl false, which strips a top-level
+	// persist-index flag - so the rewrite only reorders and compacts, and can
+	// never exceed buf_sz. Supporting PERSIST_INDEX in exp literals would mean
+	// taking that as a parameter.
 	uint8_t* temp = cf_malloc(buf_sz);
-	uint32_t new_sz = cdt_untrusted_rewrite(temp, buf, buf_sz, false);
+	uint32_t new_sz = cdt_untrusted_rewrite_literal(temp, buf, buf_sz, marker_r);
 	DEFER_FREE(temp);
 
-	if (new_sz != buf_sz) {
-		cf_warning(AS_EXP,
-			"build_check_cdt - error %u cdt not compactified",
-			AS_ERR_PARAMETER);
-		return false;
+	cf_assert(new_sz <= buf_sz, AS_EXP, "literal rewrite grew %u -> %u", buf_sz,
+			new_sz);
+
+	if (new_sz == 0) {
+		cf_warning(AS_EXP, "build_check_cdt_literal - error %u invalid cdt",
+				AS_ERR_PARAMETER);
+		return CDT_LITERAL_INVALID;
 	}
 
-	if (memcmp(buf, temp, buf_sz) != 0) {
-		cf_warning(AS_EXP,
-			"build_check_cdt - error %u cdt not ordered as expected",
-			AS_ERR_PARAMETER);
-		return false;
+	if (new_sz != buf_sz) {
+		return CDT_LITERAL_NEEDS_REWRITE;
 	}
+
+	return memcmp(buf, temp, buf_sz) == 0 ? CDT_LITERAL_OK
+										  : CDT_LITERAL_NEEDS_REWRITE;
+}
+
+// Build-pass companion to the sizing check. Neither counter says anything
+// about THIS op - together they mean only that some literal here needs the
+// walk, so an expression with neither skips it.
+// The two passes must agree, which relies on the source bytes being immutable
+// between them - guaranteed because nothing writes parse-source bytes after
+// demarshal. Do not "optimize" this into an in-place rewrite: batch repeat
+// sub-transactions share one msgp, so writing the source races sibling
+// sub-transactions' reads.
+static bool
+build_canonicalize_cdt(build_args* args, op_value_blob* op)
+{
+	if (args->literal_cleanup == 0 && ! args->has_marker_literal) {
+		return true;
+	}
+
+	uint8_t* mem = cf_malloc(op->value_sz);
+
+	// A marker survives the rewrite, so this is set either way.
+	uint32_t new_sz = cdt_untrusted_rewrite_literal(mem, op->value,
+			op->value_sz, &op->has_nonstorage);
+
+	cf_assert(new_sz != 0, AS_EXP, "cdt literal rewrite disagrees with sizing");
+	cf_assert(new_sz <= op->value_sz, AS_EXP, "literal rewrite grew %u -> %u",
+			op->value_sz, new_sz);
+
+	if (new_sz == op->value_sz && memcmp(mem, op->value, new_sz) == 0) {
+		cf_free(mem); // already canonical - keep aliasing the source
+		return true;
+	}
+
+	// Retain the canonicalized copy - the op owns it and as_exp_destroy()
+	// frees it via the cleanup stack. The rewrite only strips and compacts, so
+	// value_sz can only shrink.
+	op->value = mem;
+	op->value_sz = new_sz;
+	args->exp->cleanup_stack[args->exp->cleanup_stack_ix++] = op;
+	args->literal_cleanup--;
 
 	return true;
 }
@@ -2951,11 +3091,11 @@ build_quote(build_args* args)
 		return false;
 	}
 
-	if (! build_check_cdt(op->value, op->value_sz)) {
+	op->base.code = VOP_VALUE_LIST;
+
+	if (! build_canonicalize_cdt(args, op)) {
 		return false;
 	}
-
-	op->base.code = VOP_VALUE_LIST;
 
 	return true;
 }
@@ -3201,7 +3341,7 @@ build_value_msgpack(build_args* args)
 	}
 
 	if (type == MSGPACK_TYPE_MAP) {
-		if (! build_check_cdt(op->value, op->value_sz)) {
+		if (! build_canonicalize_cdt(args, op)) {
 			return false;
 		}
 
@@ -4703,6 +4843,14 @@ eval_map_keys_or_values(runtime* rt, const op_base_mem* ob, rt_value* ret_val,
 		return;
 	}
 
+	// Past this the value is an as_bin and the flag is gone. Keys are exempt -
+	// a marker is never a legal key type.
+	if (is_values && rt_map.r_bytes.has_nonstorage) {
+		cf_detail(AS_EXP, "map_values - map holds a wildcard or infinity");
+		*ret_val = rt_unk;
+		return;
+	}
+
 	as_bin rb;
 	define_rollback_alloc(alloc, NULL, 1);
 
@@ -4999,9 +5147,22 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	}
 
 	if (! bin_is_type(b, op->type)) {
-		if (! is_modify_local || bin_arg.type == RT_BIN ||
-				old.particle != b->particle) {
-			if (rt_value_need_destroy(&bin_arg, &old, b)) {
+		if (is_modify_local) {
+			bool live_noop = bin_arg.type == RT_BIN_PTR &&
+					bin_arg.r_bin_p->particle == b->particle;
+			bool borrowed_unchanged = bin_arg.type == RT_BIN &&
+					bin_arg.do_not_destroy && old.particle == b->particle;
+
+			if (! live_noop && ! borrowed_unchanged) {
+				as_bin_particle_destroy(b);
+			}
+		}
+		else {
+			const as_particle* bin_arg_p = bin_arg.type == RT_BIN_PTR
+					? bin_arg.r_bin_p->particle
+					: bin_arg.r_bin.particle;
+
+			if (b->particle != bin_arg_p) { // not a no-op
 				as_bin_particle_destroy(b);
 			}
 		}
@@ -5021,7 +5182,13 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 		ret_val->type = RT_BIN;
 		ret_val->r_bin = *b;
-		ret_val->do_not_destroy = rt_value_keep_do_not_destroy(&bin_arg, b);
+		// Keep the borrowed (slot-owned) status only if the modify left the
+		// particle unchanged; a reallocated result is owned by this value.
+		// Only RT_BIN has a snapshot to compare against -- a bin reached by
+		// pointer aliases old, so the test would always hold there and a
+		// reallocated result would be kept borrowed and never freed.
+		ret_val->do_not_destroy = bin_arg.type == RT_BIN &&
+				bin_arg.do_not_destroy && old.particle == b->particle;
 		return;
 	}
 
@@ -5116,6 +5283,7 @@ eval_value(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		ret_val->type = RT_MSGPACK;
 		ret_val->r_bytes.contents = ((op_value_blob*)ob)->value;
 		ret_val->r_bytes.sz = ((op_value_blob*)ob)->value_sz;
+		ret_val->r_bytes.has_nonstorage = ((op_value_blob*)ob)->has_nonstorage;
 		break;
 	default:
 		cf_crash(AS_EXP, "unexpected code %u", ob->code);
@@ -5903,6 +6071,12 @@ msgpack_to_bin(runtime* rt, as_bin* to, rt_value* from, cf_ll_buf* ll_buf)
 		p_type = AS_PARTICLE_TYPE_BLOB;
 		break;
 	default:
+		return false;
+	}
+
+	msgpack_in mp = { .buf = from->r_bytes.contents, .buf_sz = from->r_bytes.sz };
+
+	if (msgpack_sz(&mp) == 0 || mp.has_nonstorage) {
 		return false;
 	}
 

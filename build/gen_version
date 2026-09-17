@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
 #
-# Emits generated C build-id header. Version rules must stay aligned with build/version.
-# Semver / *-start migration: build/README-VERSIONING.md
-#
-# Resolution (non-/work path): same as build/version — first-parent + --long on master/hotfix;
-# other branches use --match '[0-9]*.[0-9]*.[0-9]*.[0-9]*' then generic describe; see build/version.
+# Emits generated C build-id header. The version string comes from build/version
+# (the single source of truth); see build/README-VERSIONING.md for resolution rules.
 
 EDITION=${1:-community}
 BUILD_OS=${2:-unknown}
@@ -16,44 +13,24 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 FEATURES=""
 
-# Use VERSION file from build system if present
+# build/version is the single source of truth for the version string — it handles the
+# /work/VERSION and git-describe paths, the bare-tag --match, and the master/hotfix
+# --long-suffix strip. -v (version_only) yields the bare w.x.y.z marketing version on
+# release lines: that is what the running server reports as aerospike_build_id through
+# the dev cycle. The JFrog build-id published by build-sign-deploy.yaml's setup job
+# intentionally uses the full w.x.y.z-n (default mode) so every commit gets a unique
+# coordinate that JFrog will not overwrite.
+VERSION="$(bash "$SCRIPT_DIR/version" -v)"
+
+# CE source SHA: from the /work event payload on /work builds, else HEAD.
 if [[ -f /work/VERSION ]]; then
-    VERSION="$(cat /work/VERSION)"
-    # Extract SHA and ref from EVENT file if available
+    CE_SHA="unknown"
     if [[ -f /work/EVENT ]]; then
         CE_SHA="$(grep -o '"after":"[^"]*"' /work/EVENT 2>/dev/null | head -1 | cut -d'"' -f4)"
         [[ -z "$CE_SHA" ]] && CE_SHA="$(grep -o '"sha":"[^"]*"' /work/EVENT 2>/dev/null | head -1 | cut -d'"' -f4)"
-        REF="$(grep -o '"ref":"[^"]*"' /work/EVENT 2>/dev/null | head -1 | cut -d'"' -f4)"
-        # For master or hotfix branches, trim version to x.y.z.w
-        if [[ "$REF" == "refs/heads/master" || "$REF" =~ refs/heads/hotfix/ ]]; then
-            VERSION="$(echo "$VERSION" | sed 's/-[0-9]*-g[0-9a-f]*$//')"
-        fi
     fi
     [[ -z "$CE_SHA" ]] && CE_SHA="unknown"
 else
-    # Get current branch
-    BRANCH="$(git branch --show-current)"
-
-    # If detached HEAD, try to find branch from remote
-    if [[ -z "$BRANCH" ]]; then
-        BRANCH="$(git branch -r --contains HEAD | grep -v HEAD | head -1 |
-            sed -e 's/origin\///' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-    fi
-
-    # For master or hotfix/* branches, use only x.y.z.w part
-    if [[ "$BRANCH" == "master" || "$BRANCH" =~ ^hotfix/ ]]; then
-        VERSION="$(git describe --first-parent --tags --always --long | sed 's/-[0-9]*-g[0-9a-f]*$//')"
-    else
-        # Other branches: nearest semver-like tag (glob); --long so exact tags still include -count-gSHA.
-        VERSION="$(git describe --first-parent --tags --always --abbrev=9 --long --match '[0-9]*.[0-9]*.[0-9]*.[0-9]*' 2>/dev/null)"
-        if [[ "$VERSION" != *-*-* ]]; then
-            VERSION="$(git describe --first-parent --tags --always --long --abbrev=9 2>/dev/null)"
-        fi
-        if [[ -z "$VERSION" ]]; then
-            VERSION="$(git rev-parse --short=9 HEAD)"
-        fi
-    fi
-
     CE_SHA="$(git rev-parse HEAD)"
 fi
 

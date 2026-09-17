@@ -198,6 +198,13 @@ geojson_size_from_wire(const uint8_t* wire_value, uint32_t value_size)
 	//
 	// For now also ignore any incoming cells entirely.
 
+	if (value_size < sizeof(uint8_t) + sizeof(uint16_t)) {
+		cf_warning(AS_PARTICLE,
+				"geojson_size_from_wire() invalid geojson wire_sz %u < 3",
+				value_size);
+		return -AS_ERR_GEO_INVALID_GEOJSON;
+	}
+
 	const uint16_t* p_cells = (const uint16_t*)(wire_value + 1);
 	uint16_t ncells = cf_swap_from_be16(*p_cells);
 	size_t cellsz = ncells * sizeof(uint64_t);
@@ -218,9 +225,23 @@ int
 geojson_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 		uint32_t value_size, as_particle** pp)
 {
+	if (value_size < sizeof(uint8_t) + sizeof(uint16_t)) {
+		cf_warning(AS_PARTICLE,
+				"geojson_from_wire() invalid geojson wire_sz %u < 3", value_size);
+		return -AS_ERR_GEO_INVALID_GEOJSON;
+	}
+
 	const uint16_t* p_cells = (const uint16_t*)(wire_value + 1);
 	uint16_t ncells = cf_swap_from_be16(*p_cells);
 	size_t cellsz = ncells * sizeof(uint64_t);
+
+	if ((size_t)value_size < sizeof(uint8_t) + sizeof(uint16_t) + cellsz) {
+		cf_warning(AS_PARTICLE,
+				"geojson_from_wire() invalid geojson wire_sz %u < cellsz %zu + 3",
+				value_size, cellsz);
+		return -AS_ERR_GEO_INVALID_GEOJSON;
+	}
+
 	char const* json = (char const*)p_cells + sizeof(uint16_t) + cellsz;
 	size_t jlen = value_size - sizeof(uint8_t) - sizeof(uint16_t) - cellsz;
 	geojson_mem* p_geojson_mem = (geojson_mem*)*pp;

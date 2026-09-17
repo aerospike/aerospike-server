@@ -709,8 +709,9 @@ blob_size_from_msgpack(const uint8_t* packed, uint32_t packed_size)
 {
 	(void)packed;
 	// Ok to oversize by a few bytes - only used for allocation sizing.
-	// -1 for blob internal type and -1 for blob header.
-	return (uint32_t)sizeof(blob_mem) + packed_size - 2;
+	// -1 for blob internal type and -1 for blob header. Guard against a
+	// too-small element so packed_size - 2 cannot underflow.
+	return (uint32_t)sizeof(blob_mem) + (packed_size < 2 ? 0 : packed_size - 2);
 }
 
 void
@@ -723,10 +724,18 @@ blob_from_msgpack(const uint8_t* packed, uint32_t packed_size, as_particle** pp)
 
 	cf_assert(blob != NULL, AS_PARTICLE, "invalid msgpack");
 
+	blob_mem* p_blob_mem = (blob_mem*)*pp;
+
+	// An empty msgpack bytes element carries no Aerospike type-prefix byte -
+	// treat it as an empty blob instead of underflowing blob_sz.
+	if (blob_sz == 0) {
+		p_blob_mem->type = AS_PARTICLE_TYPE_BLOB;
+		p_blob_mem->sz = 0;
+		return;
+	}
+
 	as_bytes_type type = *blob++;
 	blob_sz--;
-
-	blob_mem* p_blob_mem = (blob_mem*)*pp;
 
 	p_blob_mem->type = (uint8_t)blob_bytes_type_to_particle_type(type);
 	p_blob_mem->sz = blob_sz;

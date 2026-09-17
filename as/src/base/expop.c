@@ -196,7 +196,7 @@ as_exp_modify_tr(const as_exp_ctx* ctx, as_bin* b, const as_msg_op* msg_op,
 		b->particle = old_particle;
 		as_bin_state_set_from_type(b, old_type);
 
-		if (flags && AS_EXP_FLAG_POLICY_NO_FAIL != 0) {
+		if ((flags & AS_EXP_FLAG_POLICY_NO_FAIL) != 0) {
 			return AS_OK;
 		}
 

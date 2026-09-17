@@ -14,7 +14,7 @@ name: Tag release
 #   overlap; this workflow is manual-only. If `git push` fails with "already exists", treat like
 #   partial failure above and reconcile before retry.
 # - Tag naming: **release** tags are `vX.Y.Z.W`; the **next-release** marker on the empty commit is
-#   bare `X.Y.Z.(W+1)` (no leading v). `build/build_number` counts first-parent commits after that
+#   bare `X.Y.Z.(W+1)` (no leading v). `build/version -r` counts first-parent commits after that
 #   bare tag only (see build/README-VERSIONING.md).
 # - Each push sends only HEAD + the tag ref(s) created in that step (not a blanket `git push --tags`).
 
@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag: vX.Y.Z.W (trimmed; bare X.Y.Z.W is accepted and stored as v-prefixed). Empty = first line of `bash build/version` (bare), then prefixed with v.'
+        description: 'Release tag: vX.Y.Z.W (trimmed; bare X.Y.Z.W is accepted and stored as v-prefixed). Empty = first line of `bash build/version -v` (bare), then prefixed with v.'
         required: false
         type: string
         default: ''
@@ -70,7 +70,7 @@ jobs:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.ref }}
           fetch-depth: 0
@@ -131,18 +131,18 @@ jobs:
           # Derive / validate RELEASE_TAG unless we are pretag-only (no release tag needed).
           if [[ "$MODE" != "pretag-only" ]]; then
             if is_empty "$RELEASE_TAG"; then
-              # Same as build-sign-deploy / sign-build-deploy: release=$(bash build/version)
-              ver="$(bash build/version)"
+              # Same as build-sign-deploy / sign-build-deploy: release=$(bash build/version -v)
+              ver="$(bash build/version -v)"
               ver="${ver//$'\r'/}"
               ver="${ver%%$'\n'*}"
               ver="$(trim "$ver")"
               if ! [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                echo "build/version first line is not x.y.z.w (got: '${ver}'). Set release_tag input to override." >&2
+                echo "build/version -v first line is not x.y.z.w (got: '${ver}'). Set release_tag input to override." >&2
                 exit 1
               fi
-              rel_bare="$(bare_semver "$ver" "build/version")" || exit 1
+              rel_bare="$(bare_semver "$ver" "build/version -v")" || exit 1
               RELEASE_TAG="v${rel_bare}"
-              echo "Derived RELEASE_TAG from build/version (${ver}): ${RELEASE_TAG}"
+              echo "Derived RELEASE_TAG from build/version -v (${ver}): ${RELEASE_TAG}"
             else
               rel_bare="$(bare_semver "$RELEASE_TAG" "release_tag")" || exit 1
               RELEASE_TAG="v${rel_bare}"
@@ -225,7 +225,7 @@ jobs:
           owner: ${{ github.repository_owner }}
 
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.ref }}
           fetch-depth: 0

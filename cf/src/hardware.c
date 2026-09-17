@@ -120,8 +120,11 @@ typedef enum {
 } check_proc_res;
 
 typedef uint16_t os_numa_node_index;
-typedef uint16_t os_package_index;
-typedef uint16_t os_core_index;
+
+typedef struct core_key_s {
+	int64_t package_id;
+	int64_t core_id;
+} core_key_t;
 
 typedef uint16_t irq_number;
 
@@ -410,23 +413,45 @@ mask_to_string(cpu_set_t* mask, char* buff, size_t limit)
 	}
 }
 
-static cf_os_file_res
-read_index(const char* path, uint16_t* val)
+// Package and core ids are opaque platform labels - e.g. firmware ACPI
+// processor UIDs on bare-metal arm64 servers - so any int64_t value is
+// legitimate, including -1 and values far beyond CPU_SETSIZE. Never use
+// them as array indexes - only compare them for equality.
+//
+// Identical pairs coalesce, and detect() covers a core before its NUMA-node
+// filter, so the count is advisory - see cf_topo_count_cores() in hardware.h
+// for the range this makes reachable. Thread counts and pinning use
+// cf_topo_count_cpus() and the per-CPU maps, see the 'service-threads' default
+// in as_config_post_process() and create_service_thread().
+//
+// TODO - remove core tracking (SERVER-1295).
+
+static bool
+cover_core(core_key_t* covered, uint16_t* n_covered, int64_t package_id,
+		int64_t core_id)
 {
-	int64_t x;
-	cf_os_file_res res = cf_os_read_int_from_file(path, &x);
-
-	if (res != CF_OS_FILE_RES_OK) {
-		return res;
+	for (uint16_t i = 0; i < *n_covered; ++i) {
+		if (covered[i].package_id == package_id && covered[i].core_id == core_id) {
+			cf_detail(CF_HARDWARE,
+					"package %" PRId64 " core %" PRId64 " already covered",
+					package_id, core_id);
+			return false;
+		}
 	}
 
-	if (x < 0 || x >= CPU_SETSIZE) {
-		cf_warning(CF_HARDWARE, "invalid index in %s", path);
-		return CF_OS_FILE_RES_ERROR;
-	}
+	// detect() adds at most one entry per OS CPU and loops over at most
+	// CPU_SETSIZE CPUs, so the array cannot overflow.
 
-	*val = (uint16_t)x;
-	return CF_OS_FILE_RES_OK;
+	cf_assert(*n_covered < CPU_SETSIZE, CF_HARDWARE, "too many distinct cores");
+
+	covered[*n_covered].package_id = package_id;
+	covered[*n_covered].core_id = core_id;
+	(*n_covered)++;
+
+	cf_detail(CF_HARDWARE, "package %" PRId64 " core %" PRId64 " is new",
+			package_id, core_id);
+
+	return true;
 }
 
 static cf_os_file_res
@@ -461,6 +486,13 @@ read_device_numbers(const char* path, uint32_t* major, uint32_t* minor)
 		return res;
 	}
 
+	// Chopping an empty file's (nonexistent) newline writes buff[SIZE_MAX].
+
+	if (limit == 0) {
+		cf_warning(CF_HARDWARE, "empty device numbers file %s", path);
+		return CF_OS_FILE_RES_ERROR;
+	}
+
 	buff[limit - 1] = '\0';
 
 	cf_detail(CF_HARDWARE, "parsing device numbers \"%s\"", buff);
@@ -484,6 +516,12 @@ read_list(const char* path, cpu_set_t* mask)
 
 	if (res != CF_OS_FILE_RES_OK) {
 		return res;
+	}
+
+	// Chopping an empty file's (nonexistent) newline writes buff[SIZE_MAX].
+
+	if (limit == 0) {
+		return CF_OS_FILE_RES_NOT_FOUND;
 	}
 
 	buff[limit - 1] = '\0';
@@ -553,7 +591,13 @@ apply_cpuset(const char* base)
 		return;
 	}
 
-	cf_assert(length >= 1, CF_HARDWARE, "short /proc/self/cpuset file");
+	// Chopping an empty file's (nonexistent) newline writes path[SIZE_MAX].
+
+	if (length == 0) {
+		cf_warning(CF_HARDWARE, "empty /proc/self/cpuset file");
+		return;
+	}
+
 	length--;
 
 	while (true) {
@@ -615,13 +659,13 @@ detect(cf_topo_numa_node_index a_numa_node)
 	}
 
 	cpu_set_t covered_numa_nodes;
-	cpu_set_t covered_cores[CPU_SETSIZE]; // One mask per package.
 
 	CPU_ZERO(&covered_numa_nodes);
 
-	for (int32_t i = 0; i < CPU_SETSIZE; ++i) {
-		CPU_ZERO(&covered_cores[i]);
-	}
+	// Seen (package id, core id) label pairs - at most one entry per OS CPU.
+
+	core_key_t covered_cores[CPU_SETSIZE];
+	uint16_t n_covered_cores = 0;
 
 	g_n_numa_nodes = 0;
 	g_n_cores = 0;
@@ -640,8 +684,8 @@ detect(cf_topo_numa_node_index a_numa_node)
 		snprintf(path, sizeof(path),
 				"/sys/devices/system/cpu/cpu%hu/topology/physical_package_id",
 				g_n_os_cpus);
-		os_package_index i_os_package;
-		cf_os_file_res res = read_index(path, &i_os_package);
+		int64_t package_id;
+		cf_os_file_res res = cf_os_read_int_from_file(path, &package_id);
 
 		// The entry doesn't exist. We've processed all available CPUs. Stop
 		// looping through the CPUs.
@@ -651,12 +695,12 @@ detect(cf_topo_numa_node_index a_numa_node)
 		}
 
 		if (res != CF_OS_FILE_RES_OK) {
-			cf_crash(CF_HARDWARE,
-					"error while reading OS package index from %s", path);
+			cf_crash(CF_HARDWARE, "error while reading OS package id from %s",
+					path);
 			break;
 		}
 
-		cf_detail(CF_HARDWARE, "OS package index is %hu", i_os_package);
+		cf_detail(CF_HARDWARE, "OS package id is %" PRId64, package_id);
 
 		// Only consider CPUs that are actually in use.
 
@@ -670,33 +714,21 @@ detect(cf_topo_numa_node_index a_numa_node)
 
 		snprintf(path, sizeof(path),
 				"/sys/devices/system/cpu/cpu%hu/topology/core_id", g_n_os_cpus);
-		os_core_index i_os_core;
-		res = read_index(path, &i_os_core);
+		int64_t core_id;
+		res = cf_os_read_int_from_file(path, &core_id);
 
 		if (res != CF_OS_FILE_RES_OK) {
-			cf_crash(CF_HARDWARE, "error while reading OS core index from %s",
-					path);
+			cf_crash(CF_HARDWARE, "error while reading OS core id from %s", path);
 			break;
 		}
 
-		cf_detail(CF_HARDWARE, "OS core index is %hu", i_os_core);
+		cf_detail(CF_HARDWARE, "OS core id is %" PRId64, core_id);
 
 		// Consider a core when we see it for the first time. In other words, we
 		// consider the first Hyper Threading peer of each core to be that core.
 
-		bool new_core;
-
-		if (CPU_ISSET(i_os_core, &covered_cores[i_os_package])) {
-			cf_detail(CF_HARDWARE, "core (%hu, %hu) already covered", i_os_core,
-					i_os_package);
-			new_core = false;
-		}
-		else {
-			cf_detail(CF_HARDWARE, "core (%hu, %hu) is new", i_os_core,
-					i_os_package);
-			new_core = true;
-			CPU_SET(i_os_core, &covered_cores[i_os_package]);
-		}
+		bool new_core =
+				cover_core(covered_cores, &n_covered_cores, package_id, core_id);
 
 		// Identify the NUMA node of the current CPU. We simply look for the
 		// current CPU's topology info subtree in each NUMA node's subtree.
@@ -708,8 +740,11 @@ detect(cf_topo_numa_node_index a_numa_node)
 			snprintf(path, sizeof(path),
 					"/sys/devices/system/cpu/cpu%hu/node%hu/cpu%hu/topology/core_id",
 					g_n_os_cpus, i_os_numa_node, g_n_os_cpus);
-			uint16_t dummy;
-			res = read_index(path, &dummy);
+
+			// Only the file's existence matters - ignore the core id in it.
+
+			int64_t dummy;
+			res = cf_os_read_int_from_file(path, &dummy);
 
 			// We found the NUMA node that has the current CPU in its subtree.
 
