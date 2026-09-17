@@ -51,6 +51,13 @@ void cf_topo_force_map_memory(const uint8_t* from, size_t size);
 void cf_topo_migrate_memory(void);
 void cf_topo_info(void);
 
+// The core count is advisory - cores are identified by opaque platform labels,
+// so it collapses to 1 where the kernel reports no topology, and can be 0 when
+// cf_topo_config() confines the server to one NUMA node. Size work from
+// cf_topo_count_cpus(), but note that cf_topo_pin_to_core() is bounded by this
+// count, not by the CPU count - on a kernel reporting no topology it crashes
+// for every index above 0.
+// TODO - remove core tracking (SERVER-1295).
 uint16_t cf_topo_count_cores(void);
 uint16_t cf_topo_count_cpus(void);
 

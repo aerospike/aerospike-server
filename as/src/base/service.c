@@ -775,7 +775,7 @@ process_readable(as_file_handle* fd_h)
 				fd_h->proto_unread, 0);
 
 		if (sz < 0) {
-			return errno == EAGAIN || errno == EWOULDBLOCK;
+			return errno == EAGAIN;
 		}
 
 		if (sz == 0) {

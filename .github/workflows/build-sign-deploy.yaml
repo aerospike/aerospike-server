@@ -3,45 +3,137 @@ name: Build, sign, and deploy
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: Version of the artifact to deploy
-        required: true
+      upload_built_artifacts_jfrog:
+        description: Upload built artifacts to JFrog (only runs on master, hotfix/**, preview/**)
+        type: boolean
+        default: true
+      build_docker_images:
+        description: Build Docker images
+        type: boolean
+        default: true
+      push_docker_jfrog:
+        description: Push Docker images to JFrog (only on master, hotfix/**, preview/**; when false, images are built/tested but not pushed)
+        type: boolean
+        default: true
+      slack_notify:
+        description: Send Slack notifications (only applies on manual runs when artifacts upload, Docker push, and this flag are all enabled)
+        type: boolean
+        default: false
       ext:
         description: "Package name suffix appended to edition (e.g. TEST). Leave empty for production builds."
         required: false
         default: ""
-  push:
-    branches:
-      - master
-      - 'hotfix/**'
+  schedule:
+    # GitHub cron is UTC only. Two daily UTC times bracket 8pm America/Los_Angeles across
+    # PST vs PDT; job schedule-gate exits unless the current LA wall-clock hour is 20.
+    - cron: '0 3 * * *'
+    - cron: '0 4 * * *'
+
+# Serialize runs by workflow + branch: no two runs on the same ref can
+# publish the same jf-build-id concurrently. cancel-in-progress: false queues
+# a second run rather than cancelling it; by the time it starts, jfrog-precheck
+# will see build_exists=true and skip upload/bundle automatically.
+# NOTE: keyed on ref (not sha) so that two concurrent runs triggered against the
+# same HEAD commit — which produce the same build/version output and therefore the
+# same jf-build-id coordinate — are serialized. The second run, once unblocked, sees
+# build_exists=true from jfrog-precheck and skips upload/bundle automatically.
+# Consecutive commits on the same branch are still serialized by this group (it keys on
+# ref, not sha), but produce distinct jf-build-ids (different -n suffix) so neither run
+# skips the other's upload via build_exists.
+concurrency:
+  # Ref-keyed for publishing runs (workflow_dispatch): serialize runs on the same ref so no
+  # two publish the same jf-build-id concurrently. Scheduled runs get their OWN fixed group —
+  # they only DISPATCH child workflow_dispatch runs (each ref-serialized on its own), so they
+  # must not queue behind an in-flight manual run on the branch; otherwise schedule-gate's 8pm-LA
+  # window could pass while the run waits, silently dropping that night's dispatch.
+  group: ${{ github.workflow }}-${{ github.event_name == 'schedule' && 'schedule' || github.ref }}
+  cancel-in-progress: false
 
 permissions:
   id-token: write
   contents: read
+  actions: read
 
 defaults:
   run:
     shell: bash
 
 env:
-  ARTIFACT_NAME: aerospike-server
-  AWS_ROLE: arn:aws:iam::360255567471:role/sso/assumed/iac/AerospikeDownloadArtifactsAutomation
   JFROG_PROJECT: database
   JFROG_URL: https://aerospike.jfrog.io
-  ORG: citrusleaf
-  S3_BUCKET: aerospike-qe-build
+  # Scheduled nightly runs are gated by the repository variable BUILD_SIGN_DEPLOY_ENABLED
+  # (Settings → Secrets and variables → Actions → Variables). When unset or not 'true', the
+  # schedule path is skipped. This gates ONLY the schedule trigger; workflow_dispatch (manual
+  # runs and nightly child dispatches) is always available regardless of this variable.
+  # The release-ref policy (JFrog upload, release bundles, Docker push, promote-to-test run only
+  # on master / hotfix/** / preview/**) is computed once in the setup job and consumed via
+  # needs.setup.outputs.IS_RELEASE_REF == 'true'. nightly-dispatch-branches applies the same
+  # policy in bash because it runs before setup.
 
 jobs:
-  setup:
-    runs-on: ubuntu-22.04
+  schedule-gate:
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     outputs:
-      VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || steps.set_env.outputs.version }}
-      BUNDLE_VERSION: ${{ steps.set_env.outputs.bundle_version }}
-      COUNT:   ${{ steps.set_env.outputs.count }}
-      RELEASE: ${{ steps.set_env.outputs.release }}
-      DISTROS: ${{ steps.distros.outputs.distros }}
+      skip_all: ${{ steps.gate.outputs.skip_all }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Gate scheduled runs to 8pm America/Los_Angeles
+        id: gate
+        env:
+          ENABLED: ${{ vars.BUILD_SIGN_DEPLOY_ENABLED }}
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+        run: |
+          set -euo pipefail
+          # Only the schedule trigger is gated by BUILD_SIGN_DEPLOY_ENABLED. workflow_dispatch
+          # (manual + nightly child dispatches) always proceeds.
+          if [[ "$EVENT_NAME" != "schedule" ]]; then
+            echo "skip_all=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$ENABLED" != "true" ]]; then
+            echo "skip_all=true" >> "$GITHUB_OUTPUT"
+            echo "Skipping schedule: BUILD_SIGN_DEPLOY_ENABLED is not 'true' (got '${ENABLED:-<unset>}')."
+            exit 0
+          fi
+          # Decide from the cron that FIRED (github.event.schedule) plus today's LA UTC offset,
+          # NOT the wall-clock hour at execution time: a run that queues before starting could
+          # otherwise begin well after 8pm LA and be dropped. DST transitions happen at 02:00
+          # local, far from these evening crons, so the offset is stable across any realistic
+          # queue delay. LA hour = (cron UTC hour + signed offset hours) mod 24; 10# forces
+          # base-10 so a leading-zero hour is never parsed as octal.
+          utc_hour="$(awk '{print $2}' <<<"$SCHEDULE")"
+          offset="$(TZ=America/Los_Angeles date +%z)"   # -0800 (PST) / -0700 (PDT)
+          off_hours="$((10#${offset:1:2}))"
+          if [[ "${offset:0:1}" == "-" ]]; then
+            la_hour="$(( (10#$utc_hour - off_hours + 24) % 24 ))"
+          else
+            la_hour="$(( (10#$utc_hour + off_hours) % 24 ))"
+          fi
+          if [[ "$la_hour" != "20" ]]; then
+            echo "skip_all=true" >> "$GITHUB_OUTPUT"
+            echo "Skipping: cron '${SCHEDULE}' maps to LA hour ${la_hour}, not 20 (offset ${offset})."
+          else
+            echo "skip_all=false" >> "$GITHUB_OUTPUT"
+            echo "cron '${SCHEDULE}' maps to 8pm LA (offset ${offset}); scheduled work may proceed."
+          fi
+
+  nightly-dispatch-branches:
+    needs: [schedule-gate]
+    if: >
+      github.repository_owner == 'citrusleaf' &&
+      github.event_name == 'schedule' &&
+      needs.schedule-gate.outputs.skip_all == 'false'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: write
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -49,74 +141,247 @@ jobs:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: set env 
-        id: set_env
-        env:
-          INPUT_VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || '' }}
+      - name: Fetch all remote branches
         run: |
           set -euo pipefail
-          # Align with build/version: no *.*.*.*-start tags; semver-like x.y.z.w tags + --long on feature branches.
-          if [[ "$GITHUB_REF_NAME" == "master" || "$GITHUB_REF_NAME" =~ ^hotfix/ ]]; then
-            # Strip git describe --long suffix (-<n>-g<hash>); do not use cut -f1 — hyphenated tags (e.g. 8.0.0.1-rc1) would truncate wrong.
-            version="$(git describe --first-parent --tags --always --long | sed 's/-[0-9]*-g[0-9a-f]*$//')"
-          else
-            version="$(git describe --first-parent --tags --always --abbrev=9 --long --match '[0-9]*.[0-9]*.[0-9]*.[0-9]*' 2>/dev/null)"
-            if [[ "$version" != *-*-* ]]; then
-              version="$(git describe --first-parent --tags --always --abbrev=9 --long 2>/dev/null)"
+          git remote set-branches origin '*'
+          git fetch --prune --no-tags origin "+refs/heads/*:refs/remotes/origin/*"
+
+      - name: Dispatch this workflow for branches with commits in the last 24 hours
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo="${{ github.repository }}"
+          since="24 hours ago"
+          dispatched=0
+
+          mapfile -t refs < <(
+            git for-each-ref --format='%(refname)' 'refs/remotes/origin/*' 2>/dev/null \
+              | while IFS= read -r ref; do
+                  short="${ref#refs/remotes/origin/}"
+                  [[ "$short" == "HEAD" ]] && continue
+                  if [[ "$short" == "master" ]] || [[ "$short" =~ ^hotfix/ ]] || [[ "$short" =~ ^preview/ ]]; then
+                    printf '%s\n' "$ref"
+                  fi
+                done | sort -u
+          )
+
+          if [[ "${#refs[@]}" -eq 0 ]]; then
+            echo "No remote refs matched master / hotfix/** / preview/**."
+            exit 0
+          fi
+
+          for ref in "${refs[@]}"; do
+            [[ -n "$ref" ]] || continue
+            short="${ref#refs/remotes/origin/}"
+
+            if ! git rev-parse -q --verify "${ref}" >/dev/null; then
+              continue
             fi
-          fi
-          if [[ -z "$version" ]]; then
-            version="$(git rev-parse --short=9 HEAD)"
-          fi
-          if [[ -n "${INPUT_VERSION:-}" ]]; then
-            version="$INPUT_VERSION"
-          fi
-          count=$(bash .github/bin/artifact_count.bash)
-          release=$(bash build/version)
+
+            if [[ -z "$(git rev-list -1 --first-parent --since="${since}" "${ref}" 2>/dev/null || true)" ]]; then
+              echo "Skip '${short}' (no commits in the last 24h)."
+              continue
+            fi
+
+            echo "Dispatching workflow for '${short}' (commits in the last 24h)."
+            gh workflow run build-sign-deploy.yaml \
+              --repo "${repo}" \
+              --ref "${short}" \
+              -f upload_built_artifacts_jfrog=true \
+              -f build_docker_images=true \
+              -f push_docker_jfrog=true \
+              -f slack_notify=false \
+              -f ext= || { echo "::warning::dispatch failed for '${short}', continuing."; continue; }
+            dispatched=$((dispatched + 1))
+          done
+
+          echo "Dispatched ${dispatched} workflow run(s)."
+
+  setup:
+    needs: [schedule-gate]
+    # Gate the whole publish chain to the citrusleaf org: every downstream job
+    # (jfrog-precheck, build-artifacts, and the rest) needs setup, so skipping it
+    # in mirrors/forks cleanly skips them all — instead of jfrog-precheck running
+    # and failing loudly against JFrog OIDC that only exists in citrusleaf.
+    if: >
+      github.repository_owner == 'citrusleaf' &&
+      needs.schedule-gate.outputs.skip_all == 'false' &&
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    outputs:
+      VERSION: ${{ steps.set_env.outputs.version }}
+      BUNDLE_VERSION: ${{ steps.set_env.outputs.bundle_version }}
+      IS_RELEASE_REF: ${{ steps.set_env.outputs.is_release_ref }}
+      MATRIX_INCLUDE: ${{ steps.build_matrix.outputs.matrix_include }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: set env
+        id: set_env
+        run: |
+          set -euo pipefail
+          # build/version is the single source of truth. It anchors on the bare (dev-began)
+          # x.y.z.w tag, but in default mode (no -v) emits the full w.x.y.z-n coordinate on
+          # master/hotfix (bare tag + build number). That full string becomes VERSION below —
+          # i.e. the jf-build-id — so every commit maps to a unique, non-overwritten JFrog build.
+
+          version="$(bash build/version)"
+
           if [[ ! "$GITHUB_REF_NAME" =~ ^[a-zA-Z0-9._/\-]+$ ]]; then
             echo "ERROR: GITHUB_REF_NAME contains unsafe characters: '$GITHUB_REF_NAME'" >&2
             exit 1
           fi
           branch_prefix="${GITHUB_REF_NAME//\//-}"
-          bundle_version="TEST-${branch_prefix}-${version}"
+          # TEST- prefix dropped for parity with sign-build-deploy.yaml, which already uses
+          # "${branch_prefix}-${version}" as the bundle coordinate. The concurrency group above
+          # serializes runs on the same ref so jfrog-precheck prevents duplicate publication.
+          bundle_version="${branch_prefix}-${version}"
+
+          # Release-ref policy computed once here and consumed by every publish gate
+          # (jfrog-precheck, upload, release-bundle, docker push, promote-to-test) via
+          # needs.setup.outputs.IS_RELEASE_REF. Keep in sync with
+          # nightly-dispatch-branches' ref filter. NOTE: preview/** is a release ref
+          # (it publishes), but build/version deliberately keeps preview's -<n>-g<sha>
+          # descriptor rather than the clean master/hotfix coordinate.
+          if [[ "$GITHUB_REF_NAME" == "master" || "$GITHUB_REF_NAME" =~ ^hotfix/ || "$GITHUB_REF_NAME" =~ ^preview/ ]]; then
+            is_release_ref=true
+          else
+            is_release_ref=false
+          fi
+
           {
             echo "version=$version"
             echo "bundle_version=$bundle_version"
-            echo "count=$count"
-            echo "release=$release"
+            echo "is_release_ref=$is_release_ref"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Set distro list
-        id: distros
+      - name: Load build matrix (.github/ci/build-matrix.json)
+        id: build_matrix
         run: |
-          echo 'distros=["amzn2023","debian12","el8","el9","ubuntu22.04","ubuntu24.04"]' >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          # Fail fast in setup on malformed JSON instead of an opaque fromJson error
+          # in the build-artifacts matrix after fan-out.
+          jq empty .github/ci/build-matrix.json
+          {
+            echo 'matrix_include<<MATRIX_JSON_EOF'
+            cat .github/ci/build-matrix.json
+            echo 'MATRIX_JSON_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+  # Query JFrog for prior publication state (e.g. from a prior nightly). Runs in parallel
+  # with the build pipeline. Two INDEPENDENT signals, because build-info existence does NOT
+  # imply the release bundle was created — a run can upload artifacts then die before
+  # create-release-bundle:
+  #   build_exists  → build-info present    → gates upload-artifacts-to-jfrog.
+  #   bundle_exists → release bundle present → gates create-release-bundle + docker build/push.
+  # Keeping them separate lets a re-run finish a partially-published build-id (upload done,
+  # bundle not) while still skipping an already-completed one. Fails closed on unexpected
+  # build-info HTTP status codes.
+  jfrog-precheck:
+    needs: [setup]
+    if: >
+      needs.setup.result == 'success' &&
+      needs.setup.outputs.IS_RELEASE_REF == 'true'
+    runs-on: ubuntu-24.04
+    outputs:
+      build_exists: ${{ steps.check.outputs.build_exists }}
+      bundle_exists: ${{ steps.check.outputs.bundle_exists }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Setup JFrog CLI
+        uses: step-security/setup-jfrog-cli@3054b554c0fb4915b3d58847fb7730c593dbb934 # v5.0.0
+        env:
+          JF_URL: ${{ env.JFROG_URL }}
+          JF_PROJECT: ${{ env.JFROG_PROJECT }}
+        with:
+          oidc-provider-name: database-gh-citrusleaf
+          oidc-audience: database-gh-citrusleaf
+
+      - name: Does this build-id / release bundle already exist in JFrog?
+        id: check
+        env:
+          BUILD_NAME: aerospike-server
+          BUNDLE_NAME: aerospike-server
+          VERSION: ${{ needs.setup.outputs.VERSION }}
+          BUNDLE_VERSION: ${{ needs.setup.outputs.BUNDLE_VERSION }}
+          JFROG_PROJECT: ${{ env.JFROG_PROJECT }}
+        run: |
+          set -euo pipefail
+
+          # 1) Build-info existence → gates the artifact upload.
+          code=$(jf rt curl -s -o /dev/null -w '%{http_code}' \
+            -XGET "/api/build/${BUILD_NAME}/${VERSION}?project=${JFROG_PROJECT}")
+          case "$code" in
+            200) echo "build_exists=true"  >> "$GITHUB_OUTPUT"
+                 echo "Build ${BUILD_NAME}/${VERSION} already exists in JFrog — upload will be skipped." ;;
+            404) echo "build_exists=false" >> "$GITHUB_OUTPUT"
+                 echo "Build ${BUILD_NAME}/${VERSION} not found in JFrog — proceeding with upload." ;;
+            *)   echo "::error::Unexpected HTTP ${code} from JFrog build-info API; failing closed."
+                 exit 1 ;;
+          esac
+
+          # 2) Release-bundle existence → gates create-release-bundle independently of upload.
+          # Fails closed, exactly like the build-info probe above: only a definitive JFrog
+          # answer (exit 0 + parseable JSON with a release_bundles array) is trusted. Any
+          # failure of the search — auth, network, rate limit, outage, malformed response —
+          # fails this job rather than silently reporting "no bundle" and letting the
+          # non-idempotent create-release-bundle run against a coordinate that may already be
+          # bundled. jf release-bundle-search returns exit 0 with an empty release_bundles
+          # array when the bundle has no versions yet (a genuine "does not exist", not an
+          # error) — the same behavior the shared-workflows delete-release-bundle action relies on.
+          rbs_rc=0
+          bundle_json="$(jf release-bundle-search versions "${BUNDLE_NAME}" \
+            --project="${JFROG_PROJECT}" --format=json)" || rbs_rc=$?
+          if [[ "$rbs_rc" -ne 0 ]] || ! printf '%s' "$bundle_json" \
+              | jq -e 'has("release_bundles")' >/dev/null 2>&1; then
+            echo "::error::jf release-bundle-search versions ${BUNDLE_NAME} failed (exit ${rbs_rc}) or returned unparseable output; failing closed (see CLI error above)."
+            exit 1
+          fi
+          if printf '%s' "$bundle_json" | jq -e --arg v "${BUNDLE_VERSION}" \
+              '.release_bundles[]? | select(.release_bundle_version == $v)' >/dev/null 2>&1; then
+            echo "bundle_exists=true"  >> "$GITHUB_OUTPUT"
+            echo "Release bundle ${BUNDLE_NAME}/${BUNDLE_VERSION} already exists — create-release-bundle will be skipped."
+          else
+            echo "bundle_exists=false" >> "$GITHUB_OUTPUT"
+            echo "Release bundle ${BUNDLE_NAME}/${BUNDLE_VERSION} not found — create-release-bundle may proceed."
+          fi
 
   build-artifacts:
     needs: setup
-    if: github.repository_owner == 'citrusleaf' && github.event_name == 'push'
+    if: github.repository_owner == 'citrusleaf' && github.event_name == 'workflow_dispatch'
+    # Authenticates via create-github-app-token (private key), not OIDC — drop id-token: write.
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
-        host: [ubuntu-24.04, ubuntu-24.04-arm]
-        distro: ${{ fromJson(needs.setup.outputs.DISTROS) }}
+        include: ${{ fromJson(needs.setup.outputs.MATRIX_INCLUDE) }}
 
     runs-on: ${{ matrix.host }}
-    # Pinned base images for reproducible builds; update periodically for security and toolchain updates.
-    # Pinned base images; el8 works with OpenSSL 1.1 or 3 via enterprise tls_ee compat (TLS_GET_PEER_CERT).
-    container: >-
-      ${{ matrix.distro == 'ubuntu24.04' && 'ubuntu:24.04' ||
-        matrix.distro == 'ubuntu22.04' && 'ubuntu:22.04' ||
-        matrix.distro == 'ubuntu20.04' && 'ubuntu:20.04' ||
-        matrix.distro == 'el8' && 'registry.access.redhat.com/ubi8/ubi-minimal:8.10' ||
-        matrix.distro == 'el9' && 'registry.access.redhat.com/ubi9/ubi-minimal:9.4' ||
-        matrix.distro == 'debian11' && 'debian:bullseye-20241223-slim' ||
-        matrix.distro == 'debian12' && 'debian:bookworm-20241223-slim' ||
-        matrix.distro == 'amzn2023' && 'amazonlinux:2023.4.20240401.1' }}
+    # Pinned base images: .github/ci/build-matrix.json (host, distro, container per matrix row).
+    container: ${{ matrix.container }}
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -129,7 +394,7 @@ jobs:
         # v3 line is Node24-ready; requires modern runner (GH-hosted Ubuntu runners satisfy this).
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ vars.APP_CLIENT_ID }}
+          client-id: ${{ vars.APP_CLIENT_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
@@ -139,13 +404,13 @@ jobs:
 
           case "${{ matrix.distro }}" in
             ubuntu*|debian*)
-              apt-get update && apt-get install -y git ca-certificates
+              apt-get update && apt-get install -y git ca-certificates python3
               ;;
             el*|amzn*)
               command -v dnf >/dev/null || microdnf install -y dnf
-              dnf -y install git ca-certificates libyaml-devel
+              dnf -y install git ca-certificates libyaml-devel python3
               if [[ "${{ matrix.distro }}" == "el8" ]]; then
-                dnf -y install perl-IPC-Cmd perl-Time-Piece python3
+                dnf -y install perl-IPC-Cmd perl-Time-Piece
               fi
               ;;
           esac
@@ -154,14 +419,28 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Checkout aerospike-server
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          # Pin to github.sha — the exact dispatch-time commit that setup computed VERSION
+          # (the jf-build-id) from. Checking out github.ref_name instead would fetch whatever
+          # the branch tip is when THIS job starts, which — with cancel-in-progress: false
+          # queuing runs for potentially hours — can be a different commit, so the binary would
+          # compile a different commit than the jf-build-id it publishes under. HEAD is detached
+          # at the sha; the next step reattaches the branch name for build/version.
           repository: citrusleaf/aerospike-server
+          ref: ${{ github.sha }}
           submodules: true
           path: aerospike-server
           fetch-depth: 0
           fetch-tags: true
           token: ${{ steps.app-token.outputs.token }}
+
+      - name: Reattach branch name at the pinned commit
+        working-directory: aerospike-server
+        # build/version relies on `git branch --show-current` to classify the release line;
+        # a detached HEAD would fall back to the remote-branch heuristic and can misclassify.
+        # Recreate the branch ref at the pinned sha so classification is unambiguous.
+        run: git checkout -B "$GITHUB_REF_NAME" "$GITHUB_SHA"
 
       - name: Install required packages
         run: |
@@ -215,8 +494,15 @@ jobs:
           #                 fips branch inside do_edition() uses ${HOST:?...} to skip fips on arm64.
           MATRIX_HOST: ${{ matrix.host }}
           HOST: ${{ matrix.host }}
-          EXT: ${{ github.event_name == 'push' && 'TEST' || github.event.inputs.ext }}
+          EXT: ${{ github.event.inputs.ext }}
         run: |
+          # Ubuntu 26.04 ships CMake 4.x, which removed compatibility with
+          # cmake_minimum_required(VERSION <3.5). Set explicitly only for that
+          # distro so the legacy CMakeLists in the EE 'snappy' submodule still
+          # configures. Other matrix cells leave this unset.
+          if [[ "${DISTRO}" == "ubuntu26.04" ]]; then
+            export CMAKE_POLICY_VERSION_MINIMUM=3.5
+          fi
           if [[ "${MATRIX_HOST}" == *arm* ]]; then
             bash .github/bin/build_edition.bash -e community -e enterprise
           else
@@ -236,6 +522,8 @@ jobs:
     needs: [build-artifacts, setup]
     if: ${{ always() && needs.build-artifacts.result == 'success' }}
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     outputs:
       PACKAGE_VERSION: ${{ steps.extract_package_version.outputs.package_version }}
     steps:
@@ -245,7 +533,7 @@ jobs:
           egress-policy: audit
 
       - name: Checkout (for extract_version.bash)
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           sparse-checkout: .github/bin/extract_version.bash
           sparse-checkout-cone-mode: false
@@ -278,116 +566,47 @@ jobs:
           overwrite: true
           retention-days: 1
 
-  download-s3-artifacts:
-    needs: setup
-    if: >
-        github.repository_owner == 'citrusleaf' &&
-        github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
-    outputs:
-      PACKAGE_VERSION: ${{ steps.extract_package_version.outputs.package_version }}
-      FULL_PACKAGE_VERSION: ${{ steps.extract_package_version.outputs.package_version }}
-    env:
-      VERSION: ${{ needs.setup.outputs.VERSION }}
-      COUNT: ${{ needs.setup.outputs.COUNT }}
-      RELEASE: ${{ needs.setup.outputs.RELEASE }}
-
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: audit
-
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-
-      - name: Install GNU parallel
-        run: sudo apt-get update && sudo apt-get install -y parallel
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b  # v6.2.0
-        with:
-          role-to-assume: ${{ env.AWS_ROLE }}
-          role-session-name: aerospike-download-artifacts
-          aws-region: us-west-1
-
-      # AWS credentials from Configure step above last ~4 hour. Keep retries within that window so token does not expire; use "Re-run failed jobs" in Actions UI for a fresh token if this step fails.
-      - name: Download artifacts from QE server (retry until complete)
-        uses: step-security/retry@38808b4332b98bb36ca031abff0c100231608288  # v4.0.0
-        env:
-          GH_EVENT: ${{ github.event_name }}
-          S3_PATH: "s3://${{ env.S3_BUCKET }}/${{ env.ORG }}/${{ env.ARTIFACT_NAME }}/${{ env.VERSION }}/build/"
-        with:
-          timeout_minutes: 240
-          max_attempts: 120
-          retry_on: error
-          retry_wait_seconds: 120
-          command: bash .github/bin/download_artifacts.bash
-
-      - name: List download files
-        run: find build-artifacts
-
-      - name: Extract package version from artifacts
-        id: extract_package_version
-        run: |
-          set -euo pipefail
-          pkg_version=$(bash .github/bin/extract_version.bash build-artifacts)
-          echo "package_version=$pkg_version" >> "$GITHUB_OUTPUT"
-          echo "Extracted PACKAGE_VERSION: $pkg_version"
-
-      - name: Upload packaged Artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
-        with:
-          name: unsigned-artifacts-${{ needs.setup.outputs.VERSION }}
-          path: |
-            build-artifacts/**/*.deb
-            build-artifacts/**/*.rpm
-          overwrite: true
-          retention-days: 1
-
-  # Gate job so deploy chain does not depend on a skipped job (e.g. download-s3-artifacts on push).
+  # Gate after matrix builds merge unsigned artifacts for signing.
   artifacts-ready:
-    needs: [organize-built-artifacts, download-s3-artifacts]
-    if: always() && (needs.organize-built-artifacts.result == 'success' || needs.download-s3-artifacts.result == 'success')
+    needs: [organize-built-artifacts]
+    if: always() && needs.organize-built-artifacts.result == 'success'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     outputs:
       PACKAGE_VERSION: ${{ steps.pkg_version.outputs.package_version }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
-        with:
-          egress-policy: audit
-
-      - name: Set PACKAGE_VERSION from whichever job produced artifacts
+      - name: Set PACKAGE_VERSION from built artifacts
         id: pkg_version
         run: |
-          if [[ "${{ needs.organize-built-artifacts.result }}" == "success" ]]; then
-            echo "package_version=${{ needs.organize-built-artifacts.outputs.PACKAGE_VERSION }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "package_version=${{ needs.download-s3-artifacts.outputs.PACKAGE_VERSION }}" >> "$GITHUB_OUTPUT"
-          fi
+          echo "package_version=${{ needs.organize-built-artifacts.outputs.PACKAGE_VERSION }}" >> "$GITHUB_OUTPUT"
       - name: Gate
         run: echo "Artifacts ready for sign/deploy"
 
   sign-artifacts:
     needs: [setup, artifacts-ready]
     if: always() && needs.artifacts-ready.result == 'success'
-    uses: aerospike/shared-workflows/.github/workflows/reusable_sign-artifacts.yaml@v3.6.0
+    uses: aerospike/shared-workflows/.github/workflows/reusable_sign-artifacts.yaml@v3.7.0
     with:
       gh-artifact-name: signed-artifacts-${{ needs.setup.outputs.VERSION }}      
       gh-unsigned-artifacts: unsigned-artifacts-${{ needs.setup.outputs.VERSION }}      
-      gh-workflows-ref: "v3.4.1"
+      gh-workflows-ref: "v3.7.0"
     secrets:
       gpg-private-key: ${{ secrets.GPG_SECRET_KEY }}
       gpg-public-key: ${{ secrets.GPG_PUBLIC_KEY }}
       gpg-key-pass: ${{ secrets.GPG_PASS }}
 
+  # Skipped automatically when jfrog-precheck finds the build-id already exists (e.g. prior nightly).
   upload-artifacts-to-jfrog:
-    needs: [setup, sign-artifacts]
-    if: always() && needs.sign-artifacts.result == 'success'
-    uses: aerospike/shared-workflows/.github/workflows/reusable_deploy-artifacts.yaml@v3.6.0
+    needs: [setup, sign-artifacts, jfrog-precheck]
+    if: >
+      always() &&
+      needs.sign-artifacts.result == 'success' &&
+      needs.jfrog-precheck.outputs.build_exists == 'false' &&
+      needs.setup.outputs.IS_RELEASE_REF == 'true' &&
+      (github.event.inputs.upload_built_artifacts_jfrog == true ||
+        github.event.inputs.upload_built_artifacts_jfrog == 'true')
+    uses: aerospike/shared-workflows/.github/workflows/reusable_deploy-artifacts.yaml@v3.7.0
     with:
       jf-project: database
       jf-build-name: "aerospike-server"
@@ -399,16 +618,32 @@ jobs:
       dry-run: false
       jf-build-id: ${{ needs.setup.outputs.VERSION }}
       jf-metadata-build-id: ${{ needs.setup.outputs.VERSION }}-metadata
-      gh-workflows-ref: "v3.4.1"
+      gh-workflows-ref: "v3.7.0"
 
+  # Gated on bundle_exists (NOT build_exists): a re-run whose build-info exists but whose
+  # bundle was never created (partial publish — upload succeeded, then a later step failed)
+  # must still create the bundle, while an already-bundled coordinate is skipped so this
+  # non-idempotent job is never re-run against it. The build-info the bundle references is
+  # present either because this run uploaded it (upload success) or a prior run already did
+  # (build_exists gates the upload). docker-deploy 'skipped' is accepted so a docker-disabled
+  # run (build_docker_images=false) can still bundle; otherwise docker runs (it gates on
+  # bundle_exists too) and only a docker failure blocks the bundle.
   create-release-bundle:
     permissions:
       contents: read
       id-token: write
       attestations: write
-    needs: [setup, sign-artifacts, upload-artifacts-to-jfrog, docker-deploy]
-    if: always() && needs.upload-artifacts-to-jfrog.result == 'success' && needs.docker-deploy.result == 'success'
-    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.6.0
+    needs: [setup, sign-artifacts, upload-artifacts-to-jfrog, docker-deploy, jfrog-precheck]
+    if: >
+      always() &&
+      needs.sign-artifacts.result == 'success' &&
+      needs.jfrog-precheck.outputs.bundle_exists == 'false' &&
+      needs.setup.outputs.IS_RELEASE_REF == 'true' &&
+      (needs.upload-artifacts-to-jfrog.result == 'success' ||
+        needs.jfrog-precheck.outputs.build_exists == 'true') &&
+      (needs.docker-deploy.result == 'success' ||
+        needs.docker-deploy.result == 'skipped')
+    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.7.0
     with:
       jf-project: "database"
       jf-build-names: "aerospike-server:${{ needs.setup.outputs.VERSION }}"
@@ -416,12 +651,33 @@ jobs:
       oidc-provider-name: gh-citrusleaf
       oidc-audience: citrusleaf
       version: ${{ needs.setup.outputs.BUNDLE_VERSION }}
-      gh-workflows-ref: "v3.4.1"
+      gh-workflows-ref: "v3.7.0"
       dry-run: false
 
   docker-deploy:
-    needs: [setup, artifacts-ready, sign-artifacts]
-    if: always() && needs.sign-artifacts.result == 'success'
+    needs: [setup, artifacts-ready, sign-artifacts, jfrog-precheck]
+    # Skip the whole multi-arch build + Snyk scan whenever it would be wasted:
+    #  - bundle_exists != 'true': gate on the release bundle (the terminal published state),
+    #    NOT build_exists. A partial-publish retry (upload succeeded, then docker/bundle failed)
+    #    sees build_exists='true' but bundle_exists='false' and STILL needs docker built+pushed;
+    #    gating on build_exists would skip docker yet let create-release-bundle proceed, promoting
+    #    a build-id to TEST with no docker images. Only an already-bundled coordinate (fully
+    #    published) skips here — matching the upload/bundle skip behavior.
+    #  - jfrog-precheck result success|skipped: if the precheck itself FAILED (e.g. a JFrog
+    #    outage tripping its fail-closed exit), the release tail (upload/bundle/promote) is
+    #    already dead, so building+scanning here would burn a full cycle for nothing. Gate on
+    #    the job RESULT, not just its output value — a failed job emits bundle_exists='' which
+    #    would otherwise pass the '' != 'true' check and run.
+    # On dev refs jfrog-precheck is skipped, so result is 'skipped' and bundle_exists is ''
+    # ('' != 'true') — images still build/test as before.
+    if: >
+      always() &&
+      needs.sign-artifacts.result == 'success' &&
+      (needs.jfrog-precheck.result == 'success' ||
+        needs.jfrog-precheck.result == 'skipped') &&
+      needs.jfrog-precheck.outputs.bundle_exists != 'true' &&
+      (github.event.inputs.build_docker_images == true ||
+        github.event.inputs.build_docker_images == 'true')
     runs-on: ubuntu-24.04
     outputs:
       time: ${{ steps.timestamp.outputs.time }}
@@ -434,7 +690,7 @@ jobs:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -457,14 +713,14 @@ jobs:
           oidc-audience: database-gh-citrusleaf
 
       - name: Docker login to Artifactory
-        uses: step-security/docker-login-action@870af644803bf9f204aed474adbad2958fec048b # v4.1.0
+        uses: step-security/docker-login-action@164e21d7e52229904128e2f946001cb88278c33d # v4.2.0
         with:
           registry: artifact.aerospike.io
           username: ${{ steps.jf.outputs.oidc-user }}
           password: ${{ steps.jf.outputs.oidc-token }}
 
       - name: Checkout aerospike-server.docker repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: aerospike/aerospike-server.docker
           path: pkg/docker
@@ -472,10 +728,10 @@ jobs:
           fetch-depth: 1
 
       - name: Set up QEMU
-        uses: step-security/setup-qemu-action@109c6ed9f089be1a250c75fd6a534e30df44e030 # v4.0.0
+        uses: step-security/setup-qemu-action@fe44c529aab16157fc475f4991a7f926aa9a02a2 # v4.1.0
 
       - name: Set up Docker Buildx
-        uses: step-security/setup-buildx-action@f931205d68723ad9589fd2a7e2ece238bf9de341 # v4.0.0
+        uses: step-security/setup-buildx-action@6997872a55d77391e51b87609556578131f44402 # v4.1.0
 
       - name: Get current timestamp
         id: timestamp
@@ -519,14 +775,32 @@ jobs:
         run: bash "${GITHUB_WORKSPACE}/.github/bin/summarize_snyk_scan.sh"
 
       - name: Push Docker image
+        # bundle_exists == 'false' keeps a serialized re-run (queued behind a prior run that
+        # already fully published this coordinate) from re-pushing duplicate images, while still
+        # pushing on a partial-publish retry (build_exists='true' but bundle_exists='false') where
+        # the images were never pushed. Matches the docker-deploy job gate and the bundle skip.
+        if: >
+          github.event_name == 'workflow_dispatch' &&
+          (github.event.inputs.push_docker_jfrog == true ||
+            github.event.inputs.push_docker_jfrog == 'true') &&
+          needs.setup.outputs.IS_RELEASE_REF == 'true' &&
+          needs.jfrog-precheck.outputs.bundle_exists == 'false'
         run: |
           set -euo pipefail
           cd pkg/docker
           ./docker-build.sh -p ${{ needs.artifacts-ready.outputs.PACKAGE_VERSION }} -d ubuntu -u ../../signed-artifacts -r artifact.aerospike.io/database-docker-dev-local -T ${{ steps.timestamp.outputs.time }}
 
   promote-to-test:
-    needs: [setup, create-release-bundle]
-    if: always() && needs.create-release-bundle.result == 'success'
+    needs: [setup, create-release-bundle, jfrog-precheck]
+    # Runs when this run created the bundle (create success) OR the bundle already exists
+    # (a prior run created it but may not have promoted it, or a dup re-run). The step is
+    # idempotent — it checks the TEST promotion record and exits 0 if already promoted — so
+    # re-entry here is safe.
+    if: >
+      always() &&
+      needs.setup.outputs.IS_RELEASE_REF == 'true' &&
+      (needs.create-release-bundle.result == 'success' ||
+        needs.jfrog-precheck.outputs.bundle_exists == 'true')
     runs-on: ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -566,7 +840,14 @@ jobs:
 
   notify-slack:
     needs: [setup, artifacts-ready, docker-deploy, promote-to-test]
-    if: always() && needs.promote-to-test.result == 'success' && needs.docker-deploy.result == 'success'
+    if: >
+      always() &&
+      needs.promote-to-test.result == 'success' &&
+      needs.docker-deploy.result == 'success' &&
+      (github.event_name == 'workflow_dispatch' &&
+        (github.event.inputs.upload_built_artifacts_jfrog == true || github.event.inputs.upload_built_artifacts_jfrog == 'true') &&
+        (github.event.inputs.push_docker_jfrog == true || github.event.inputs.push_docker_jfrog == 'true') &&
+        (github.event.inputs.slack_notify == true || github.event.inputs.slack_notify == 'true'))
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -575,7 +856,6 @@ jobs:
       VERSION: ${{ needs.setup.outputs.VERSION }}
       BUNDLE_VERSION: ${{ needs.setup.outputs.BUNDLE_VERSION }}
       PACKAGE_VERSION: ${{ needs.artifacts-ready.outputs.PACKAGE_VERSION }}
-      FULL_PACKAGE_VERSION: ${{ needs.artifacts-ready.outputs.PACKAGE_VERSION }}
       BRANCH: ${{ github.ref_name }}
       TIME: ${{ needs.docker-deploy.outputs.time }}
       TIME_DISPLAY: ${{ needs.docker-deploy.outputs.time_display }}
@@ -587,7 +867,7 @@ jobs:
           egress-policy: audit
 
       - name: Checkout (for changelog)
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -615,7 +895,7 @@ jobs:
             *Time:* ${{ env.TIME_DISPLAY }}
             *Branch:* ${{ env.BRANCH }}
             *Build Id:* ${{ env.VERSION }}
-            *Package Version:* ${{ env.FULL_PACKAGE_VERSION }}
+            *Package Version:* ${{ env.PACKAGE_VERSION }}
             *Bundle Version:* ${{ env.BUNDLE_VERSION }}
         run: |
           set -euo pipefail

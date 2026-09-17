@@ -1063,6 +1063,11 @@ as_batch_queue_task(as_transaction* btr)
 			}
 
 			// Row should use previous namespace and bin names.
+			// Note - repeat groups share one msgp across sub-transactions,
+			// which execute concurrently. Treat sub-transaction msgps as
+			// immutable after demarshal - an in-place rewrite anywhere
+			// downstream (e.g. expression or op parsing) races sibling
+			// sub-transactions' reads of these shared bytes.
 			data += BATCH_REPEAT_SIZE;
 			tr.msgp = prev_msgp;
 		}
