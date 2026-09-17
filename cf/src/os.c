@@ -151,6 +151,14 @@ cf_os_read_int_from_file(const char* path, int64_t* val)
 		return res;
 	}
 
+	// An empty file would make the chop below write buf[SIZE_MAX] and leave
+	// buf uninitialized for the parse.
+
+	if (limit == 0) {
+		cf_warning(CF_OS, "empty file %s", path);
+		return CF_OS_FILE_RES_ERROR;
+	}
+
 	buf[limit - 1] = '\0';
 
 	cf_detail(CF_OS, "parsing value \"%s\"", buf);
@@ -158,7 +166,12 @@ cf_os_read_int_from_file(const char* path, int64_t* val)
 	char* end;
 	int64_t x = strtol(buf, &end, 10);
 
-	if (*end != '\0') {
+	// A newline-only file chops to "", which strtol() reports by not advancing
+	// end - otherwise it would be accepted as a legitimate 0. Don't add an
+	// ERANGE reject: stock /proc/sys/kernel/shmmax exceeds INT64_MAX and must
+	// parse (saturated), or cf_os_best_practices_check() crashes EE startup.
+
+	if (end == buf || *end != '\0') {
 		cf_warning(CF_OS, "invalid value \"%s\" in %s", buf, path);
 		return CF_OS_FILE_RES_ERROR;
 	}

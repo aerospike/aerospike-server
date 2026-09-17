@@ -10,9 +10,9 @@ OPT_AS = $(BUILD_ROOT)/opt/aerospike
 
 EXT ?=
 EXT_SUFFIX := $(if $(EXT),-$(EXT),)
-REV := $(shell $(DEPTH)/build/version | sed 's/-/_/g')
+REV := $(shell $(DEPTH)/build/version -v | sed 's/-/_/g')
 OS := $(shell $(DEPTH)/build/os_version)
-BUILD_NUMBER := $(shell $(DEPTH)/build/build_number)
+BUILD_NUMBER := $(shell $(DEPTH)/build/version -r)
 
 CONF_VERSION = _systemd
 

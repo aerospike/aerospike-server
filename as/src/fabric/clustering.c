@@ -45,6 +45,7 @@
 #include "shash.h"
 
 #include "base/cfg.h"
+#include "fabric/exchange.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
 #include "fabric/hlc.h"
@@ -7705,7 +7706,17 @@ clustering_cluster_reform()
 	log_cf_node_vector("recluster: pending join requests - ", new_nodes,
 			cf_vector_size(new_nodes) > 0 ? CF_INFO : CF_DEBUG);
 
-	bool redundant = ! as_partition_balance_are_migrations_allowed();
+	// SERVER-589 - a reform is redundant only while an exchange round is in
+	// flight (or the node is orphaned), not merely because migrations are
+	// disallowed. After an aborted round the node can settle back at rest with
+	// migrations stuck disallowed and no path to re-enable them; keying off the
+	// migration flag wrongly judged that state redundant and refused recluster.
+	// Rest is independent of the migration flag (see as_exchange_is_at_rest()):
+	// in a normal (non-aborted) steady state the commit path also re-enables
+	// migrations, so this coincides with the old !migrations_allowed check; the
+	// aborted-round case is exactly where the two diverge, and keying off rest
+	// is what handles it.
+	bool redundant = ! as_exchange_is_at_rest();
 
 	if (! clustering_is_running() || ! clustering_is_principal() || redundant ||
 			cf_vector_size(dead_nodes) > 0 ||

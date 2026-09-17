@@ -1071,6 +1071,7 @@ defn_hash_delete(as_sindex* si)
 			// If the list size becomes 0, delete the entry from the hash.
 			if (cf_ll_size(si_ll) == 0) {
 				cf_shash_delete(ns->sindex_defn_hash, &key);
+				cf_free(si_ll); // head allocated in defn_hash_put()
 			}
 
 			return;

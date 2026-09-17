@@ -1753,7 +1753,7 @@ fabric_connection_send_progress(fabric_connection* fc)
 	int32_t send_sz = cf_socket_send_msg(&fc->sock, &sendhdr, 0);
 
 	if (send_sz < 0) {
-		if (errno != EAGAIN && errno != EWOULDBLOCK) {
+		if (errno != EAGAIN) {
 			return false;
 		}
 
@@ -1932,7 +1932,7 @@ fabric_connection_read_fabric_msg(fabric_connection* fc)
 				sizeof(msg_hdr) + fc->r_buf_sz - fc->r_sz, 0);
 
 		if (recv_sz < 0) {
-			if (errno != EAGAIN && errno != EWOULDBLOCK) {
+			if (errno != EAGAIN) {
 				cf_warning(AS_FABRIC,
 						"fabric_connection_read_fabric_msg() recv_sz %d errno %d %s",
 						recv_sz, errno, cf_strerror(errno));
@@ -2138,7 +2138,7 @@ fabric_connection_process_readable(fabric_connection* fc)
 		}
 
 		if (recv_sz < 0) {
-			if (errno != EAGAIN && errno != EWOULDBLOCK) {
+			if (errno != EAGAIN) {
 				cf_warning(AS_FABRIC,
 						"fabric_connection_process_readable() recv_sz %d msg_sz %u remote 0x%lx errno %d %s",
 						recv_sz, fc->r_buf_sz, fabric_connection_get_id(fc),
