@@ -433,7 +433,7 @@ loop:
 }
 
 // Scan a regex literal (lex->cursor at the opening '/'): pattern up to the next
-// unescaped '/', then [imsxw] flags. Newline/EOF before the close ->
+// unescaped '/', then [imsgxw] flags. Newline/EOF before the close ->
 // TOK_ERROR_UNCLOSED_REGEX. Fills val->regex with the pattern + flag lengths;
 // the offsets derive from the token span (see token_value).
 static int
@@ -458,7 +458,7 @@ lex_scan_regex(lexer_t* lex, token_value* val)
 	p = flag;
 
 	while (p < lex->limit && (*p == 'i' || *p == 'm' || *p == 's' ||
-			*p == 'x' || *p == 'w')) {
+			*p == 'g' || *p == 'x' || *p == 'w')) {
 		p++;
 	}
 

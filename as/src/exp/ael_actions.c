@@ -117,7 +117,7 @@ static ast_ref ael_finalize_str_call(ael_context* ctx, ast_ref recv,
 static ast_ref ael_finalize_str_path(ael_context* ctx, ast_ref ctx_ref,
 		ast_ref str_fn);
 static bool ael_regex_parse_flags(ael_context* ctx, uint32_t flag_off,
-		uint32_t flag_sz, uint64_t* out);
+		uint32_t flag_sz, uint64_t* out, bool allow_global);
 static ast_etype hll_result_etype(ast_node_t pf_type);
 
 // func-call resolution — arg binding + builders
@@ -2648,9 +2648,11 @@ ael_finalize_str_path(ael_context* ctx, ast_ref ctx_ref, ast_ref str_fn)
 // pre:  flag_* is a source span into ctx->input (the run after the closing /).
 // post: i/m/s -> *out (true); x/w are lexer-admitted but have no wire bit, so
 //       they diagnose and return false.
+// allow_global gates 'g': the wire rejects GLOBAL on REGEX_COMPARE, so `=~`
+// passes false and diagnoses here rather than letting it fail at execute.
 static bool
 ael_regex_parse_flags(ael_context* ctx, uint32_t flag_off, uint32_t flag_sz,
-		uint64_t* out)
+		uint64_t* out, bool allow_global)
 {
 	uint64_t flags = 0;
 
@@ -2665,9 +2667,19 @@ ael_regex_parse_flags(ael_context* ctx, uint32_t flag_off, uint32_t flag_sz,
 		case 's':
 			flags |= AS_STRING_REGEX_DOTALL;
 			break;
+		case 'g':
+			if (! allow_global) {
+				ael_err(ctx, flag_off + i, 1,
+						"regex flag g is valid only for regexReplace");
+				return false;
+			}
+
+			flags |= AS_STRING_REGEX_GLOBAL;
+			break;
 		default: // 'x' / 'w': admitted by the lexer, but no wire bit exists
 			ael_err(ctx, flag_off + i, 1,
-					"regex flag not supported (only i, m, s)");
+					allow_global ? "regex flag not supported (only i, m, s, g)"
+								 : "regex flag not supported (only i, m, s)");
 			return false;
 		}
 	}
@@ -2691,7 +2703,7 @@ ael_new_regex_match(ael_context* ctx, ast_ref lhs, uint32_t pat_off,
 
 	uint64_t flags;
 
-	if (! ael_regex_parse_flags(ctx, flag_off, flag_sz, &flags)) {
+	if (! ael_regex_parse_flags(ctx, flag_off, flag_sz, &flags, false)) {
 		return AST_REF_NULL;
 	}
 
@@ -2712,21 +2724,16 @@ ael_new_regex_match(ael_context* ctx, ast_ref lhs, uint32_t pat_off,
 // from ael_new_regex_match because a `pattern:` operand feeds a modify op, not
 // the `=~` compare.
 // pre:  pat_* / flag_* are source spans into ctx->input.
-// post: flags i/m/s -> wire; unsupported x/w -> diagnostic + AST_REF_NULL.
+// post: flags i/m/s/g -> wire; unsupported x/w -> diagnostic + AST_REF_NULL.
 ast_ref
 ael_new_regex_operand(ael_context* ctx, uint32_t pat_off, uint32_t pat_sz,
 		uint32_t flag_off, uint32_t flag_sz)
 {
 	uint64_t flags;
 
-	if (! ael_regex_parse_flags(ctx, flag_off, flag_sz, &flags)) {
+	if (! ael_regex_parse_flags(ctx, flag_off, flag_sz, &flags, true)) {
 		return AST_REF_NULL;
 	}
-
-	// regexReplace replaces every match (the spec's `/\d+/ -> ''` removes
-	// all digits); there is no first-only regex form. GLOBAL is unused by
-	// `=~` (REGEX_COMPARE), so set here, not in the shared flag parser.
-	flags |= AS_STRING_REGEX_GLOBAL;
 
 	ast_ref pat = ast_new_string(ctx->pool, ctx->input + pat_off, pat_sz, false);
 	ast_ref fl = ast_new_int(ctx->pool, (int64_t)flags);
