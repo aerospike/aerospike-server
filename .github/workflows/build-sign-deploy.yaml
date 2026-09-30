@@ -76,7 +76,7 @@ env:
   # test.sh against them). Hoisted here because a partial bump -- three of the
   # four checkouts updated, one missed -- would generate the Dockerfile from one
   # commit and validate it with test.sh from another, and both jobs would pass.
-  DOCKER_IMAGE_REPO_REF: 76d714ee55389b9c379261968f5bb20bccb4b1b2
+  DOCKER_IMAGE_REPO_REF: 7e472d5ad886eaca4d944e8ac3fd994af1f6a826
   JFROG_URL: https://aerospike.jfrog.io
   # Scheduled nightly runs are gated by the repository variable BUILD_SIGN_DEPLOY_ENABLED
   # (Settings → Secrets and variables → Actions → Variables). When unset or not 'true', the
@@ -273,6 +273,8 @@ jobs:
     outputs:
       VERSION: ${{ steps.set_env.outputs.version }}
       BUNDLE_VERSION: ${{ steps.set_env.outputs.bundle_version }}
+      REF_SLUG: ${{ steps.set_env.outputs.ref_slug }}
+      IS_RELEASE_LINE: ${{ steps.set_env.outputs.is_release_line }}
       IS_RELEASE_REF: ${{ steps.set_env.outputs.is_release_ref }}
       MATRIX_INCLUDE: ${{ steps.build_matrix.outputs.matrix_include }}
     steps:
@@ -298,15 +300,54 @@ jobs:
 
           version="$(bash build/version)"
 
+          # This allowlist is a security control, not just hygiene: the reusable docker
+          # workflow template-interpolates app-version directly into a run: body. Two
+          # checks keep that expression-into-shell sink inert — this allowlist for the
+          # ref-derived slug half (used on non-release-line refs), and the version
+          # grammar at artifacts-ready for the package half (the whole value on release
+          # lines). Neither may be relaxed.
           if [[ ! "$GITHUB_REF_NAME" =~ ^[a-zA-Z0-9._/\-]+$ ]]; then
             echo "ERROR: GITHUB_REF_NAME contains unsafe characters: '$GITHUB_REF_NAME'" >&2
             exit 1
           fi
-          branch_prefix="${GITHUB_REF_NAME//\//-}"
-          # TEST- prefix dropped for parity with sign-build-deploy.yaml, which already uses
-          # "${branch_prefix}-${version}" as the bundle coordinate. The concurrency group above
-          # serializes runs on the same ref so jfrog-precheck prevents duplicate publication.
-          bundle_version="${branch_prefix}-${version}"
+          # REF_SLUG is the ref with '/' flattened, validated against the Docker tag
+          # grammar here (first char [a-zA-Z0-9_]) so a ref that cannot become a tag
+          # component fails at setup, not as a push rejection in three parallel jobs
+          # inside the reusable workflow after the builds complete. Length budget: the
+          # immutable tag is <slug>-<version>_<timestamp> within Docker's 128-char tag
+          # limit — 17 for _<timestamp>, ~31 headroom for -<version> (a preview git
+          # descriptor like 8.1.3.0-888-g0123456789-12) — leaving 80 for the slug.
+          ref_slug="${GITHUB_REF_NAME//\//-}"
+          if [[ ! "$ref_slug" =~ ^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,79}$ ]]; then
+            echo "ERROR: ref '$GITHUB_REF_NAME' does not yield a usable Docker tag component: '$ref_slug'" >&2
+            exit 1
+          fi
+          # master and hotfix/** publish the unprefixed w.x.y.z-n coordinate: the version
+          # already names the release line, so a branch prefix added nothing and made the
+          # bundle coordinate differ from the jf-build-id (SERVER-1721). Any other ref
+          # keeps the prefix so its bundles can never be mistaken for a release
+          # coordinate. The concurrency group above serializes runs on the same ref so
+          # jfrog-precheck prevents duplicate publication. This is the single definition
+          # of the release-line predicate that is exported as an output —
+          # artifacts-ready's docker_app_version reads it as
+          # needs.setup.outputs.IS_RELEASE_LINE. docker-mutable-tags re-derives the same
+          # master/hotfix split from GITHUB_REF_NAME for its three-way tag choice; keep
+          # the two in sync, and with sign-build-deploy.yaml.
+          if [[ "$GITHUB_REF_NAME" == "master" || "$GITHUB_REF_NAME" =~ ^hotfix/ ]]; then
+            is_release_line=true
+            bundle_version="$version"
+          else
+            is_release_line=false
+            bundle_version="${ref_slug}-${version}"
+          fi
+
+          # No probe for the pre-SERVER-1721 branch-prefixed spelling is needed here: a
+          # GitHub re-run of a pre-rename run replays that run's (pre-rename) workflow
+          # file, and a fresh dispatch computes a first-parent build count above every
+          # pre-rename run on its line, so this file can never name a pre-rename
+          # coordinate. The reachable transition hazard is sign-build-deploy.yaml's
+          # operator-supplied version, guarded by the "Refuse an already-bundled
+          # coordinate" precheck in its download-artifacts job.
 
           # Release-ref policy computed once here and consumed by every publish gate
           # (jfrog-precheck, upload, release-bundle, docker push, promote-to-test) via
@@ -314,7 +355,7 @@ jobs:
           # nightly-dispatch-branches' ref filter. NOTE: preview/** is a release ref
           # (it publishes), but build/version deliberately keeps preview's -<n>-g<sha>
           # descriptor rather than the clean master/hotfix coordinate.
-          if [[ "$GITHUB_REF_NAME" == "master" || "$GITHUB_REF_NAME" =~ ^hotfix/ || "$GITHUB_REF_NAME" =~ ^preview/ ]]; then
+          if [[ "$is_release_line" == "true" || "$GITHUB_REF_NAME" =~ ^preview/ ]]; then
             is_release_ref=true
           else
             is_release_ref=false
@@ -323,6 +364,8 @@ jobs:
           {
             echo "version=$version"
             echo "bundle_version=$bundle_version"
+            echo "ref_slug=$ref_slug"
+            echo "is_release_line=$is_release_line"
             echo "is_release_ref=$is_release_ref"
           } >> "$GITHUB_OUTPUT"
 
@@ -344,7 +387,11 @@ jobs:
   # imply the release bundle was created — a run can upload artifacts then die before
   # create-release-bundle:
   #   build_exists  → build-info present    → gates upload-artifacts-to-jfrog.
-  #   bundle_exists → release bundle present → gates create-release-bundle + docker build/push.
+  #   bundle_exists → release bundle present at BUNDLE_VERSION → gates
+  #                   create-release-bundle + docker build/push.
+  #   matched_bundle_version → BUNDLE_VERSION when the bundle probe found it, else ''
+  #                   → gates AND names promote-to-test's promotion, so it always
+  #                   promotes a bundle that exists.
   # Keeping them separate lets a re-run finish a partially-published build-id (upload done,
   # bundle not) while still skipping an already-completed one. Fails closed on unexpected
   # build-info HTTP status codes.
@@ -357,6 +404,7 @@ jobs:
     outputs:
       build_exists: ${{ steps.check.outputs.build_exists }}
       bundle_exists: ${{ steps.check.outputs.bundle_exists }}
+      matched_bundle_version: ${{ steps.check.outputs.matched_bundle_version }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -397,29 +445,54 @@ jobs:
 
           # 2) Release-bundle existence → gates create-release-bundle independently of upload.
           # Fails closed, exactly like the build-info probe above: only a definitive JFrog
-          # answer (exit 0 + parseable JSON with a release_bundles array) is trusted. Any
-          # failure of the search — auth, network, rate limit, outage, malformed response —
-          # fails this job rather than silently reporting "no bundle" and letting the
-          # non-idempotent create-release-bundle run against a coordinate that may already be
-          # bundled. jf release-bundle-search returns exit 0 with an empty release_bundles
-          # array when the bundle has no versions yet (a genuine "does not exist", not an
-          # error) — the same behavior the shared-workflows delete-release-bundle action relies on.
+          # answer — exit 0 plus a JSON object whose release_bundles is an array and whose
+          # total is a number — is trusted. Any failure of the search — auth, network, rate
+          # limit, outage, malformed response — fails this job rather than silently reporting
+          # "no bundle" and letting the non-idempotent create-release-bundle run against a
+          # coordinate that may already be bundled. jf release-bundle-search returns exit 0
+          # with an empty release_bundles array when the bundle has no versions yet (a genuine
+          # "does not exist", not an error) — the same behavior the shared-workflows
+          # delete-release-bundle action relies on. The type check is what distinguishes that
+          # from release_bundles: null, which has() accepts and .release_bundles[]? then
+          # swallows, so the probe would examine nothing and report success.
+          #
+          # --limit=255 is the versions API maximum; it defaults to 25 and orders newest-first,
+          # so an unlimited probe examines only the newest page and answers "not found" for
+          # everything older. seen != total means the listing is still truncated — fail closed
+          # rather than probe a partial list; the fix at that point is --offset paging.
           rbs_rc=0
           bundle_json="$(jf release-bundle-search versions "${BUNDLE_NAME}" \
-            --project="${JFROG_PROJECT}" --format=json)" || rbs_rc=$?
+            --project="${JFROG_PROJECT}" --limit=255 --format=json)" || rbs_rc=$?
           if [[ "$rbs_rc" -ne 0 ]] || ! printf '%s' "$bundle_json" \
-              | jq -e 'has("release_bundles")' >/dev/null 2>&1; then
-            echo "::error::jf release-bundle-search versions ${BUNDLE_NAME} failed (exit ${rbs_rc}) or returned unparseable output; failing closed (see CLI error above)."
+              | jq -e '(.release_bundles | type) == "array" and (.total | type) == "number"' >/dev/null 2>&1; then
+            echo "::error::jf release-bundle-search versions ${BUNDLE_NAME} failed (exit ${rbs_rc}) or returned no release_bundles array; failing closed (see CLI error above)."
             exit 1
           fi
+          seen=$(printf '%s' "$bundle_json" | jq '.release_bundles | length')
+          total=$(printf '%s' "$bundle_json" | jq '.total')
+          echo "Probed ${seen} of ${total} ${BUNDLE_NAME} release-bundle versions."
+          if [[ "$seen" -ne "$total" ]]; then
+            echo "::error::release-bundle listing truncated (${seen} of ${total} versions); failing closed. Add --offset paging to this probe."
+            exit 1
+          fi
+          # matched_bundle_version is BUNDLE_VERSION when the probe found it, else '':
+          # promote-to-test gates on it and promotes exactly that string, so it can
+          # never promote a coordinate that does not exist. (No pre-rename spelling is
+          # probed — this file cannot name one; see the setup comment.)
           if printf '%s' "$bundle_json" | jq -e --arg v "${BUNDLE_VERSION}" \
               '.release_bundles[]? | select(.release_bundle_version == $v)' >/dev/null 2>&1; then
-            echo "bundle_exists=true"  >> "$GITHUB_OUTPUT"
+            matched_bundle_version="$BUNDLE_VERSION"
+            bundle_exists=true
             echo "Release bundle ${BUNDLE_NAME}/${BUNDLE_VERSION} already exists — create-release-bundle will be skipped."
           else
-            echo "bundle_exists=false" >> "$GITHUB_OUTPUT"
+            matched_bundle_version=""
+            bundle_exists=false
             echo "Release bundle ${BUNDLE_NAME}/${BUNDLE_VERSION} not found — create-release-bundle may proceed."
           fi
+          {
+            echo "bundle_exists=$bundle_exists"
+            echo "matched_bundle_version=$matched_bundle_version"
+          } >> "$GITHUB_OUTPUT"
 
   build-artifacts:
     needs: setup
@@ -703,18 +776,57 @@ jobs:
 
   # Gate after matrix builds merge unsigned artifacts for signing.
   artifacts-ready:
-    needs: [organize-built-artifacts]
+    # setup is already an ancestor via organize-built-artifacts; it is in needs only to
+    # expose IS_RELEASE_LINE and REF_SLUG, and cannot change when this job runs.
+    needs: [setup, organize-built-artifacts]
     if: always() && needs.organize-built-artifacts.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     outputs:
       PACKAGE_VERSION: ${{ steps.pkg_version.outputs.package_version }}
+      DOCKER_APP_VERSION: ${{ steps.pkg_version.outputs.docker_app_version }}
     steps:
       - name: Set PACKAGE_VERSION from built artifacts
         id: pkg_version
+        env:
+          PACKAGE_VERSION: ${{ needs.organize-built-artifacts.outputs.PACKAGE_VERSION }}
+          IS_RELEASE_LINE: ${{ needs.setup.outputs.IS_RELEASE_LINE }}
+          REF_SLUG: ${{ needs.setup.outputs.REF_SLUG }}
         run: |
-          echo "package_version=${{ needs.organize-built-artifacts.outputs.PACKAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          # Version half of app-version: the reusable docker workflow template-expands
+          # app-version inside run: bodies, and dpkg only warns on shell metacharacters
+          # in a package Version — so the package half needs its own grammar, mirroring
+          # setup's REF_SLUG check for the slug half. Charset only; the length limit is
+          # enforced on the composed app-version below, where it actually applies (a
+          # dev branch on a legacy -start/-alphaN anchor already reaches 30 chars).
+          if [[ ! "$PACKAGE_VERSION" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
+            echo "::error::package version '${PACKAGE_VERSION}' is not a well-formed version; refusing to forward it to the Docker jobs."
+            exit 1
+          fi
+          echo "package_version=${PACKAGE_VERSION}" >> "$GITHUB_OUTPUT"
+          # app-version for the Docker jobs — the immutable tag's version component
+          # and, via docker-ready, the aerospike-server-docker bundle coordinate.
+          # A release line (master/hotfix, per setup's IS_RELEASE_LINE) ships the
+          # package's own w.x.y.z-n coordinate; every other ref — preview/** and any
+          # dev branch, since this job is not gated on IS_RELEASE_REF — is prefixed
+          # with setup's tag-grammar-checked REF_SLUG so its images can never be read
+          # as — or collide with — a release coordinate (SERVER-1721).
+          # PACKAGE_VERSION itself stays unprefixed and full (dpkg's Version — the same
+          # value sign-build-deploy passes as FULL_PACKAGE_VERSION): docker-build.sh
+          # matches it against package filenames, and docker-mutable-tags parses w.x.y.z
+          # out of it.
+          if [[ "$IS_RELEASE_LINE" == "true" ]]; then
+            docker_app_version="$PACKAGE_VERSION"
+          else
+            docker_app_version="${REF_SLUG}-${PACKAGE_VERSION}"
+          fi
+          if (( ${#docker_app_version} > 111 )); then # 128 - len("_YYYYmmddTHHMMSSZ")
+            echo "::error::app-version '${docker_app_version}' is ${#docker_app_version} chars; the immutable tag allows 111."
+            exit 1
+          fi
+          echo "docker_app_version=${docker_app_version}" >> "$GITHUB_OUTPUT"
       - name: Gate
         run: echo "Artifacts ready for sign/deploy"
 
@@ -816,10 +928,10 @@ jobs:
   #
   # These images take the native .deb path, which carries no aerospike-tools bundle
   # and therefore no asadm of its own, so the standalone aerospike-asadm package is
-  # installed explicitly. docker-build.sh treats an unresolved asadm as a warning,
-  # which would silently produce images without an administration shell, so
-  # prepare_docker_context.bash fails the build unless the resolved package actually
-  # lands in the generated Dockerfile.
+  # installed explicitly. As of the pinned sha, docker-build.sh -g itself fails on
+  # any unresolvable asadm for a built arch (SERVER-1850; older pins only warned);
+  # prepare_docker_context.bash additionally asserts the resolved package actually
+  # lands per arch in the generated Dockerfile.
   #
   # The SERVER package is not best-effort: the script fails the build if it
   # resolves to a remote URL, because it must be the .deb this run just signed.
@@ -909,11 +1021,15 @@ jobs:
           # second arch publishes -- rather than shipping an index whose halves
           # carry different asadm builds.
           #
-          # Pinning a version is NOT just swapping in a direct .deb URL: -A applies
-          # a direct package only to the arch its filename names, so an amd64 URL
-          # leaves arm64 with no asadm and now fails the same check. A pin needs a
-          # source covering every arch the edition builds; SERVER-1671 asks
-          # aerospike-server.docker for a version selector that does this properly.
+          # Pinning a version is NOT done with a direct .deb URL: -A applies a
+          # direct package only to the arch its filename names, so an amd64 URL
+          # leaves arm64 with no asadm and fails the same check. Pin by exporting
+          # ASADM_VERSION on this step instead: docker-build.sh (at the pinned sha)
+          # reads it from the environment — -V is its flag form, added for
+          # SERVER-1671 — through unchanged prepare_docker_context.bash. It narrows
+          # this repo source to one version for every arch the edition builds. (Not
+          # the same thing as docker-context's ASADM_VERSION output, which reports
+          # what was resolved.)
           #
           # Two runs of the same server version may therefore carry different asadm
           # builds. That is accepted, on the condition that what shipped is
@@ -982,7 +1098,7 @@ jobs:
       id-token: write
     uses: aerospike/shared-workflows/.github/workflows/reusable_docker-build-deploy.yaml@v4.1.0
     with:
-      app-version: ${{ needs.artifacts-ready.outputs.PACKAGE_VERSION }}
+      app-version: ${{ needs.artifacts-ready.outputs.DOCKER_APP_VERSION }}
       app-name: Aerospike Server
       image-name: aerospike-server
       # jf-project + repo-scope resolve to artifact.aerospike.io/database-docker-dev-local
@@ -1024,7 +1140,7 @@ jobs:
       id-token: write
     uses: aerospike/shared-workflows/.github/workflows/reusable_docker-build-deploy.yaml@v4.1.0
     with:
-      app-version: ${{ needs.artifacts-ready.outputs.PACKAGE_VERSION }}
+      app-version: ${{ needs.artifacts-ready.outputs.DOCKER_APP_VERSION }}
       app-name: Aerospike Enterprise Server
       image-name: aerospike-server-enterprise
       jf-project: database
@@ -1054,7 +1170,7 @@ jobs:
       id-token: write
     uses: aerospike/shared-workflows/.github/workflows/reusable_docker-build-deploy.yaml@v4.1.0
     with:
-      app-version: ${{ needs.artifacts-ready.outputs.PACKAGE_VERSION }}
+      app-version: ${{ needs.artifacts-ready.outputs.DOCKER_APP_VERSION }}
       app-name: Aerospike Federal Server
       image-name: aerospike-server-federal
       jf-project: database
@@ -1381,15 +1497,16 @@ jobs:
 
   promote-to-test:
     needs: [setup, create-release-bundle, jfrog-precheck]
-    # Runs when this run created the bundle (create success) OR the bundle already exists
-    # (a prior run created it but may not have promoted it, or a dup re-run). The step is
-    # idempotent — it checks the TEST promotion record and exits 0 if already promoted — so
-    # re-entry here is safe.
+    # Runs when this run created the bundle (create success) OR jfrog-precheck found
+    # it already exists (matched_bundle_version, which is the coordinate the promote
+    # step promotes) — a prior run may have created it but died before promoting.
+    # Re-entry safety rests on jf rbp's behavior for an already-promoted bundle, not
+    # on the record check below (see its NOTE).
     if: >
       always() &&
       needs.setup.outputs.IS_RELEASE_REF == 'true' &&
       (needs.create-release-bundle.result == 'success' ||
-        needs.jfrog-precheck.outputs.bundle_exists == 'true')
+        needs.jfrog-precheck.outputs.matched_bundle_version != '')
     runs-on: ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -1411,10 +1528,14 @@ jobs:
           JFROG_PROJECT: ${{ env.JFROG_PROJECT }}
           RELEASE_BUNDLE_NAME: aerospike-server
           JF_SIGNING_KEY: aerospike
-          VERSION: ${{ needs.setup.outputs.BUNDLE_VERSION }}
+          VERSION: ${{ needs.create-release-bundle.result == 'success' && needs.setup.outputs.BUNDLE_VERSION || needs.jfrog-precheck.outputs.matched_bundle_version }}
         run: |
           set -euo pipefail
           # Check if already promoted to TEST
+          # NOTE: this lookup currently never short-circuits — jf rt curl resolves
+          # /lifecycle under /artifactory and 404s silently, so status stays empty and
+          # jf rbp always runs. Fix pending (query the platform URL directly, as
+          # aerospike-client-c's promote-bundle.yml does).
           status=$(jf rt curl -s -XGET "/lifecycle/api/v2/promotion/records/${RELEASE_BUNDLE_NAME}/${VERSION}?project=${JFROG_PROJECT}" | jq -r '.promotions[]? | select(.environment == "TEST") | .status' 2>/dev/null || true)
           if [[ "$status" == "COMPLETED" ]]; then
             echo "Release bundle '${RELEASE_BUNDLE_NAME}:${VERSION}' is already promoted to TEST — skipping."
@@ -1513,7 +1634,11 @@ jobs:
         run: |
           set -euo pipefail
           # Check if already promoted to TEST — the bundle version is unique per run,
-          # so this only guards a re-run of this job against the same coordinate.
+          # so this could only matter for a re-run of this job against the same coordinate.
+          # NOTE: this lookup currently never short-circuits — jf rt curl resolves
+          # /lifecycle under /artifactory and 404s silently, so status stays empty and
+          # jf rbp always runs. Fix pending (query the platform URL directly, as
+          # aerospike-client-c's promote-bundle.yml does).
           status=$(jf rt curl -s -XGET "/lifecycle/api/v2/promotion/records/${RELEASE_BUNDLE_NAME}/${VERSION}?project=${JFROG_PROJECT}" | jq -r '.promotions[]? | select(.environment == "TEST") | .status' 2>/dev/null || true)
           if [[ "$status" == "COMPLETED" ]]; then
             echo "Release bundle '${RELEASE_BUNDLE_NAME}:${VERSION}' is already promoted to TEST — skipping."
@@ -1831,13 +1956,15 @@ jobs:
         id: slack_text
         env:
           SLACK_TITLE: ${{ env.VERSION }} promoted to JFrog TEST
+          # Bundle links target the release-bundles-v2 repo tree (<project>-release-bundles-v2)
+          # — the stable Artifactory deep link; the Lifecycle UI has no stable URL shape.
           SLACK_MSG: |
             *Time:* ${{ env.TIME_DISPLAY }}
             *Branch:* ${{ env.BRANCH }}
             *Build Id:* ${{ env.VERSION }}
             *Package Version:* ${{ env.PACKAGE_VERSION }}
-            *Bundle Version:* ${{ env.BUNDLE_VERSION }}
-            *Docker Bundle Version:* ${{ env.DOCKER_BUNDLE_VERSION }}
+            *Bundle Version:* <${{ env.JFROG_URL }}/ui/repos/tree/General/${{ env.JFROG_PROJECT }}-release-bundles-v2/aerospike-server/${{ env.BUNDLE_VERSION }}|${{ env.BUNDLE_VERSION }}>
+            *Docker Bundle Version:* <${{ env.JFROG_URL }}/ui/repos/tree/General/${{ env.JFROG_PROJECT }}-release-bundles-v2/aerospike-server-docker/${{ env.DOCKER_BUNDLE_VERSION }}|${{ env.DOCKER_BUNDLE_VERSION }}>
             *asadm:* ${{ env.ASADM_VERSION }}
         run: |
           set -euo pipefail

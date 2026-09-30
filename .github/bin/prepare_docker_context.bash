@@ -20,6 +20,9 @@
 #   CTX_DEST         path under the build context root the artifact unpacks at
 #
 # Optional env:
+#   ASADM_VERSION    Pin the asadm version. Not read here — docker-build.sh reads it
+#                    from the environment (its -V flag form) and this script passes
+#                    its environment through.
 #   ASADM_SOURCE     Where the standalone aerospike-asadm package comes from.
 #                    Unset (the default) inherits docker-build.sh's own default,
 #                    the JFrog repo matching the package format. Set to "none"
@@ -58,9 +61,10 @@ cd "$DOCKER_REPO_DIR"
 # JFrog repo matching the package format. A repo URL resolves the newest
 # published asadm at generation time; a direct package URL pins an exact
 # version. Whatever is resolved is SHA256-pinned into the Dockerfile and
-# checked at image build time. asadm is best-effort by design — if none is
-# published for this distro/arch, docker-build.sh warns and the image is built
-# without it rather than failing the release.
+# checked at image build time. As of the pinned aerospike-server.docker sha,
+# -g generation itself fails on an asadm that cannot be resolved for a built
+# arch (SERVER-1850); on older pins resolution was warning-only, so the
+# per-arch assertions below stay as defense in depth on the emitted Dockerfile.
 asadm_args=()
 case "${ASADM_SOURCE:-}" in
 "") ;;
@@ -105,9 +109,11 @@ for edition in "${editions[@]}"; do
     [[ -z "$remote_server" ]] || die \
         "remote server URL in ${dockerfile} — the image would not ship the signed artifact: ${remote_server}"
 
-    # asadm resolution is warning-only in docker-build.sh, so an unpublished or
-    # mistyped source would quietly produce an image without asadm. Anything but
-    # a deliberate ASADM_SOURCE=none has to actually land.
+    # docker-build.sh -g now fails on an unresolved asadm (SERVER-1850), but these
+    # assertions stay: they check what actually LANDED in the emitted Dockerfile,
+    # not what the generator claimed to resolve — and they hold on any older pin,
+    # where resolution was warning-only. Anything but a deliberate
+    # ASADM_SOURCE=none has to actually land.
     #
     # It has to land PER ARCH. The generated Dockerfile inlines install-native.sh,
     # which carries an independent asadmUrl in each of its amd64 and arm64
