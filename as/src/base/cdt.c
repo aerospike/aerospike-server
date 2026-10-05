@@ -8927,6 +8927,8 @@ cdt_stack_untrusted_rewrite(cdt_stack* cs, uint8_t* dest)
 			return 0;
 		}
 
+		cs->saw_nonstorage = cs->saw_nonstorage || has_nonstorage;
+
 		cdt_stack_entry* pe = cdt_stack_get_entry(cs);
 		bool do_incr_ix = (i != 0);
 
@@ -9480,6 +9482,20 @@ cdt_untrusted_err_msg(cdt_untrusted_err err)
 	cf_crash(AS_PARTICLE, "unexpected cdt_untrusted_err %u", err);
 
 	return NULL;
+}
+
+uint32_t
+cdt_untrusted_rewrite(uint8_t* dest, const uint8_t* src, uint32_t src_sz,
+		bool has_toplvl)
+{
+	return untrusted_rewrite(dest, src, src_sz, has_toplvl, false, NULL);
+}
+
+uint32_t
+cdt_untrusted_rewrite_literal(uint8_t* dest, const uint8_t* src,
+		uint32_t src_sz, bool* has_marker_r)
+{
+	return untrusted_rewrite(dest, src, src_sz, false, true, has_marker_r);
 }
 
 //==========================================================

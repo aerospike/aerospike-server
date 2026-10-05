@@ -951,6 +951,8 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 	return true;
 }
 
+#pragma GCC diagnostic pop
+
 //==========================================================
 // Public API - get memory info
 
