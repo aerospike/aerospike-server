@@ -1,0 +1,878 @@
+name: Refresh released Docker images
+run-name: "Refresh released Docker images (${{ github.event_name == 'schedule' && 'weekly, default lineages' || inputs.version || 'default lineages' }})"
+
+# Rebuild the images for already-released server versions so they pick up a patched base
+# image, without rebuilding or re-signing the server itself. This workflow only resolves
+# which versions to refresh; each version then runs the full pipeline (build -> test/scan
+# -> bundle -> promote TEST -> STAGE) in refresh-docker-image-version.yaml. Nothing in
+# either file reaches PROD or moves a mutable tag: the PROD promotion is someone else's
+# step, and publish-refreshed-tags.yaml does the tagging afterwards.
+#
+# Version selection matches aerospike-server.docker's docker-build.sh:
+#   (empty)   the latest release of every default lineage -- RELEASES in lib/support.sh
+#             at docker_repo_ref (e.g. 7.2 8.0 8.1 8.2)
+#   8.1       a lineage: its latest release
+#   8.1.2.5   a specific release
+# "Latest release" is the newest of the UNION of every record that a version shipped --
+# git ship tags, PROD tags and Docker Hub tags. See .github/bin/released_versions.sh for
+# why no one of them is authoritative.
+#
+# The weekly schedule exists because a published image goes stale on its own: a CVE fixed
+# in the base distro's archive reaches an already-released image only when something
+# rebuilds it. Nothing else does. A scheduled run resolves the same settings as a manual
+# dispatch with every default -- rebuild and promote as far as STAGE, against the pinned
+# docker_repo_ref -- but unlike a dispatch it is gated by `precheck` below: it refreshes
+# only the versions whose published images are behind their archive, and may refresh
+# nothing at all.
+#
+# The schedule is DISARMED until vars.REFRESH_DOCKER_IMAGES_ENABLED is set to "true",
+# the same lever build-sign-deploy.yaml uses for its own cron. Merging this file must not
+# be the thing that arms an unattended weekly build-and-promote; the flip is a
+# repository-variable change, not a PR, so it is also the stop button.
+#
+# The aerospike-server.docker ref is pinned, not floating. That repo is checked out three
+# times -- here for the default lineage set, and in each dispatched run by `context` to
+# generate the Dockerfile and by `test-images` to run test.sh -- across two runs and hours
+# apart, so a floating ref could have an image generated from one commit and validated by
+# another's test harness, with every job green. `docker_repo_ref: master` is therefore a
+# sentinel, resolved to a sha before anything is checked out and pinned for the whole
+# fan-out; a scheduled run always uses DEFAULT_DOCKER_REPO_REF and never the tip. Every
+# run reports how far that pin has drifted.
+#
+# A schedule event carries no inputs: every `inputs.*` is null, which for a boolean means
+# false and for docker_repo_ref means an empty ref. The settings step below is what turns
+# that into the documented defaults; read effective values from its outputs, never from
+# `inputs.*` directly, or a scheduled run silently becomes a no-push dry run. Scheduled
+# workflows also run only from the default branch, so this takes effect once merged.
+
+on:
+  schedule:
+    # Mondays. Offset off the hour and off build-and-test.yaml's 06:00 Monday slot: GitHub
+    # delays runs scheduled at high-load times, and both pipelines are heavy builds that
+    # would otherwise contend for runners.
+    - cron: "25 7 * * 1"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to refresh: w.x.y.z (e.g. 8.1.2.5), a lineage w.x (its latest release), or empty for the latest release of every default lineage in aerospike-server.docker."
+        required: false
+        type: string
+        default: ""
+      push_docker_jfrog:
+        description: Push the refreshed images to JFrog (when false, nothing is pushed, no bundle is cut and no tag moves; the images are rebuilt locally for linux/amd64 and tested that way instead)
+        type: boolean
+        default: true
+      promote_bundle:
+        description: "Promote each refresh bundle TEST -> STAGE. When false, the bundle is cut but left in database-docker-dev-local for inspection. Nothing here reaches PROD or moves a mutable tag under any setting -- that is a separate, manual step; see the per-version workflow's handoff."
+        type: boolean
+        default: true
+      force_publish:
+        description: "Publish even when the rebuilt images carry exactly the packages the published ones already have. The package comparison cannot see a recipe change that moves no package -- an entrypoint, a config template, an ENV, a label -- so picking one up through a newer docker_repo_ref needs this. Never set on a scheduled run."
+        type: boolean
+        default: false
+      asadm_version:
+        description: "aerospike-asadm version to install in the images, e.g. 5.0.3. Defaults to the newest published for the distro/arch."
+        required: false
+        type: string
+        default: ""
+      docker_repo_ref:
+        description: "aerospike-server.docker commit to generate the image definitions from and read the default lineage set. A full 40-hex sha, or the literal `master` to take that branch's tip -- which is resolved to a sha immediately and pinned for the whole fan-out, so every job builds and tests from one commit. Empty uses the pin in DEFAULT_DOCKER_REPO_REF below. Independent of build-sign-deploy.yaml's DOCKER_IMAGE_REPO_REF and may legitimately be ahead of it: a refresh picks up recipe changes a past release predates."
+        type: string
+        default: ""
+
+# Two dispatches with the same input serialize: this group covers resolving the version
+# set and dispatching it, which is all this workflow does -- the refreshes run as
+# their own runs (see the dispatch job) and carry their own per-version group, which is
+# what actually keeps two refreshes of one release off the same mutable tags. An
+# empty-version and an "8.1" dispatch still land in different groups here and can still
+# resolve to the same release; serializing them is that per-version group's job, not
+# this one's.
+# cancel-in-progress stays false so a dispatch in flight is not killed half way through
+# the version list, leaving some refreshes started and others not; GitHub keeps only one
+# run pending per group, so a third identical dispatch cancels the queued second.
+# A scheduled run carries no inputs, so it lands in the same group as an empty-version
+# dispatch -- which is what must happen: both resolve to the same default lineages. This
+# expression and run-name above are the only two places outside the settings step that
+# read inputs.* directly, because both are evaluated before any job runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.version || 'default-lineages' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # The ONLY literal for the pinned aerospike-server.docker commit. The dispatch input
+  # defaults to empty and falls back to this, so a dispatch and a scheduled run cannot
+  # resolve different refs -- a partial bump would otherwise have every manual dispatch
+  # building from the new recipe while the unattended weekly publish kept building from
+  # the old one, with both runs looking correct in isolation.
+  #
+  # A SCHEDULED run always uses this pin, never that repo's tip. The reconciler publishes
+  # to public Docker Hub without a human, so a floating default would put an unreviewed
+  # commit from another repo into published images on a Monday nobody is watching --
+  # require_docker_ref_on_master.sh guards against fork commits, not against a bad commit
+  # on master. A recipe change ships when someone bumps this line, deliberately. The
+  # resolve step below reports how far the pin has drifted from the tip, so that stays
+  # visible rather than being discovered when a recipe fix turns out not to have shipped.
+  DEFAULT_DOCKER_REPO_REF: 7e472d5ad886eaca4d944e8ac3fd994af1f6a826
+  REGISTRY: artifact.aerospike.io
+  # The repo the refresh actually re-tags, and therefore the one the precheck reads.
+  PROD_DOCKER_REPO: database-docker-prod-public-local
+
+jobs:
+  versions:
+    if: github.repository_owner == 'citrusleaf'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # released_versions.sh lists the PROD docker repo through the JFrog CLI.
+      id-token: write
+    outputs:
+      VERSIONS: ${{ steps.resolve.outputs.versions }}
+      GAPS: ${{ steps.resolve.outputs.gaps }}
+      SKIP_ALL: ${{ steps.settings.outputs.skip_all }}
+      PUSH_DOCKER_JFROG: ${{ steps.settings.outputs.push_docker_jfrog }}
+      PROMOTE_BUNDLE: ${{ steps.settings.outputs.promote_bundle }}
+      FORCE_PUBLISH: ${{ steps.settings.outputs.force_publish }}
+      ASADM_VERSION: ${{ steps.settings.outputs.asadm_version }}
+      DOCKER_REPO_REF: ${{ steps.resolve_ref.outputs.docker_repo_ref }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      # The one place a schedule event's absent inputs become the documented defaults,
+      # the schedule kill switch is read, and the release-ref policy is decided.
+      - name: Resolve effective settings
+        id: settings
+        env:
+          ENABLED: ${{ vars.REFRESH_DOCKER_IMAGES_ENABLED }}
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          IN_VERSION: ${{ inputs.version }}
+          IN_PUSH_DOCKER_JFROG: ${{ inputs.push_docker_jfrog }}
+          IN_PROMOTE_BUNDLE: ${{ inputs.promote_bundle }}
+          IN_FORCE_PUBLISH: ${{ inputs.force_publish }}
+          IN_ASADM_VERSION: ${{ inputs.asadm_version }}
+          IN_DOCKER_REPO_REF: ${{ inputs.docker_repo_ref }}
+        run: |
+          set -euo pipefail
+
+          # Only the schedule is gated, as in build-sign-deploy.yaml: a workflow_dispatch
+          # is someone deciding to refresh, and always proceeds. With the variable unset
+          # the cron is inert, which is what it must be the week this merges -- the
+          # bundle-and-promote half has never run, and a dry run cannot reach it.
+          skip_all=false
+          if [[ "$EVENT" == "schedule" && "$ENABLED" != "true" ]]; then
+            echo "::notice::scheduled refresh disabled: REFRESH_DOCKER_IMAGES_ENABLED is '${ENABLED:-<unset>}', not 'true'."
+            skip_all=true
+          fi
+          # Written on every path, not just the skip: a consumer comparing against
+          # 'true' would otherwise be comparing against an undefined output.
+          echo "skip_all=${skip_all}" >> "$GITHUB_OUTPUT"
+
+          # A scheduled refresh promotes as far as this identity can reach: it exists to
+          # put patched images in front of the human who promotes STAGE -> PROD, and a
+          # cron that stopped short of STAGE would leave them nothing to promote.
+          # force_publish is the one default a schedule does NOT take: on a cron, "the
+          # rebuilt image is identical to the published one" means there was nothing to
+          # ship, and republishing it anyway is churn on shared tags.
+          if [[ "$EVENT" == "schedule" ]]; then
+            version=""
+            push_docker_jfrog=true
+            promote_bundle=true
+            force_publish=false
+            asadm_version=""
+            docker_repo_ref="${DEFAULT_DOCKER_REPO_REF}"
+          else
+            version="$IN_VERSION"
+            push_docker_jfrog="$IN_PUSH_DOCKER_JFROG"
+            promote_bundle="$IN_PROMOTE_BUNDLE"
+            force_publish="$IN_FORCE_PUBLISH"
+            asadm_version="$IN_ASADM_VERSION"
+            docker_repo_ref="${IN_DOCKER_REPO_REF:-${DEFAULT_DOCKER_REPO_REF}}"
+          fi
+
+          # Release-ref policy, the same shape build-sign-deploy.yaml computes once and
+          # feeds to every publish gate. A non-release-ref run on that path was still
+          # bounded at dev-local; this one promotes a bundle into TEST and STAGE built by
+          # the branch's own unreviewed workflow code, and that bundle is what someone
+          # later promotes to PROD largely on trust.
+          #
+          # Degrade rather than refuse, deliberately: a branch dispatch is how these
+          # workflows get exercised end to end before they have ever run, and a refusal
+          # would make that impossible. preview/ is a release ref for build-sign-deploy
+          # because it publishes previews; it is not one here, because a refresh only
+          # ever re-publishes an already-shipped release.
+          is_release_ref=false
+          if [[ "$REF_NAME" == "master" || "$REF_NAME" =~ ^hotfix/ ]]; then
+            is_release_ref=true
+          fi
+          if [[ "$is_release_ref" != "true" ]]; then
+            echo "::notice::'${REF_NAME}' is not a release ref; this run is degraded to a build-and-test dry run (nothing is pushed or promoted)."
+            push_docker_jfrog=false
+            promote_bundle=false
+            force_publish=false
+          fi
+
+          # Validate BEFORE writing to $GITHUB_OUTPUT. The file is parsed line-wise with
+          # last-write-wins and has no newline guard, and a workflow_dispatch string input
+          # sent through the REST API may contain one -- so an unvalidated value here can
+          # forge a later `k=v` line and override an output written above it.
+          if [[ -n "$version" && ! "$version" =~ ^[0-9]+\.[0-9]+(\.[0-9]+\.[0-9]+)?$ ]]; then
+            echo "::error::'${version}' is neither a w.x.y.z version nor a w.x lineage."
+            exit 1
+          fi
+          # A full 40-hex sha, or the one sentinel that means "resolve master's tip".
+          # Any other git ref is refused: `versions`, `context` and `test-images` each
+          # check this ref out independently, across two runs and hours apart, so a
+          # floating ref could name a different tree at each one -- the image generated
+          # from one commit and validated by another's test.sh, with every job green. The
+          # sentinel is resolved to a sha by the resolve step below, before anything is
+          # checked out at it, so what reaches those jobs is always a pin.
+          if [[ "$docker_repo_ref" != "master" && ! "$docker_repo_ref" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::docker_repo_ref must be a full 40-character commit sha or the literal 'master', got '${docker_repo_ref}'."
+            exit 1
+          fi
+          if [[ -n "$asadm_version" && ! "$asadm_version" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+            echo "::error::'${asadm_version}' is not an asadm version (e.g. 5.0.3)."
+            exit 1
+          fi
+          # The booleans are forwarded verbatim to `gh workflow run -f`, and the dispatch
+          # API rejects anything but true/false against the target workflow's boolean
+          # inputs -- but only AFTER the dispatch, where the error names neither this
+          # workflow nor the input that produced it. Assert the shape here instead, where
+          # it can.
+          for b in push_docker_jfrog promote_bundle force_publish; do
+            if [[ "${!b}" != "true" && "${!b}" != "false" ]]; then
+              echo "::error::${b} resolved to '${!b}', expected true or false."
+              exit 1
+            fi
+          done
+
+          {
+            echo "version=${version}"
+            echo "push_docker_jfrog=${push_docker_jfrog}"
+            echo "promote_bundle=${promote_bundle}"
+            echo "force_publish=${force_publish}"
+            echo "asadm_version=${asadm_version}"
+            echo "docker_repo_ref=${docker_repo_ref}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Event: ${EVENT} (ref ${REF_NAME}, release ref: ${is_release_ref})"
+          echo "Version: ${version:-<default lineages>}"
+          echo "docker_repo_ref: ${docker_repo_ref}"
+          echo "push_docker_jfrog=${push_docker_jfrog} promote_bundle=${promote_bundle}" \
+               "force_publish=${force_publish}"
+          echo "skip_all=${skip_all}"
+
+      - name: Checkout
+        if: steps.settings.outputs.skip_all != 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      # Pin the ref before anything is checked out at it. The sentinel becomes a sha here
+      # and nowhere else, so the three independent checkouts downstream -- this job's, and
+      # `context`'s and `test-images`' in each dispatched run -- are the same commit by
+      # construction.
+      #
+      # The drift line runs on every path, pinned runs included: the pin goes stale
+      # silently otherwise, and "how far behind is it" is the question nobody thinks to
+      # ask until a recipe fix turns out not to have shipped. Non-fatal, because a GitHub
+      # outage must not fail a run that already has its sha.
+      - name: Resolve docker_repo_ref
+        id: resolve_ref
+        if: steps.settings.outputs.skip_all != 'true'
+        env:
+          REQUESTED: ${{ steps.settings.outputs.docker_repo_ref }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$REQUESTED" == "master" ]]; then
+            if ! resolved="$(bash .github/bin/docker_repo_tip.sh)"; then
+              echo "::error::docker_repo_ref=master, but aerospike-server.docker's tip could not be resolved."
+              exit 1
+            fi
+            echo "::notice::docker_repo_ref=master resolved to ${resolved}; every job in this fan-out uses that commit."
+          else
+            resolved="$REQUESTED"
+          fi
+          echo "docker_repo_ref=${resolved}" >> "$GITHUB_OUTPUT"
+
+          tip="$(bash .github/bin/docker_repo_tip.sh 2>/dev/null || true)"
+          if [[ -z "$tip" ]]; then
+            echo "::warning::could not read aerospike-server.docker's tip; not reporting pin drift."
+          elif [[ "$tip" == "$resolved" ]]; then
+            echo "aerospike-server.docker ${resolved} is master's tip."
+          else
+            echo "::notice::building from ${resolved}; aerospike-server.docker master is now ${tip}. Bump DEFAULT_DOCKER_REPO_REF to adopt it, or dispatch with docker_repo_ref=master for a one-off."
+            {
+              echo "### aerospike-server.docker"
+              echo ""
+              echo "Building from \`${resolved}\`; master is now \`${tip}\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Only the empty-version branch reads the docker repo (for RELEASES); a targeted
+      # refresh never clones an unvalidated ref here at all.
+      - name: Checkout aerospike-server.docker repository
+        if: steps.settings.outputs.skip_all != 'true' && steps.settings.outputs.version == ''
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: aerospike/aerospike-server.docker
+          path: pkg/docker
+          ref: ${{ steps.resolve_ref.outputs.docker_repo_ref }}
+          fetch-depth: 1
+
+      # Sourcing lib/support.sh below executes code from that checkout, so the same
+      # boundary the per-version workflow enforces applies here.
+      - name: Require docker_repo_ref to be on aerospike-server.docker master
+        if: steps.settings.outputs.skip_all != 'true' && steps.settings.outputs.version == ''
+        env:
+          DOCKER_REPO_DIR: ${{ github.workspace }}/pkg/docker
+          DOCKER_REPO_REF: ${{ steps.resolve_ref.outputs.docker_repo_ref }}
+        run: bash .github/bin/require_docker_ref_on_master.sh
+
+      # released_versions.sh lists the PROD docker repo, which needs an authenticated jf.
+      - name: Install JFrog CLI
+        if: steps.settings.outputs.skip_all != 'true'
+        uses: step-security/setup-jfrog-cli@3054b554c0fb4915b3d58847fb7730c593dbb934 # v5.0.0
+        env:
+          JF_URL: https://artifact.aerospike.io
+          JF_PROJECT: database
+        with:
+          version: 2.78.8
+          oidc-provider-name: database-gh-citrusleaf
+          oidc-audience: database-gh-citrusleaf
+
+      - name: Resolve versions to refresh
+        id: resolve
+        if: steps.settings.outputs.skip_all != 'true'
+        env:
+          VERSION: ${{ steps.settings.outputs.version }}
+          DOCKER_REPO_REF: ${{ steps.resolve_ref.outputs.docker_repo_ref }}
+          RV_HUB_ORG: ${{ vars.AEROSPIKE_DOCKER_ORG_NAME }}
+          RV_PROD_REPO: ${{ env.PROD_DOCKER_REPO }}
+          RV_GIT_DIR: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+
+          # The union of every record that a version shipped, not this repo's ship tags
+          # alone, and fail-closed on any source it cannot read. The reasoning and the
+          # failure it prevents are in .github/bin/released_versions.sh.
+          # Captured rather than piped straight into mapfile: `mapfile < <(cmd)`
+          # discards cmd's exit status, so the script's own fail-closed exits would
+          # only ever be caught by the emptiness check behind them.
+          if ! released_raw="$(bash .github/bin/released_versions.sh)"; then
+            echo "::error::could not resolve the released version set."
+            exit 1
+          fi
+          mapfile -t released < <(grep -E '^[0-9]+(\.[0-9]+){3}$' <<<"$released_raw" || true)
+          if [[ "${#released[@]}" -eq 0 ]]; then
+            echo "::error::released_versions.sh produced no versions."
+            exit 1
+          fi
+          echo "::group::known releases (${#released[@]})"
+          printf '%s\n' "${released[@]}"
+          echo "::endgroup::"
+
+          # The list is version-sorted ascending, so the tip of any span is its last line.
+          latest_of() {
+            printf '%s\n' "${released[@]}" | grep -E "^${1//./\\.}\\." | tail -1
+          }
+
+          versions=()
+          gaps=()
+          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            versions+=("$VERSION")
+          elif [[ "$VERSION" =~ ^[0-9]+\.[0-9]+$ ]]; then
+            latest="$(latest_of "$VERSION" || true)"
+            if [[ -z "$latest" ]]; then
+              echo "::error::no released w.x.y.z for lineage ${VERSION}."
+              exit 1
+            fi
+            versions+=("$latest")
+          elif [[ -n "$VERSION" ]]; then
+            echo "::error::'${VERSION}' is neither a w.x.y.z version nor a w.x lineage."
+            exit 1
+          else
+            # The default set is aerospike-server.docker's, read from the same commit the
+            # image definitions are generated from -- so an empty version selects exactly
+            # what an all-lineage `docker-build.sh -p` at that commit would build.
+            if ! lineages="$(cd pkg/docker && bash -c 'source lib/support.sh >/dev/null && support_releases')" \
+               || [[ -z "$lineages" ]]; then
+              echo "::error::could not read the default lineage set (support_releases) from aerospike-server.docker@${DOCKER_REPO_REF}."
+              exit 1
+            fi
+            echo "Default lineages at ${DOCKER_REPO_REF}: ${lineages}"
+            for wx in $lineages; do
+              if [[ ! "$wx" =~ ^[0-9]+\.[0-9]+$ ]]; then
+                echo "::error::unexpected lineage '${wx}' from support_releases."
+                exit 1
+              fi
+              latest="$(latest_of "$wx" || true)"
+              if [[ -z "$latest" ]]; then
+                # The docker repo only lists published lineages, so an unresolved one is a
+                # fault -- but one lineage's, not the run's. Recorded and reported by
+                # report-gaps after the others have been dispatched; failing here would
+                # mean a single bad lineage cancels the whole week.
+                echo "::error::no released w.x.y.z for default lineage ${wx}."
+                gaps+=("lineage ${wx}")
+                continue
+              fi
+              versions+=("$latest")
+            done
+          fi
+
+          if [[ "${#gaps[@]}" -gt 0 ]]; then
+            printf '%s\n' "${gaps[@]}" | jq -Rcn '[inputs]' | sed 's/^/gaps=/' >> "$GITHUB_OUTPUT"
+          else
+            echo "gaps=[]" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ "${#versions[@]}" -eq 0 ]]; then
+            echo "::error::no default lineage resolved to a released version."
+            echo "versions=[]" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          json="$(printf '%s\n' "${versions[@]}" | jq -Rcn '[inputs]')"
+          echo "versions=${json}" >> "$GITHUB_OUTPUT"
+          echo "Refreshing: ${versions[*]}"
+
+  # Does the published image actually need rebuilding? Only a scheduled run is gated on
+  # the answer -- a dispatch is someone asking for a refresh, and is never second-guessed.
+  #
+  # The signal is the published image itself: `apt-get -s dist-upgrade` inside it reports
+  # what the archive now has that the image does not. Why that is the right question, and
+  # why `upgrade` would miss the soname bump this pipeline exists for, is written out once
+  # in .github/bin/image_packages.sh.
+  #
+  # Checking the base image's digest instead would be cheaper and wrong -- a security
+  # update reaches us through apt at build time, not through a base layer, so the base tag
+  # can sit unmoved while its archive ships a fix. The CVE this gate exists for behaved
+  # exactly that way: ubuntu:24.04's digest was unchanged while noble-security carried
+  # libssl3t64 3.0.13-0ubuntu3.16 for the 3.0.13-0ubuntu3.15 in the published images.
+  #
+  # Read from PROD, the repo whose images this pipeline exists to replace -- not from
+  # Docker Hub, which is the downstream mirror. A gate that consults a different registry
+  # than the one it gates
+  # re-fires forever on any skew between them, and PROD is reachable with the JFrog OIDC
+  # identity the rest of the pipeline already uses, so no Docker Hub publish credential
+  # has to be materialized here at all.
+  #
+  # Checked on linux/amd64 only: Ubuntu publishes a security update for both arches at
+  # once, so one arch is a faithful proxy and the gate stays a few seconds per image.
+  precheck:
+    needs: [versions]
+    # The loop is 4 lineages x 3 editions, and each image costs one bounded manifest
+    # probe plus one bounded apt probe. IMAGE_PACKAGES_TIMEOUT is lowered to 120s below
+    # so the worst case (12 x 180s = 36 min) still fits well inside this, instead of the
+    # job timeout firing before any image reached its own fail-open branch -- which would
+    # take `dispatch` with it and cancel the week.
+    # SKIP_ALL first: when the kill switch stops a scheduled run, `resolve` never runs
+    # and VERSIONS is the empty string, which `!= '[]'` would let through into a job
+    # whose first assertion is that the list is non-empty.
+    if: needs.versions.outputs.SKIP_ALL != 'true' && needs.versions.outputs.VERSIONS != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      VERSIONS: ${{ steps.filter.outputs.versions }}
+      # Versions PROD does not carry. Non-empty fails report-gaps, after the lineages
+      # that CAN be refreshed have been dispatched.
+      GAPS: ${{ steps.filter.outputs.gaps }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout (for the image probes)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: |
+            .github/bin/image_packages.sh
+            .github/bin/image_exists.sh
+          sparse-checkout-cone-mode: false
+
+      # Only the scheduled path reads an image; a dispatch passes straight through the
+      # filter step below, so it needs no registry identity at all.
+      - name: Install JFrog CLI
+        id: jf
+        if: github.event_name == 'schedule'
+        uses: step-security/setup-jfrog-cli@3054b554c0fb4915b3d58847fb7730c593dbb934 # v5.0.0
+        env:
+          JF_URL: https://artifact.aerospike.io
+          JF_PROJECT: database
+        with:
+          version: 2.78.8
+          oidc-provider-name: database-gh-citrusleaf
+          oidc-audience: database-gh-citrusleaf
+
+      - name: Docker login to Artifactory
+        if: github.event_name == 'schedule'
+        uses: step-security/docker-login-action@164e21d7e52229904128e2f946001cb88278c33d # v4.2.0
+        with:
+          registry: artifact.aerospike.io
+          username: ${{ steps.jf.outputs.oidc-user }}
+          password: ${{ steps.jf.outputs.oidc-token }}
+
+      - name: Select the versions whose published images are behind the archive
+        id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          VERSIONS: ${{ needs.versions.outputs.VERSIONS }}
+          # Per-probe budgets that fit the job timeout above; see the note on the job.
+          IMAGE_PACKAGES_TIMEOUT: "120"
+          IMAGE_EXISTS_TIMEOUT: "60"
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT" != "schedule" ]]; then
+            echo "Dispatch: refreshing every resolved version without prechecking."
+            # gaps on every path, not just the prechecked one: `!= '[]'` is true for the
+            # empty string, so an unwritten output reads as "there are gaps" and fails
+            # report-gaps on every manual dispatch.
+            {
+              echo "versions=${VERSIONS}"
+              echo "gaps=[]"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          mapfile -t versions < <(jq -r '.[]' <<<"$VERSIONS")
+
+          # A failure inside a process substitution is invisible to set -e and pipefail,
+          # and `jq -r '.[]' <<<""` even exits 0. An empty list here would walk straight
+          # into the "nothing to do" branch below and report every published image as
+          # current, having examined none -- the one answer this gate must never give.
+          if [[ "${#versions[@]}" -eq 0 ]]; then
+            echo "::error::precheck received no versions to examine (VERSIONS='${VERSIONS}')."
+            exit 1
+          fi
+
+          # How many packages one published image is behind its archive on, or
+          # "fail-open" when the image exists but cannot be read. A registry outage must
+          # not be mistaken for "nothing to do" -- that would silently park a vulnerable
+          # image in the clear.
+          #
+          # A tag that is genuinely ABSENT is a different answer and gets a different
+          # branch: fail-open would report it every single week with nothing able to fix
+          # it, so an absence is named once and fails the job. The discrimination lives
+          # in .github/bin/image_exists.sh, which both this gate and verify-refresh use.
+          #
+          # The probe lives in .github/bin/image_packages.sh so both gates read an image
+          # the same way -- same `docker run` shape, same fail-closed plausibility
+          # checks -- and neither can be changed without the other being read. The
+          # questions themselves are deliberately different: this one asks `pending`
+          # (what the archive has that the image does not) and uses only the count;
+          # verify-refresh asks `installed` and diffs the sets.
+          # Called in a command substitution, so it reports through stdout only: an
+          # array appended to in here would be appended to in a subshell and lost.
+          pending_in() {
+            local ref=$1 out n rc=0
+            bash "${GITHUB_WORKSPACE}/.github/bin/image_exists.sh" "$ref" >/dev/null 2>&1 || rc=$?
+            case "$rc" in
+              0) ;;
+              2) echo "absent"; return ;;
+              *) echo "::warning::could not reach ${ref}; treating as needing a refresh." >&2
+                 echo "fail-open"; return ;;
+            esac
+            if ! out=$(bash "${GITHUB_WORKSPACE}/.github/bin/image_packages.sh" pending "$ref" 2>/dev/null); then
+              echo "::warning::could not inspect ${ref}; treating as needing a refresh." >&2
+              echo "fail-open"
+              return
+            fi
+            n=$(grep -c . <<<"$out" || true)
+            # An empty count would compare as "not greater than 0" and read as
+            # "nothing to do" -- the one wrong answer this gate must never give.
+            [[ "$n" =~ ^[0-9]+$ ]] || n="fail-open"
+            echo "$n"
+          }
+
+          needed=()
+          missing=()
+          {
+            echo "| version | image | pending upgrades |"
+            echo "|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for v in "${versions[@]}"; do
+            why=""
+            absent=false
+            for image in aerospike-server aerospike-server-enterprise aerospike-server-federal; do
+              ref="${REGISTRY}/${PROD_DOCKER_REPO}/${image}:${v}"
+              n="$(pending_in "$ref")"
+              echo "| ${v} | ${image} | ${n} |" >> "$GITHUB_STEP_SUMMARY"
+              if [[ "$n" == "absent" ]]; then
+                missing+=("$ref")
+                absent=true
+              elif [[ "$n" == "fail-open" || "$n" -gt 0 ]]; then
+                why="${why}${why:+, }${image}=${n}"
+              fi
+              # Pulled images accumulate on one runner across up to 12 inspections.
+              docker image rm "$ref" >/dev/null 2>&1 || true
+            done
+            # A version with ANY edition missing from PROD is left to report-gaps, even
+            # if another edition is stale: dispatching it would spend three multi-arch
+            # builds and then fail in verify-refresh on the absent edition, since the
+            # dispatcher never sets allow_first_publish. The editions ship as a set.
+            if [[ "$absent" == "true" ]]; then
+              echo "${v}: not refreshed; an edition is missing from ${PROD_DOCKER_REPO}."
+            elif [[ -n "$why" ]]; then
+              echo "${v}: refresh needed (${why})"
+              needed+=("$v")
+            else
+              echo "${v}: published images are current; skipping."
+            fi
+          done
+
+          # A version the registry does not have is still a fault -- it was never
+          # promoted, or the lineage/repo mapping is wrong, and a human has to look --
+          # but it is that LINEAGE's fault, not the run's. Failing here takes every other
+          # lineage down with it, because `dispatch` needs `precheck` to succeed: a single
+          # default lineage whose newest release PROD does not carry would mean no refresh
+          # at all that week.
+          #
+          # Reported per version and carried to report-gaps, which fails the run AFTER
+          # the healthy lineages have been dispatched.
+          if [[ "${#missing[@]}" -gt 0 ]]; then
+            {
+              echo ""
+              echo "**Not published in \`${PROD_DOCKER_REPO}\` — not refreshed:**"
+              for m in "${missing[@]}"; do echo "- \`${m}\`"; done
+            } >> "$GITHUB_STEP_SUMMARY"
+            for m in "${missing[@]}"; do
+              echo "::error::no published image at ${m}. A refresh only re-publishes an existing release; promote that version, or drop its lineage from the default set."
+            done
+            printf '%s\n' "${missing[@]}" | jq -Rcn '{gaps: [inputs]} | .gaps' \
+              | sed 's/^/gaps=/' >> "$GITHUB_OUTPUT"
+          else
+            echo "gaps=[]" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [[ ${#needed[@]} -eq 0 ]]; then
+            echo "versions=[]" >> "$GITHUB_OUTPUT"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "No refresh needed: every published image already carries the newest packages its archive offers." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          json="$(printf '%s\n' "${needed[@]}" | jq -Rcn '[inputs]')"
+          echo "versions=${json}" >> "$GITHUB_OUTPUT"
+          echo "Refreshing: ${needed[*]}"
+
+  # One RUN per version, not a matrix of reusable-workflow calls in this run.
+  #
+  # reusable_docker-build-deploy names its per-leg artifacts from image-name and
+  # platform alone -- digests-aerospike-server--linux-amd64 -- with no overwrite, and
+  # GitHub scopes artifacts to the run. A called workflow's jobs execute inside the
+  # CALLER's run, so several versions under one run means several uploads of one
+  # artifact name: a 409 that kills every leg but the first, after its builds have
+  # already been paid for. That namespace is the one a caller cannot qualify, because
+  # image-name is also the published repository path -- so the fix is to stop sharing
+  # the run. A default-lineage or scheduled refresh is always the multi-version case,
+  # so this is not an edge.
+  #
+  # Dispatching rather than calling is also what build-sign-deploy.yaml does to fan its
+  # scheduled work out, for its own reasons; the token and permission shape here are
+  # copied from it.
+  #
+  # The tradeoff is real and deliberate: this run no longer reports per-version
+  # results, because the children are separate runs. It reports what it dispatched;
+  # the refreshes themselves are tracked on the per-version workflow.
+  dispatch:
+    needs: [versions, precheck]
+    # Spelled out rather than left to GitHub's implicit needs-success rule, which the
+    # bare `!= '[]'` relied on: that expression is also true for the empty string a
+    # skipped or failed precheck leaves behind. A precheck that did not succeed stops
+    # the run rather than falling back to the unfiltered list -- deliberately. On an
+    # unattended cron the unfiltered list is four lineages rebuilt and promoted into
+    # STAGE, each one asking a human to finish it, which is not the right thing to do
+    # when the gate in front of it just crashed.
+    if: >
+      !cancelled() &&
+      needs.versions.result == 'success' &&
+      needs.precheck.result == 'success' &&
+      needs.precheck.outputs.VERSIONS != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Dispatch one refresh run per version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+          VERSIONS: ${{ needs.precheck.outputs.VERSIONS }}
+          PUSH_DOCKER_JFROG: ${{ needs.versions.outputs.PUSH_DOCKER_JFROG }}
+          PROMOTE_BUNDLE: ${{ needs.versions.outputs.PROMOTE_BUNDLE }}
+          FORCE_PUBLISH: ${{ needs.versions.outputs.FORCE_PUBLISH }}
+          ASADM_VERSION: ${{ needs.versions.outputs.ASADM_VERSION }}
+          DOCKER_REPO_REF: ${{ needs.versions.outputs.DOCKER_REPO_REF }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t versions < <(jq -r '.[]' <<<"$VERSIONS")
+
+          # Same hazard as in precheck: an unreadable list yields an empty array, the
+          # loop runs zero times, and the final [[ failed -eq 0 ]] would report a green
+          # run that dispatched nothing.
+          if [[ "${#versions[@]}" -eq 0 ]]; then
+            echo "::error::nothing to dispatch (VERSIONS='${VERSIONS}')."
+            exit 1
+          fi
+
+          dispatched=0
+          failed=0
+          {
+            echo "### Refresh runs dispatched"
+            echo ""
+            echo "| version | dispatched |"
+            echo "|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for v in "${versions[@]}"; do
+            # --ref is this run's own ref, so a scheduled run (always the default
+            # branch) dispatches the definition it was itself read from. The dispatch
+            # API validates -f inputs against the workflow definition on the TARGET
+            # ref, so the two files have to land together; a ref carrying only one of
+            # them is rejected outright rather than silently dropping an input.
+            #
+            # allow_first_publish is deliberately not passed: it defaults to false, and
+            # a fan-out refresh must never be the thing that gives a version its first
+            # published image.
+            if gh workflow run refresh-docker-image-version.yaml \
+                 --repo "$REPO" \
+                 --ref "$REF" \
+                 -f version="$v" \
+                 -f push_docker_jfrog="$PUSH_DOCKER_JFROG" \
+                 -f promote_bundle="$PROMOTE_BUNDLE" \
+                 -f force_publish="$FORCE_PUBLISH" \
+                 -f asadm_version="$ASADM_VERSION" \
+                 -f docker_repo_ref="$DOCKER_REPO_REF"; then
+              echo "Dispatched refresh for ${v}."
+              echo "| ${v} | yes |" >> "$GITHUB_STEP_SUMMARY"
+              dispatched=$((dispatched + 1))
+            else
+              # Unlike build-sign-deploy's nightly, which warns because older branches
+              # legitimately predate an input, every dispatch here targets one ref and
+              # one definition. A rejection is a fault, not a stale branch.
+              echo "::error::dispatch failed for ${v}."
+              echo "| ${v} | FAILED |" >> "$GITHUB_STEP_SUMMARY"
+              failed=$((failed + 1))
+            fi
+          done
+
+          {
+            echo ""
+            echo "Dispatched ${dispatched} of ${#versions[@]} version(s)."
+            echo ""
+            echo "Each refresh runs as its own \`Refresh released Docker images (one version)\`"
+            echo "run: https://github.com/${REPO}/actions/workflows/refresh-docker-image-version.yaml"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "Dispatched ${dispatched} of ${#versions[@]}; ${failed} rejected."
+          [[ "$failed" -eq 0 && "$dispatched" -eq "${#versions[@]}" ]]
+
+  # Fails the run for any lineage that could not be refreshed, AFTER the ones that could
+  # have been dispatched. Separating the two is the point: a gap that fails `precheck`
+  # cancels the whole week, because `dispatch` needs it.
+  report-gaps:
+    needs: [versions, precheck, dispatch]
+    # Each GAPS must be a non-empty JSON array, not merely `!= '[]'`: an output that was
+    # never written is the empty string, which `!= '[]'` reads as "there are gaps". A
+    # disarmed cron skips both producers, so the bare comparison would fail every such
+    # run and alert CORE about it.
+    if: >
+      !cancelled() &&
+      needs.versions.result == 'success' &&
+      needs.versions.outputs.SKIP_ALL != 'true' &&
+      ((needs.versions.outputs.GAPS != '[]' && needs.versions.outputs.GAPS != '') ||
+       (needs.precheck.outputs.GAPS != '[]' && needs.precheck.outputs.GAPS != ''))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Report the lineages that could not be refreshed
+        env:
+          VERSION_GAPS: ${{ needs.versions.outputs.GAPS }}
+          PRECHECK_GAPS: ${{ needs.precheck.outputs.GAPS }}
+          DISPATCH_RESULT: ${{ needs.dispatch.result }}
+        run: |
+          set -euo pipefail
+          mapfile -t gaps < <(jq -r '.[]?' <<<"${VERSION_GAPS:-[]}"; jq -r '.[]?' <<<"${PRECHECK_GAPS:-[]}")
+
+          # Belt and braces behind the job's `if:`: this job exists to fail a run, so it
+          # must never do that on an empty list.
+          if [[ "${#gaps[@]}" -eq 0 ]]; then
+            echo "No gaps to report."
+            exit 0
+          fi
+
+          {
+            echo "### Not refreshed"
+            echo ""
+            for g in "${gaps[@]}"; do echo "- \`${g}\`"; done
+            echo ""
+            echo "Everything else was dispatched (\`dispatch\` finished \`${DISPATCH_RESULT}\`)."
+            echo "Promote the missing version, or drop its lineage from RELEASES at the pinned docker_repo_ref."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::not refreshed: ${gaps[*]}"
+          exit 1
+
+  # A cron has no operator watching it, and a failure here means no refresh was
+  # dispatched at all -- the week's patched images simply do not ship, silently, because
+  # a skipped or failed run renders as nothing in most views.
+  notify-failure:
+    needs: [versions, precheck, dispatch, report-gaps]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Send Slack message to CORE
+        continue-on-error: true
+        uses: step-security/slack-github-action@16410fbfd088e8034b2d1cda051d29ada4097065 # v3.0.3
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.DB_SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ secrets.DB_SLACK_CHANNEL }}",
+              "text": "Weekly Docker image refresh failed to dispatch",
+              "blocks": [
+                { "type": "header", "text": { "type": "plain_text", "text": "Weekly Docker image refresh failed to dispatch", "emoji": true } },
+                { "type": "section", "text": { "type": "mrkdwn", "text": "*versions:* ${{ needs.versions.result }}\n*precheck:* ${{ needs.precheck.result }}\n*dispatch:* ${{ needs.dispatch.result }}\n*report-gaps:* ${{ needs.report-gaps.result }}\n\nIf only report-gaps failed, the healthy lineages WERE dispatched and one or more could not be. <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>" } }
+              ]
+            }

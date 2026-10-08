@@ -1,0 +1,1040 @@
+name: Publish refreshed Docker tags
+run-name: "Publish refreshed tags (${{ inputs.version || 'scan' }})"
+
+# The second half of a Docker image refresh: point the PROD mutable tags at a refreshed
+# image and copy it to Docker Hub.
+#
+# refresh-docker-image-version.yaml rebuilds, tests and verifies a released version and
+# promotes its bundle as far as STAGE. It cannot go further -- promoting STAGE -> PROD is
+# someone else's step -- and until that happens no mutable tag may move, because
+# w.x.y.z / w.x.y / w.x / latest must only ever point at an image PROD actually holds.
+#
+# This RECONCILES rather than waiting to be told. It asks one question of the registry --
+# "does PROD hold a refreshed image that its own mutable tags do not point at?" -- and
+# converges what it finds. So a forgotten dispatch cannot strand a refresh: the next
+# scheduled run picks it up. It is also idempotent by construction, which a handoff
+# carrying state across an unbounded human-gated wait could never be.
+#
+# NOTHING IS HANDED OVER. Every value is re-read from the registries at the moment it
+# runs. Digests and tags carried across that gap can be stale -- a newer release shipped,
+# a different bundle was promoted, the refresh was superseded by a later one -- and a tag
+# written from stale state is the regression this pipeline exists to avoid.
+#
+# WHY THE LABEL MATTERS. "PROD's w.x.y.z does not point at the newest immutable tag" is
+# ALSO true of every ordinary release, between its PROD promotion and whatever moves its
+# tags afterwards. A refresh and a release are otherwise indistinguishable once published:
+# same labels, same bundle name, same <w.x.y.z-n>_<timestamp> coordinate. So the scan acts
+# only on images carrying com.aerospike.refresh.run, which refresh-docker-image-version
+# stamps and the release path does not. Without that the reconciler would silently take
+# over PROD tagging for all releases.
+#
+# Which tags may move is decided HERE, at write time, from the union of git ship tags,
+# PROD tags and Docker Hub tags -- see .github/bin/released_versions.sh for why no single
+# one of those is authoritative. A version superseded while it waited for its PROD
+# promotion keeps its own w.x.y.z and quietly stops claiming the shared spans.
+
+on:
+  schedule:
+    # Daily. The PROD promotion is human-gated and may take days, so a cadence pinned to
+    # the weekly refresh would miss it and then not look again for a week. A run with
+    # nothing to do costs one tag listing plus a couple of manifest reads per recent
+    # version, so daily is close to free.
+    - cron: "40 9 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Publish just this version, w.x.y.z (e.g. 8.1.2.5). Empty scans PROD for every refresh whose tags have not been published yet."
+        required: false
+        type: string
+        default: ""
+      bundle_version:
+        description: "With `version` (required alongside it), pin the exact refresh to publish, as the enterprise immutable tag (e.g. 8.1.2.5-1_20261006T174233Z). Empty takes the newest refresh of that version PROD holds. ONE-SHOT: the next scheduled scan rolls the tags forward onto the newest refresh again, so set PUBLISH_REFRESHED_TAGS_ENABLED to false until the bad refresh is removed from PROD. All three editions resolve through the pinned refresh's label, so they roll back together."
+        required: false
+        type: string
+        default: ""
+      lookback_days:
+        description: "How far back a refresh coordinate's timestamp may be and still be reconciled automatically. Bounds the scan, and keeps a months-old unpublished refresh a thing a human looks at rather than something this quietly ships. Ignored when `version` is given."
+        required: false
+        type: string
+        default: "30"
+      update_mutable_tags:
+        description: "Move the PROD mutable tags -- w.x.y.z always, plus w.x.y at its patch line's tip, w.x at its lineage's tip and latest at the overall tip. When false, Docker Hub receives only the immutable tag."
+        type: boolean
+        default: true
+      push_docker_hub:
+        description: "Copy the images and their tags to Docker Hub (aerospike/aerospike-server*). The source is always the PROD repo, so Docker Hub can only ever receive what was promoted."
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  REGISTRY: artifact.aerospike.io
+  PROD_DOCKER_REPO: database-docker-prod-public-local
+  HUB_ORG: ${{ vars.AEROSPIKE_DOCKER_ORG_NAME }}
+  JFROG_URL: https://aerospike.jfrog.io
+  JFROG_PROJECT: database
+  REFRESH_LABEL: com.aerospike.refresh.run
+
+jobs:
+  # What, if anything, is unpublished? Cheap by construction: one tag listing for the
+  # whole repo, then a couple of manifest reads per in-lookback version, and the label
+  # read only on versions that are actually candidates.
+  scan:
+    if: github.repository_owner == 'citrusleaf'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      VERSIONS: ${{ steps.scan.outputs.versions }}
+      SKIP_ALL: ${{ steps.gate.outputs.skip_all }}
+      IS_RELEASE_REF: ${{ steps.gate.outputs.is_release_ref }}
+      # The effective toggles. Read these, never inputs.* -- a schedule event carries no
+      # inputs at all, so every `inputs.x` is null and the cron would skip every write
+      # while still going green.
+      UPDATE_MUTABLE_TAGS: ${{ steps.gate.outputs.update_mutable_tags }}
+      PUSH_DOCKER_HUB: ${{ steps.gate.outputs.push_docker_hub }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      # Only the schedule is gated, as in build-sign-deploy.yaml and
+      # refresh-docker-images.yaml: a workflow_dispatch is someone deciding to publish and
+      # always proceeds. This cron moves `latest` on public Docker Hub unattended, so it
+      # lands inert and the flip is a repository-variable change rather than a PR -- which
+      # makes it the stop button too.
+      - name: Gate the run
+        id: gate
+        env:
+          ENABLED: ${{ vars.PUBLISH_REFRESHED_TAGS_ENABLED }}
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          IN_UPDATE_MUTABLE_TAGS: ${{ inputs.update_mutable_tags }}
+          IN_PUSH_DOCKER_HUB: ${{ inputs.push_docker_hub }}
+        run: |
+          set -euo pipefail
+          skip_all=false
+          if [[ "$EVENT" == "schedule" && "$ENABLED" != "true" ]]; then
+            echo "::notice::scheduled publish disabled: PUBLISH_REFRESHED_TAGS_ENABLED is '${ENABLED:-<unset>}', not 'true'."
+            skip_all=true
+          fi
+
+          # Release-ref policy. Everything this workflow writes is public -- PROD mutable
+          # tags and Docker Hub -- so a dispatch from a branch must not reach the writing
+          # half with that branch's own unreviewed code. The SCAN still runs off-ref: it
+          # only reads, and being able to see what it would have published is the whole
+          # value of a rehearsal.
+          is_release_ref=false
+          if [[ "$REF_NAME" == "master" || "$REF_NAME" =~ ^hotfix/ ]]; then
+            is_release_ref=true
+          else
+            echo "::notice::'${REF_NAME}' is not a release ref; the scan will report what it finds, but nothing will be published."
+          fi
+
+          # The one place a schedule event's absent inputs become the documented
+          # defaults, as refresh-docker-images.yaml does. A schedule carries no inputs:
+          # every `inputs.*` is null, which for a boolean means false -- so reading them
+          # directly would make the daily cron skip the tag write AND the Hub copy AND
+          # the Hub-parity half of the scan, and still report success. The header's "the
+          # next scheduled run picks it up" would never have happened, and no dispatch
+          # rehearsal could show it, because a dispatch fills the defaults in.
+          if [[ "$EVENT" == "schedule" ]]; then
+            update_mutable_tags=true
+            push_docker_hub=true
+          else
+            update_mutable_tags="$IN_UPDATE_MUTABLE_TAGS"
+            push_docker_hub="$IN_PUSH_DOCKER_HUB"
+          fi
+          for b in update_mutable_tags push_docker_hub; do
+            if [[ "${!b}" != "true" && "${!b}" != "false" ]]; then
+              echo "::error::${b} resolved to '${!b}', expected true or false."
+              exit 1
+            fi
+          done
+
+          {
+            echo "skip_all=${skip_all}"
+            echo "is_release_ref=${is_release_ref}"
+            echo "update_mutable_tags=${update_mutable_tags}"
+            echo "push_docker_hub=${push_docker_hub}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Event: ${EVENT} (ref ${REF_NAME}); update_mutable_tags=${update_mutable_tags} push_docker_hub=${push_docker_hub}"
+
+      - name: Checkout (for registry_tags.sh)
+        if: steps.gate.outputs.skip_all != 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: .github/bin/registry_tags.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Install JFrog CLI
+        id: jf
+        if: steps.gate.outputs.skip_all != 'true'
+        uses: step-security/setup-jfrog-cli@3054b554c0fb4915b3d58847fb7730c593dbb934 # v5.0.0
+        env:
+          JF_URL: https://artifact.aerospike.io
+          JF_PROJECT: database
+        with:
+          version: 2.78.8
+          oidc-provider-name: database-gh-citrusleaf
+          oidc-audience: database-gh-citrusleaf
+
+      - name: Docker login to Artifactory
+        if: steps.gate.outputs.skip_all != 'true'
+        uses: step-security/docker-login-action@164e21d7e52229904128e2f946001cb88278c33d # v4.2.0
+        with:
+          registry: artifact.aerospike.io
+          username: ${{ steps.jf.outputs.oidc-user }}
+          password: ${{ steps.jf.outputs.oidc-token }}
+
+      # Read-only, for comparing Hub against PROD. Anonymous manifest reads count against
+      # Docker Hub's per-IP pull limit and GitHub runners share theirs, so a throttled
+      # read would make the scan flap. Prefers a read-only PAT and falls back to the
+      # publish credential only because the read-only one is not minted yet; provisioning
+      # AEROSPIKE_DOCKER_ORG_RO_TOKEN switches this over with no further change.
+      - name: Docker login to Docker Hub
+        if: steps.gate.outputs.skip_all != 'true'
+        uses: step-security/docker-login-action@164e21d7e52229904128e2f946001cb88278c33d # v4.2.0
+        with:
+          username: ${{ vars.AEROSPIKE_DOCKER_ORG_NAME }}
+          password: ${{ secrets.AEROSPIKE_DOCKER_ORG_RO_TOKEN || secrets.AEROSPIKE_DOCKER_ORG_RW_TOKEN }}
+
+      - name: Set up Docker Buildx
+        if: steps.gate.outputs.skip_all != 'true'
+        uses: step-security/setup-buildx-action@6997872a55d77391e51b87609556578131f44402 # v4.1.0
+
+      - name: Find refreshes PROD holds but has not published
+        id: scan
+        if: steps.gate.outputs.skip_all != 'true'
+        env:
+          ONLY_VERSION: ${{ inputs.version }}
+          PIN: ${{ inputs.bundle_version }}
+          LOOKBACK_DAYS: ${{ inputs.lookback_days }}
+          CHECK_HUB: ${{ steps.gate.outputs.push_docker_hub }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "$ONLY_VERSION" && ! "$ONLY_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'${ONLY_VERSION}' is not a w.x.y.z version."
+            exit 1
+          fi
+          lookback="${LOOKBACK_DAYS:-30}"
+          if [[ ! "$lookback" =~ ^[0-9]+$ ]]; then
+            echo "::error::lookback_days must be a whole number of days, got '${lookback}'."
+            exit 1
+          fi
+
+          # A pin names one refresh of one version, so it is meaningless without that
+          # version -- and silently dropping it published the NEWEST refresh instead,
+          # which is the opposite of what a rollback asks for.
+          pin="${PIN:-}"
+          if [[ -n "$pin" && -z "$ONLY_VERSION" ]]; then
+            echo "::error::bundle_version names one refresh of one version, so version must be set too."
+            exit 1
+          fi
+          if [[ -n "$pin" && ! "$pin" =~ ^${ONLY_VERSION//./\\.}-[0-9]+_[0-9]{8}T[0-9]{6}Z$ ]]; then
+            echo "::error::bundle_version '${pin}' is not a <${ONLY_VERSION}-n>_<timestamp> coordinate."
+            exit 1
+          fi
+
+          # Enterprise is canonical: every edition is refreshed together, and the bundle
+          # version is enterprise's coordinate.
+          image=aerospike-server-enterprise
+          base="${REGISTRY}/${PROD_DOCKER_REPO}/${image}"
+          mapfile -t tags < <(bash .github/bin/registry_tags.sh "$PROD_DOCKER_REPO" "$image")
+          if [[ "${#tags[@]}" -eq 0 ]]; then
+            echo "::error::${PROD_DOCKER_REPO}/${image} listed no tags at all; refusing to conclude there is nothing to publish."
+            exit 1
+          fi
+          echo "${#tags[@]} tags in ${PROD_DOCKER_REPO}/${image}"
+
+          # Empty rather than failing, for every caller here: under `set -e` + pipefail a
+          # tag that is simply not there -- which is exactly what "Docker Hub has never
+          # had this version" looks like -- would abort the whole scan instead of being
+          # the finding. Callers that need a digest check for emptiness explicitly; the
+          # ones comparing treat empty as "behind", which is the safe direction because
+          # publishing is idempotent.
+          digest_of() {
+            docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' 2>/dev/null |
+              jq -r '.digest // empty' 2>/dev/null || true
+          }
+          # Labels live in the per-platform image config, so an index has to be indexed
+          # into. This fetches the config blob only -- no layers.
+          refresh_label_of() {
+            docker buildx imagetools inspect "$1" --format '{{json .Image}}' 2>/dev/null |
+              jq -r --arg l "$REFRESH_LABEL" \
+                '(to_entries[0].value.config.Labels // {})[$l] // empty' 2>/dev/null
+          }
+
+          cutoff=""
+          [[ "$lookback" -eq 0 ]] || cutoff="$(date -u -d "${lookback} days ago" +%Y%m%dT%H%M%SZ)"
+
+          # Newest refresh-shaped coordinate per version. The listing is one call and the
+          # shape is read off the tag name, so nothing below costs a request yet.
+          declare -A newest=()
+          stale=()
+          for tag in "${tags[@]}"; do
+            [[ "$tag" =~ ^([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)-[0-9]+_([0-9]{8}T[0-9]{6}Z)$ ]] || continue
+            v="${BASH_REMATCH[1]}"
+            [[ -z "$ONLY_VERSION" || "$v" == "$ONLY_VERSION" ]] || continue
+            # Excluded by the lookback -- reported, not dropped. The cutoff is on the
+            # coordinate's BUILD timestamp, so a refresh promoted STAGE->PROD long after
+            # it was built lands here, and the input description promises a human looks
+            # at it. A silent skip plus a green "nothing to do" is how they never find out.
+            if [[ -n "$cutoff" && -z "$ONLY_VERSION" ]] && [[ ! "${BASH_REMATCH[2]}" > "$cutoff" ]]; then
+              echo "::warning::${tag} is older than the ${lookback}-day lookback; not reconciled automatically. Dispatch with version=${v} to publish it."
+              stale+=("${tag}")
+              continue
+            fi
+            if [[ -z "${newest[$v]:-}" ]] || [[ "$(printf '%s\n%s\n' "${newest[$v]}" "$tag" | sort -V | tail -1)" == "$tag" ]]; then
+              newest[$v]="$tag"
+            fi
+          done
+
+          # A pin overrides "newest" -- that is the whole point of a rollback. Without
+          # this the scan compared PROD against the newest refresh regardless, so pinning
+          # back reported "already published" and moved nothing.
+          if [[ -n "$pin" ]]; then
+            printf '%s\n' "${tags[@]}" | grep -qxF "$pin" || {
+              echo "::error::${PROD_DOCKER_REPO} has no aerospike-server-enterprise:${pin}."
+              exit 1
+            }
+            [[ "${newest[$ONLY_VERSION]:-}" == "$pin" ]] ||
+              echo "::notice::pinned to ${pin} rather than the newest refresh of ${ONLY_VERSION}."
+            newest[$ONLY_VERSION]="$pin"
+            echo "::warning::A pin is ONE-SHOT: the next scheduled scan rolls the tags forward onto the newest refresh again. Set PUBLISH_REFRESHED_TAGS_ENABLED to false until the bad refresh is removed from PROD."
+          fi
+
+          if [[ "${#stale[@]}" -gt 0 ]]; then
+            {
+              echo "### Older than the ${lookback}-day lookback — not reconciled automatically"
+              echo ""
+              for t in "${stale[@]}"; do echo "- \`${t}\`"; done
+              echo ""
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [[ "${#newest[@]}" -eq 0 ]]; then
+            if [[ -n "$ONLY_VERSION" ]]; then
+              echo "::error::${PROD_DOCKER_REPO} holds no refreshed ${image} image for ${ONLY_VERSION}. Either the bundle has not been promoted STAGE -> PROD yet, or this version was never refreshed."
+              exit 1
+            fi
+            echo "versions=[]" >> "$GITHUB_OUTPUT"
+            echo "No refresh coordinates within ${lookback} days; nothing to do."
+            exit 0
+          fi
+
+          needed=()
+          {
+            echo "### Refresh publication status"
+            echo ""
+            echo "| version | newest refresh in PROD | state |"
+            echo "|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for v in $(printf '%s\n' "${!newest[@]}" | sort -V); do
+            coord="${newest[$v]}"
+
+            # Is this a refresh at all, or an ordinary release awaiting its own tagging?
+            # The two are identical from the registry apart from this label, and acting on
+            # a release would mean taking over PROD tagging for the release process.
+            # Captured, not inlined in [[ ]]: a failure inside $(...) does not trip
+            # set -e, so a throttle, auth failure or registry error on the label read
+            # would look exactly like "no label" -- the version is logged "not a refresh",
+            # the run goes green, and a persistent read failure skips every refresh
+            # forever with no alert.
+            if ! lbl="$(refresh_label_of "${base}:${coord}")"; then
+              echo "::error::could not read the ${REFRESH_LABEL} label of ${base}:${coord}."
+              exit 1
+            fi
+            if [[ -z "$lbl" ]]; then
+              # A coordinate the operator pinned explicitly is an error, not a skip:
+              # silently doing nothing reads as success.
+              if [[ -n "$pin" && "$coord" == "$pin" ]]; then
+                echo "::error::the pinned ${coord} carries no ${REFRESH_LABEL} label, so it was not produced by a refresh."
+                exit 1
+              fi
+              echo "${v}: ${coord} carries no ${REFRESH_LABEL} label; not a refresh, leaving it alone."
+              echo "| ${v} | \`${coord}\` | not a refresh — skipped |" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            # Every edition, resolved through the shared refresh label -- the three carry
+            # the same com.aerospike.refresh.run. Deciding from enterprise alone meant a
+            # community or federal retag that failed while enterprise succeeded read as
+            # "published" on the next scan, so the "next scheduled scan retries" promise
+            # did not hold for two of the three editions.
+            pkg_version="${coord%%_*}"
+            declare -A ed_coord=([aerospike-server-enterprise]="$coord")
+            ed_ok=true
+            for other in aerospike-server aerospike-server-federal; do
+              mapfile -t ocand < <(bash .github/bin/registry_tags.sh "$PROD_DOCKER_REPO" "$other" |
+                grep -E "^${pkg_version//./\\.}_[0-9]{8}T[0-9]{6}Z$" | sort -V || true)
+              omatch=""
+              for c in "${ocand[@]}"; do
+                if ! olbl="$(refresh_label_of "${REGISTRY}/${PROD_DOCKER_REPO}/${other}:${c}")"; then
+                  echo "::error::could not read the ${REFRESH_LABEL} label of ${other}:${c}."
+                  exit 1
+                fi
+                [[ "$olbl" != "$lbl" ]] || omatch="$c"
+              done
+              if [[ -z "$omatch" ]]; then
+                echo "::warning::${v}: no ${other} image carries ${REFRESH_LABEL}=${lbl}; the editions did not ship as a set."
+                ed_ok=false
+                break
+              fi
+              ed_coord[$other]="$omatch"
+            done
+            if [[ "$ed_ok" != "true" ]]; then
+              echo "| ${v} | \`${coord}\` | editions not a set — skipped |" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            why=""
+            for ed in "${!ed_coord[@]}"; do
+              ed_base="${REGISTRY}/${PROD_DOCKER_REPO}/${ed}"
+              ed_c="$(digest_of "${ed_base}:${ed_coord[$ed]}")"
+              if [[ -z "$ed_c" ]]; then
+                echo "::error::could not read the digest of ${ed_base}:${ed_coord[$ed]}."
+                exit 1
+              fi
+              ed_m="$(digest_of "${ed_base}:${v}")"
+              [[ "$ed_m" == "$ed_c" ]] || { why="PROD ${ed}:${v} -> ${ed_m:-<absent>}, refresh is ${ed_c}"; break; }
+            done
+
+            if [[ -n "$why" ]]; then
+              : # a PROD tag is already behind; no need to ask Docker Hub
+            elif [[ "$CHECK_HUB" == "true" ]]; then
+              # PROD is converged; Docker Hub may still be behind if a previous copy
+              # failed part way. That lag is otherwise permanent -- nothing upstream
+              # re-derives it once PROD looks right.
+              #
+              # EVERY tag the Hub set would carry, not just w.x.y.z. A copy that wrote
+              # the immutable tag and w.x.y.z and then failed before w.x / latest left
+              # those on the superseded build, and a w.x.y.z-only check would have
+              # declared the version published and never looked again. Which tags those
+              # are is decided in `publish`, but PROD is the authority for all of them,
+              # so comparing each against its PROD counterpart needs no decision here.
+              # Docker Hub's set is PROD's minus w.x.y -- see the Hub subset in `decide`,
+              # and live Hub has no aerospike-server-enterprise:8.1.2. Including it here
+              # made every refresh that is its patch line's tip -- which is what the
+              # dispatcher always picks -- report "Docker Hub 8.1.2 -> <absent>" on every
+              # single scan, re-tagging PROD and re-copying to public Hub daily for the
+              # whole lookback window and never converging.
+              for ed in "${!ed_coord[@]}"; do
+                ed_base="${REGISTRY}/${PROD_DOCKER_REPO}/${ed}"
+                ed_c="$(digest_of "${ed_base}:${ed_coord[$ed]}")"
+                for t in "$v" "${v%.*.*}" latest; do
+                  prod_t="$(digest_of "${ed_base}:${t}")"
+                  # Only tags PROD actually points at this coordinate: w.x / latest held
+                  # by another version are that version's, not lag.
+                  [[ -n "$prod_t" && "$prod_t" == "$ed_c" ]] || continue
+                  hub_t="$(digest_of "docker.io/${HUB_ORG}/${ed}:${t}")"
+                  [[ "$hub_t" == "$prod_t" ]] || { why="Docker Hub ${ed}:${t} -> ${hub_t:-<absent>}, PROD is ${prod_t}"; break 2; }
+                done
+              done
+            fi
+
+            if [[ -z "$why" ]]; then
+              echo "${v}: already published."
+              echo "| ${v} | \`${coord}\` | published |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "${v}: needs publishing (${why})."
+              echo "| ${v} | \`${coord}\` | **needs publishing** — ${why} |" >> "$GITHUB_STEP_SUMMARY"
+              needed+=("$v")
+            fi
+          done
+
+          if [[ "${#needed[@]}" -eq 0 ]]; then
+            echo "versions=[]" >> "$GITHUB_OUTPUT"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Nothing to publish." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          json="$(printf '%s\n' "${needed[@]}" | jq -Rcn '[inputs]')"
+          echo "versions=${json}" >> "$GITHUB_OUTPUT"
+          echo "Publishing: ${needed[*]}"
+
+  publish:
+    needs: [scan]
+    # IS_RELEASE_REF is what keeps an off-ref dispatch to the scan alone; the scan itself
+    # is read-only and runs anywhere.
+    if: >
+      needs.scan.outputs.SKIP_ALL != 'true' &&
+      needs.scan.outputs.IS_RELEASE_REF == 'true' &&
+      needs.scan.outputs.VERSIONS != '[]' &&
+      needs.scan.outputs.VERSIONS != ''
+    strategy:
+      # One at a time: `latest` is shared across versions, and serializing keeps the log
+      # readable for what is at most a handful of versions a day.
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(needs.scan.outputs.VERSIONS) }}
+    # Two publishes of one version must not race onto its mutable tags. Keyed on the
+    # version so a dispatch and a scheduled run of different versions still proceed.
+    concurrency:
+      group: publish-refreshed-tags-${{ matrix.version }}
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      # Full tag history: released_versions.sh reads this repo's ship tags as one of its
+      # three sources. sparse-checkout keeps the working tree to the scripts.
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          sparse-checkout: |
+            .github/bin/released_versions.sh
+            .github/bin/registry_tags.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Install JFrog CLI
+        id: jf
+        uses: step-security/setup-jfrog-cli@3054b554c0fb4915b3d58847fb7730c593dbb934 # v5.0.0
+        env:
+          JF_URL: https://artifact.aerospike.io
+          JF_PROJECT: database
+        with:
+          version: 2.78.8
+          oidc-provider-name: database-gh-citrusleaf
+          oidc-audience: database-gh-citrusleaf
+
+      - name: Docker login to Artifactory
+        uses: step-security/docker-login-action@164e21d7e52229904128e2f946001cb88278c33d # v4.2.0
+        with:
+          registry: artifact.aerospike.io
+          username: ${{ steps.jf.outputs.oidc-user }}
+          password: ${{ steps.jf.outputs.oidc-token }}
+
+      - name: Docker login to Docker Hub
+        if: needs.scan.outputs.PUSH_DOCKER_HUB == 'true'
+        uses: step-security/docker-login-action@164e21d7e52229904128e2f946001cb88278c33d # v4.2.0
+        with:
+          username: ${{ vars.AEROSPIKE_DOCKER_ORG_NAME }}
+          password: ${{ secrets.AEROSPIKE_DOCKER_ORG_RW_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: step-security/setup-buildx-action@6997872a55d77391e51b87609556578131f44402 # v4.1.0
+
+      - name: Resolve the refreshed images in PROD
+        id: find
+        env:
+          VERSION: ${{ matrix.version }}
+          PIN: ${{ inputs.bundle_version }}
+          ONLY_VERSION: ${{ inputs.version }}
+          JF_TOKEN: ${{ steps.jf.outputs.oidc-token }}
+          RELEASE_BUNDLE_NAME: aerospike-server-docker
+        run: |
+          set -euo pipefail
+
+          # Re-validated here and not trusted from the scan: a $GITHUB_OUTPUT write of an
+          # unvalidated string is how a newline in a REST-dispatched input forges a later
+          # `k=v` line, and every output below is read by a step that writes to a public
+          # registry.
+          if [[ ! "$VERSION" =~ ^(([0-9]+\.[0-9]+)\.[0-9]+)\.[0-9]+$ ]]; then
+            echo "::error::'${VERSION}' is not a w.x.y.z version."
+            exit 1
+          fi
+          wxy="${BASH_REMATCH[1]}"
+          wx="${BASH_REMATCH[2]}"
+
+          coord_re="^${VERSION//./\\.}-[0-9]+_[0-9]{8}T[0-9]{6}Z$"
+          # The pin only means anything for the version it names.
+          pin=""
+          [[ -z "$PIN" || "$ONLY_VERSION" != "$VERSION" ]] || pin="$PIN"
+          if [[ -n "$pin" && ! "$pin" =~ $coord_re ]]; then
+            echo "::error::bundle_version '${pin}' is not a <${VERSION}-n>_<timestamp> coordinate."
+            exit 1
+          fi
+
+          tags_of() { bash .github/bin/registry_tags.sh "$PROD_DOCKER_REPO" "$1"; }
+          digest_of() {
+            docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' | jq -r '.digest'
+          }
+          refresh_label_of() {
+            docker buildx imagetools inspect "$1" --format '{{json .Image}}' 2>/dev/null |
+              jq -r --arg l "$REFRESH_LABEL" \
+                '(to_entries[0].value.config.Labels // {})[$l] // empty' 2>/dev/null
+          }
+
+          mapfile -t ent < <(tags_of aerospike-server-enterprise | grep -E "$coord_re" | sort -V || true)
+          if [[ "${#ent[@]}" -eq 0 ]]; then
+            echo "::error::no refreshed aerospike-server-enterprise image for ${VERSION} in ${PROD_DOCKER_REPO}."
+            exit 1
+          fi
+          if [[ -n "$pin" ]]; then
+            printf '%s\n' "${ent[@]}" | grep -qxF "$pin" || {
+              echo "::error::${PROD_DOCKER_REPO} has no aerospike-server-enterprise:${pin}. Present: ${ent[*]}"
+              exit 1
+            }
+            bundle_version="$pin"
+          else
+            bundle_version="${ent[-1]}"
+          fi
+
+          # Re-checked here, not inherited from the scan: this is the gate that keeps the
+          # reconciler off release-path images, and it guards the step that writes.
+          #
+          # The VALUE is kept, not just its presence: it is the run id of the refresh that
+          # produced all three editions, and it is the only thing tying them together.
+          # Every refresh of a version reuses the same released .deb, so all of them share
+          # pkg_version -- picking the newest community/federal build by package revision
+          # would take the newest refresh whatever enterprise resolved to, and a pin to an
+          # older refresh would move enterprise back while community and federal rolled
+          # forward onto the build being rolled away from.
+          if ! refresh_run="$(refresh_label_of "${REGISTRY}/${PROD_DOCKER_REPO}/aerospike-server-enterprise:${bundle_version}")"; then
+            echo "::error::could not read the ${REFRESH_LABEL} label of aerospike-server-enterprise:${bundle_version}."
+            exit 1
+          fi
+          if [[ -z "$refresh_run" ]]; then
+            echo "::error::${bundle_version} carries no ${REFRESH_LABEL} label, so it was not produced by a refresh. Refusing to move PROD mutable tags onto it."
+            exit 1
+          fi
+          echo "refresh run: ${refresh_run}"
+
+          # The promotion record, not the presence of the image, is what proves this came
+          # through the release-bundle route rather than being pushed by hand. The
+          # Lifecycle API lives at the platform root, which `jf rt curl` cannot reach (it
+          # pins /artifactory), so query the platform URL directly.
+          code=$(curl -sS -o /tmp/promotions.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${JF_TOKEN}" \
+            "${JFROG_URL}/lifecycle/api/v2/promotion/records/${RELEASE_BUNDLE_NAME}/${bundle_version}?project=${JFROG_PROJECT}")
+          if [[ "$code" != "200" ]]; then
+            echo "::error::promotion-record lookup for ${RELEASE_BUNDLE_NAME}:${bundle_version} returned HTTP ${code}; refusing to publish."
+            cat /tmp/promotions.json || true
+            exit 1
+          fi
+          if ! jq -e '[.promotions[]? | select(.environment == "PROD" and .status == "COMPLETED")] | length > 0' \
+              /tmp/promotions.json >/dev/null; then
+            echo "::error::release bundle ${RELEASE_BUNDLE_NAME}:${bundle_version} is not promoted to PROD. Promote it STAGE -> PROD first; this workflow only publishes what PROD already holds."
+            jq -r '[.promotions[]? | "\(.environment)=\(.status)"] | join(", ")' /tmp/promotions.json || true
+            exit 1
+          fi
+
+          # The package revision is shared across editions even though the timestamps are
+          # not, so it is what ties the three together: <w.x.y.z-n>_<ts> -> <w.x.y.z-n>.
+          pkg_version="${bundle_version%%_*}"
+          {
+            echo "version=${VERSION}"
+            echo "wxy=${wxy}"
+            echo "wx=${wx}"
+            echo "bundle_version=${bundle_version}"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### ${VERSION} — publishing refresh \`${bundle_version}\`"
+            echo ""
+            echo "| image | immutable tag | digest |"
+            echo "|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for entry in "community=aerospike-server" \
+                       "enterprise=aerospike-server-enterprise" \
+                       "federal=aerospike-server-federal"; do
+            edition="${entry%%=*}"
+            image="${entry#*=}"
+
+            if [[ "$edition" == "enterprise" ]]; then
+              tag="$bundle_version"
+            else
+              # Candidates share the package revision; the LABEL picks the one from this
+              # refresh. Exactly one must match -- zero means the editions did not ship as
+              # a set, and more than one means two refreshes carry the same run id, which
+              # cannot happen and must not be guessed at.
+              mapfile -t cand < <(tags_of "$image" | grep -E "^${pkg_version//./\\.}_[0-9]{8}T[0-9]{6}Z$" | sort -V || true)
+              if [[ "${#cand[@]}" -eq 0 ]]; then
+                echo "::error::no ${image} image for package revision ${pkg_version} in ${PROD_DOCKER_REPO}; the three editions must ship as a set."
+                exit 1
+              fi
+              matched=()
+              for c in "${cand[@]}"; do
+                if ! lbl="$(refresh_label_of "${REGISTRY}/${PROD_DOCKER_REPO}/${image}:${c}")"; then
+                  echo "::error::could not read the ${REFRESH_LABEL} label of ${image}:${c}."
+                  exit 1
+                fi
+                [[ "$lbl" == "$refresh_run" ]] && matched+=("$c")
+              done
+              if [[ "${#matched[@]}" -ne 1 ]]; then
+                echo "::error::${#matched[@]} ${image} images carry ${REFRESH_LABEL}=${refresh_run} (candidates: ${cand[*]}); expected exactly one. The three editions of a refresh share that label, so this means they did not ship as a set."
+                exit 1
+              fi
+              tag="${matched[0]}"
+            fi
+
+            ref="${REGISTRY}/${PROD_DOCKER_REPO}/${image}:${tag}"
+            if ! digest="$(digest_of "$ref")" || [[ -z "$digest" || "$digest" == "null" ]]; then
+              echo "::error::could not read the manifest digest of ${ref}."
+              exit 1
+            fi
+            echo "${ref} -> ${digest}"
+            echo "| ${image} | \`${tag}\` | \`${digest}\` |" >> "$GITHUB_STEP_SUMMARY"
+            {
+              echo "${edition}_tag=${tag}"
+              echo "${edition}_digest=${digest}"
+            } >> "$GITHUB_OUTPUT"
+          done
+
+      # PROD ONLY, deliberately -- not dev-local, test-local or stage-local, even though
+      # the release path writes its own tags in dev and test. The same tag spelling means
+      # a different thing in each place: in dev/test/stage, `w.x` tracks the newest BUILD
+      # of that lineage, development included, which is what those repos are for; in PROD
+      # it names the newest RELEASE. A refresh re-publishes an old release, so pointing
+      # test-local's `w.x` at it would drag a development pointer backwards onto a shipped
+      # build. They are not meant to agree, and nothing should make them.
+      #
+      # `latest` is only ever written here: the release path never writes it in any repo.
+      - name: Decide which mutable tags may move
+        id: decide
+        if: needs.scan.outputs.UPDATE_MUTABLE_TAGS == 'true'
+        env:
+          VERSION: ${{ steps.find.outputs.version }}
+          WXY: ${{ steps.find.outputs.wxy }}
+          WX: ${{ steps.find.outputs.wx }}
+          RV_HUB_ORG: ${{ vars.AEROSPIKE_DOCKER_ORG_NAME }}
+          RV_PROD_REPO: ${{ env.PROD_DOCKER_REPO }}
+          RV_GIT_DIR: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+
+          # Captured rather than piped straight into mapfile: `mapfile < <(cmd)` discards
+          # cmd's exit status, so released_versions.sh's own fail-closed exits would only
+          # ever be caught by the emptiness check behind them.
+          if ! released_raw="$(bash .github/bin/released_versions.sh)"; then
+            echo "::error::could not resolve the released version set; refusing to move a shared tag on an unknown tip."
+            exit 1
+          fi
+          mapfile -t released < <(grep -E '^[0-9]+(\.[0-9]+){3}$' <<<"$released_raw" || true)
+          if [[ "${#released[@]}" -eq 0 ]]; then
+            echo "::error::released_versions.sh produced no versions; refusing to move a shared tag on an unknown tip."
+            exit 1
+          fi
+
+          # Ascending, so the tip of a span is its last line.
+          tip_of() { printf '%s\n' "${released[@]}" | grep -E "^${1//./\\.}\\." | tail -1; }
+          overall_tip="${released[-1]}"
+          wxy_tip="$(tip_of "$WXY")"
+          wx_tip="$(tip_of "$WX")"
+          echo "tips now: ${WXY} -> ${wxy_tip}, ${WX} -> ${wx_tip}, overall -> ${overall_tip}"
+
+          # w.x.y.z always: it names exactly this version, so a refresh of it can never be
+          # the wrong thing for that tag to point at. The shared spans move only while
+          # this version still holds them -- a release landing while this refresh waited
+          # for its PROD promotion takes them, and that is the correct outcome.
+          keep=("$VERSION")
+          dropped=()
+          [[ "$wxy_tip" == "$VERSION" ]] && keep+=("$WXY") || dropped+=("${WXY} (now ${wxy_tip})")
+          [[ "$wx_tip" == "$VERSION" ]] && keep+=("$WX") || dropped+=("${WX} (now ${wx_tip})")
+          [[ "$overall_tip" == "$VERSION" ]] && keep+=("latest") || dropped+=("latest (now ${overall_tip})")
+
+          # Docker Hub gets the same set minus w.x.y -- PROD publishes that one, Hub does
+          # not. Derived from what was kept, so the Hub set is a subset by construction.
+          hub=()
+          for tag in "${keep[@]}"; do
+            [[ "$tag" == "$WXY" ]] || hub+=("$tag")
+          done
+
+          {
+            echo "prod_tags=${keep[*]}"
+            echo "hub_tags=${hub[*]}"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo ""
+            echo "**Applying in \`${PROD_DOCKER_REPO}\`:** \`${keep[*]}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${#dropped[@]}" -gt 0 ]]; then
+            {
+              echo ""
+              echo "**Not moved** — \`${VERSION}\` is no longer the newest of the span these name,"
+              echo "so moving them would serve a superseded build:"
+              echo ""
+              for d in "${dropped[@]}"; do echo "- \`${d}\`"; done
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::not moving ${dropped[*]}: a newer release now holds the span."
+          fi
+          echo "Applying: ${keep[*]} (Docker Hub subset: ${hub[*]})"
+
+      - name: Apply mutable tags
+        if: needs.scan.outputs.UPDATE_MUTABLE_TAGS == 'true'
+        env:
+          PROD_MUTABLE_TAGS: ${{ steps.decide.outputs.prod_tags }}
+          COMMUNITY_DIGEST: ${{ steps.find.outputs.community_digest }}
+          ENTERPRISE_DIGEST: ${{ steps.find.outputs.enterprise_digest }}
+          FEDERAL_DIGEST: ${{ steps.find.outputs.federal_digest }}
+        run: |
+          set -euo pipefail
+          read -ra tags <<< "$PROD_MUTABLE_TAGS"
+          echo "Moving ${tags[*]} in ${PROD_DOCKER_REPO}"
+
+          images=(
+            "aerospike-server=${COMMUNITY_DIGEST}"
+            "aerospike-server-enterprise=${ENTERPRISE_DIGEST}"
+            "aerospike-server-federal=${FEDERAL_DIGEST}"
+          )
+
+          # Every digest is checked before the first tag is written: a missing one
+          # discovered mid-loop would leave the editions on different builds.
+          for entry in "${images[@]}"; do
+            [[ -n "${entry#*=}" ]] || { echo "::error::no digest for ${entry%%=*}"; exit 1; }
+          done
+
+          # The digest every tag pointed at before this run, for rollback: restore one by
+          # re-running `imagetools create` with its previous digest.
+          previous=()
+          for entry in "${images[@]}"; do
+            base="${REGISTRY}/${PROD_DOCKER_REPO}/${entry%%=*}"
+            for tag in "${tags[@]}"; do
+              prev="$(docker buildx imagetools inspect "${base}:${tag}" \
+                --format '{{json .Manifest}}' 2>/dev/null | jq -r '.digest' 2>/dev/null)" || prev=""
+              previous+=("${base}:${tag} ${prev:-absent}")
+            done
+          done
+          printf 'pre-move: %s\n' "${previous[@]}"
+          {
+            echo ""
+            echo "| tag | previous digest |"
+            echo "|---|---|"
+            for entry in "${previous[@]}"; do
+              echo "| \`${entry%% *}\` | \`${entry#* }\` |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Retagging an existing index by digest: buildx copies the source manifest rather
+          # than rebuilding it, so every tag must resolve back to the same digest. Verified
+          # below because a rebuilt index would still push cleanly under a different one.
+          retag_and_verify() {
+            local base=$1 digest=$2 tag got
+            local -a tag_args=()
+            for tag in "${tags[@]}"; do
+              tag_args+=(-t "${base}:${tag}")
+            done
+            docker buildx imagetools create "${tag_args[@]}" "${base}@${digest}" || return 1
+            for tag in "${tags[@]}"; do
+              got="$(docker buildx imagetools inspect "${base}:${tag}" --format '{{json .Manifest}}' | jq -r '.digest')" || return 1
+              if [[ "$got" != "$digest" ]]; then
+                echo "::error::${base}:${tag} resolves to ${got}, expected ${digest}."
+                return 1
+              fi
+              echo "${base}:${tag} -> ${got}"
+            done
+          }
+
+          failed=()
+          for entry in "${images[@]}"; do
+            image="${entry%%=*}"
+            digest="${entry#*=}"
+            base="${REGISTRY}/${PROD_DOCKER_REPO}/${image}"
+
+            echo "::group::${base} ${tags[*]} -> ${digest}"
+            ok=false
+            # Moving a mutable tag is idempotent, so a transient registry error is worth
+            # another attempt before giving up on this image.
+            for attempt in 1 2 3; do
+              [[ "$attempt" -eq 1 ]] || { echo "attempt ${attempt}/3..."; sleep 5; }
+              if retag_and_verify "$base" "$digest"; then
+                ok=true
+                break
+              fi
+            done
+            echo "::endgroup::"
+            # The tags move as a set, so keep going instead of bailing out: finishing the
+            # rest converges as much of the set as the registry allows, and the error
+            # below names what stayed behind. The next scheduled scan retries either way.
+            "$ok" || failed+=("$base")
+          done
+
+          if [[ "${#failed[@]}" -gt 0 ]]; then
+            echo "::error::mutable tags not applied for: ${failed[*]}. These images still point at their previous build while the others moved."
+            exit 1
+          fi
+
+      # Docker Hub is a separate registry, so this is a real copy rather than a retag.
+      # buildx imagetools cannot do it: its sources "must already exist in the registry
+      # where the new manifest is created", because it only writes manifests -- fine for
+      # the in-Artifactory retags above, useless when the blobs are on another host.
+      # skopeo is preinstalled on the runner, so this needs no extra tooling; --all copies
+      # the index and every per-platform child, and manifests are copied byte-for-byte,
+      # which is what makes the digest check below meaningful.
+      #
+      # Source is the PROD repo, so Docker Hub can only ever receive what was promoted.
+      - name: Copy images to Docker Hub
+        if: needs.scan.outputs.PUSH_DOCKER_HUB == 'true'
+        env:
+          HUB_MUTABLE_TAGS: ${{ steps.decide.outputs.hub_tags }}
+          COMMUNITY_DIGEST: ${{ steps.find.outputs.community_digest }}
+          ENTERPRISE_DIGEST: ${{ steps.find.outputs.enterprise_digest }}
+          FEDERAL_DIGEST: ${{ steps.find.outputs.federal_digest }}
+          COMMUNITY_TAG: ${{ steps.find.outputs.community_tag }}
+          ENTERPRISE_TAG: ${{ steps.find.outputs.enterprise_tag }}
+          FEDERAL_TAG: ${{ steps.find.outputs.federal_tag }}
+        run: |
+          set -euo pipefail
+
+          : "${HUB_ORG:?AEROSPIKE_DOCKER_ORG_NAME is not set}"
+
+          # The mutable tags only go if they were decided and applied in the PROD repo, so
+          # Docker Hub never advertises a tag Artifactory does not have. An empty set is
+          # the update_mutable_tags=false case: the immutable tag still goes across.
+          mutable=()
+          if [[ -n "${HUB_MUTABLE_TAGS:-}" ]]; then
+            read -ra mutable <<< "$HUB_MUTABLE_TAGS"
+          else
+            echo "::notice::no mutable tags were applied in ${PROD_DOCKER_REPO}; pushing only the immutable tag to Docker Hub."
+          fi
+
+          images=(
+            "aerospike-server=${COMMUNITY_DIGEST}=${COMMUNITY_TAG}"
+            "aerospike-server-enterprise=${ENTERPRISE_DIGEST}=${ENTERPRISE_TAG}"
+            "aerospike-server-federal=${FEDERAL_DIGEST}=${FEDERAL_TAG}"
+          )
+
+          # Checked before the first copy, so a missing value cannot surface mid-set.
+          for entry in "${images[@]}"; do
+            IFS='=' read -r image digest immutable_tag <<<"$entry"
+            [[ -n "$digest" ]] || { echo "::error::no digest for ${image}"; exit 1; }
+            [[ -n "$immutable_tag" ]] || { echo "::error::no immutable tag for ${image}"; exit 1; }
+          done
+
+          copy_and_verify() {
+            local image=$1 digest=$2 immutable_tag=$3
+            local src dst tag got
+            # Every edition stamps its own timestamp, so the immutable tag has to come from
+            # that edition. The bundle version is enterprise's and does not exist for the
+            # other two.
+            local -a tags=("${immutable_tag}" "${mutable[@]}")
+            src="${REGISTRY}/${PROD_DOCKER_REPO}/${image}@${digest}"
+            dst="docker.io/${HUB_ORG}/${image}"
+
+            # The first copy carries the blobs across; the rest are same-repository copies,
+            # so skopeo finds every blob already present and only writes the manifest.
+            # --preserve-digests makes skopeo refuse to re-serialize rather than quietly
+            # changing the digest, so PROD and Docker Hub cannot diverge.
+            skopeo copy --all --preserve-digests --retry-times 3 \
+              "docker://${src}" "docker://${dst}:${tags[0]}" || return 1
+            for tag in "${tags[@]:1}"; do
+              skopeo copy --all --preserve-digests --retry-times 3 \
+                "docker://${dst}:${tags[0]}" "docker://${dst}:${tag}" || return 1
+            done
+
+            for tag in "${tags[@]}"; do
+              # A manifest's digest is the sha256 of its bytes, so hashing the raw manifest
+              # is the check that the index arrived unaltered.
+              got="sha256:$(skopeo inspect --raw "docker://${dst}:${tag}" | sha256sum | cut -d' ' -f1)" || return 1
+              if [[ "$got" != "$digest" ]]; then
+                echo "::error::${dst}:${tag} resolves to ${got}, expected ${digest}."
+                return 1
+              fi
+              echo "${dst}:${tag} -> ${got}"
+            done
+          }
+
+          failed=()
+          for entry in "${images[@]}"; do
+            IFS='=' read -r image digest immutable_tag <<<"$entry"
+            echo "::group::docker.io/${HUB_ORG}/${image} -> ${digest}"
+            ok=false
+            # The same three attempts retag_and_verify gets. skopeo's --retry-times covers
+            # transient HTTP inside ONE copy; it does not cover the digest verification
+            # below it, which returns immediately on a mismatch.
+            for attempt in 1 2 3; do
+              [[ "$attempt" -eq 1 ]] || { echo "attempt ${attempt}/3..."; sleep 5; }
+              if copy_and_verify "$image" "$digest" "$immutable_tag"; then
+                ok=true
+                break
+              fi
+            done
+            echo "::endgroup::"
+            # Copies are idempotent by digest, so keep going: the rest of the set
+            # converges, the error below names what stayed behind, and the next scheduled
+            # scan notices Hub is still behind and retries.
+            "$ok" || failed+=("$image")
+          done
+
+          if [[ "${#failed[@]}" -gt 0 ]]; then
+            echo "::error::Docker Hub copy incomplete for: ${failed[*]}."
+            exit 1
+          fi
+
+  # A failure here is the dangerous one: the refreshed images are already in PROD, so a
+  # half-applied tag set serves a refreshed aerospike-server:latest beside an
+  # enterprise:latest still on the vulnerable build. The next scheduled scan retries, so
+  # this alarm is about the window rather than about permanence -- but the window is a day
+  # and it is on a public registry.
+  notify-failure:
+    needs: [scan, publish]
+    if: failure()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      # Built here and passed through toJSON: VERSIONS is a JSON array, and interpolating
+      # it raw ended the JSON string at its first quote. The payload then failed to parse,
+      # continue-on-error swallowed that, and the alert for the dangerous case never went
+      # out -- it only ever arrived when `scan` itself failed, because then VERSIONS was
+      # empty.
+      - name: Describe what stopped
+        id: state
+        env:
+          SCAN: ${{ needs.scan.result }}
+          PUBLISH: ${{ needs.publish.result }}
+          VERSIONS: ${{ needs.scan.outputs.VERSIONS }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          delimiter="SLACK_$(openssl rand -hex 8)"
+          {
+            echo "body<<${delimiter}"
+            echo "*scan:* ${SCAN}  *publish:* ${PUBLISH}"
+            echo "*versions:* ${VERSIONS:-<none>}"
+            echo ""
+            if [[ "$PUBLISH" == "failure" ]]; then
+              echo "PROD may serve a refreshed image under some mutable tags and the previous build under others. The next scheduled scan retries; re-run this workflow to converge it now."
+            else
+              echo "Nothing was published; no tag moved."
+            fi
+            echo ""
+            echo "<${RUN_URL}|View run>"
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Send Slack message to CORE
+        continue-on-error: true
+        uses: step-security/slack-github-action@16410fbfd088e8034b2d1cda051d29ada4097065 # v3.0.3
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.DB_SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ secrets.DB_SLACK_CHANNEL }}",
+              "text": "Publishing refreshed Docker tags failed",
+              "blocks": [
+                { "type": "header", "text": { "type": "plain_text", "text": "Publishing refreshed Docker tags failed", "emoji": true } },
+                { "type": "section", "text": { "type": "mrkdwn", "text": ${{ toJSON(steps.state.outputs.body) }} } }
+              ]
+            }

@@ -1,0 +1,1648 @@
+name: Refresh released Docker images (one version)
+run-name: "Refresh ${{ inputs.version }}"
+
+# Per-version pipeline behind refresh-docker-images.yaml. Normally reached by
+# dispatching THAT workflow, which resolves which versions to refresh and dispatches
+# one run of this one per version; dispatching this directly is the supervised
+# single-version path and skips the precheck. Rebuilds the images for one
+# already-released server version so they pick up a patched base image, without
+# rebuilding or re-signing the server itself. The server package is taken as-is from
+# database-deb-prod-public-local.
+#
+# The refreshed images follow the same route as a release: the build pushes the immutable
+# tag to database-docker-dev-local, a release bundle is cut from the per-edition build-info,
+# and that bundle is promoted TEST -> STAGE. This workflow stops there.
+#
+# It cannot promote to PROD -- that is someone else's step, out of band -- so it also must
+# not move any mutable tag: w.x.y.z / w.x.y / w.x / latest may only point at an image PROD
+# actually holds. Everything downstream of the STAGE promotion therefore lives in
+# publish-refreshed-tags.yaml, which is run AFTER the PROD promotion and re-derives
+# everything it needs from the PROD registry rather than carrying state across a gap that
+# is unbounded and human-gated. See that file's header for why nothing is handed over.
+#
+# Coordinates match the release path: the immutable tag and the aerospike-server-docker
+# bundle version are <w.x.y.z-n>_<UTC timestamp>, where w.x.y.z-n is the package revision
+# the context actually staged -- so a refresh bundle names its contents, and sorts after
+# the release it supersedes.
+#
+# The generated Dockerfile's FROM is a floating tag (e.g. ubuntu:24.04), so a rebuild
+# resolves the current base. A base image whose digest MOVED would have been picked up
+# without any of this; that is not the case this pipeline exists for. The case it exists
+# for is the other one: the distro ships the fix through its archive days before it
+# rebuilds the base image, so ubuntu:24.04 still resolves to the same digest, every layer
+# keys identically, and reusable_docker-build-deploy's hardcoded BuildKit cache replays
+# the apt work that was supposed to re-resolve the patched packages. The context's
+# injected cache-bust ARG (see .github/bin/prepare_docker_context.bash) is what forces
+# the miss, and the verify-refresh job below is the check that it worked -- without it
+# the pipeline republishes the vulnerable image under a fresh manifest digest, with
+# everything downstream green.
+#
+# A refresh at a NEWER docker_repo_ref than the release used also picks up the newer
+# image recipe (e.g. the standalone aerospike-asadm install) -- deliberate; the run log
+# and the com.aerospike.asadm.version label record what landed. verify-refresh compares
+# PACKAGES, so a recipe change that moves none of them needs force_publish to ship.
+#
+# docker_repo_ref takes a sha, or `master` for that branch's tip. The sentinel is resolved
+# to a sha in `validate` and every job reads the resolved value, because `context` and
+# `test-images` check the ref out independently, separated by three multi-arch builds: a
+# floating ref could have the image generated from one commit and validated by another's
+# test.sh, with both jobs green.
+#
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Released version to refresh, w.x.y.z (e.g. 8.1.2.5). Must have a vw.x.y.z release tag."
+        required: true
+        type: string
+      push_docker_jfrog:
+        description: Push the refreshed images to JFrog (when false, nothing is pushed, no bundle is cut and no tag moves; the images are rebuilt locally for linux/amd64 and tested that way instead)
+        type: boolean
+        default: true
+      promote_bundle:
+        description: "Promote the release bundle TEST -> STAGE. When false, the bundle is cut but left in database-docker-dev-local for inspection. The stop is one-way: a skipped job cannot be re-run into existence and a re-run replays the same inputs, so shipping the inspected bundle means promoting it by hand (jf rbp ... TEST then STAGE), or re-dispatching, which cuts a NEW bundle -- delete the inspected one."
+        type: boolean
+        default: true
+      force_publish:
+        description: "Publish even when the rebuilt images carry exactly the packages the published ones already have. verify-refresh compares installed package sets, so a recipe change that moves no package -- an entrypoint, a config template, an ENV, a label -- is invisible to it; picking one up through a newer docker_repo_ref needs this. Never set by a scheduled run."
+        type: boolean
+        default: false
+      allow_first_publish:
+        description: "Allow a version that has no published image in the PROD repo to get its first one from this workflow. Off by default: a refresh re-publishes an existing release, and an absent image normally means the version was never promoted or the lineage mapping is wrong. The fan-out dispatcher never sets this."
+        type: boolean
+        default: false
+      asadm_version:
+        description: "aerospike-asadm version to install in the images, e.g. 5.0.3. Defaults to the newest published for the distro/arch."
+        required: false
+        type: string
+        default: ""
+      docker_repo_ref:
+        description: "aerospike-server.docker commit to generate the image definition from. A full 40-hex sha, or the literal `master` to take that branch's tip -- which is resolved to a sha in `validate` and pinned for the rest of the run, because `context` and `test-images` check this ref out independently, hours apart, and a floating ref could name two different trees within one refresh."
+        required: true
+        type: string
+
+# Two refreshes of the SAME release must not race each other onto its bundle coordinate
+# or its promotion. Keyed on the version so different versions still run in parallel --
+# which is the whole point of giving each its own run. cancel-in-progress is false
+# because a refresh mid-promotion must not be killed.
+concurrency:
+  group: ${{ github.workflow }}-version-${{ inputs.version }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  REGISTRY: artifact.aerospike.io
+  # The environments this workflow can promote into. The build pushes to
+  # -docker-dev-local; promotion is what copies the immutable tag onward.
+  TEST_DOCKER_REPO: database-docker-test-local
+  STAGE_DOCKER_REPO: database-docker-stage-local
+  # Read-only here: verify-refresh compares the rebuild against what is published, and
+  # that is still PROD. Nothing in this file writes it.
+  PROD_DOCKER_REPO: database-docker-prod-public-local
+  DEB_REPO: database-deb-prod-public-local
+  JFROG_URL: https://aerospike.jfrog.io
+  JFROG_PROJECT: database
+
+jobs:
+  # Refuse anything that is not a shipped release. The ship tag (vw.x.y.z) is the record
+  # that a version was released; requiring it to exist is what keeps this workflow off
+  # unreleased versions.
+  #
+  # This job decides nothing about mutable tags. The write happens in a different run
+  # entirely -- after a human promotes STAGE -> PROD, with no bound on how long that
+  # takes -- so a tag set computed here could not be current when it was used. The tip
+  # decision lives in publish-refreshed-tags.yaml, at the moment of writing, derived from
+  # the registries.
+  validate:
+    if: github.repository_owner == 'citrusleaf'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      VERSION: ${{ steps.check.outputs.version }}
+      DISTRO: ${{ steps.check.outputs.distro }}
+      # The publish toggles AFTER the release-ref policy has been applied. Read these,
+      # never inputs.push_docker_jfrog / inputs.promote_bundle, or an off-ref dispatch
+      # publishes anyway.
+      PUSH_DOCKER_JFROG: ${{ steps.check.outputs.push_docker_jfrog }}
+      PROMOTE_BUNDLE: ${{ steps.check.outputs.promote_bundle }}
+      # The ref with the `master` sentinel already resolved to a sha. `context` and
+      # `test-images` read THIS, never inputs.docker_repo_ref, so their two independent
+      # checkouts cannot land on different commits.
+      DOCKER_REPO_REF: ${{ steps.check.outputs.docker_repo_ref }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Validate version against the release tag history
+        id: check
+        env:
+          VERSION: ${{ inputs.version }}
+          ASADM_VERSION: ${{ inputs.asadm_version }}
+          DOCKER_REPO_REF: ${{ inputs.docker_repo_ref }}
+          REF_NAME: ${{ github.ref_name }}
+          IN_PUSH_DOCKER_JFROG: ${{ inputs.push_docker_jfrog }}
+          IN_PROMOTE_BUNDLE: ${{ inputs.promote_bundle }}
+          IN_FORCE_PUBLISH: ${{ inputs.force_publish }}
+          IN_ALLOW_FIRST_PUBLISH: ${{ inputs.allow_first_publish }}
+        run: |
+          set -euo pipefail
+
+          # Repeated here and not only in the dispatcher: this workflow is directly
+          # dispatchable, which is the supervised single-version path, so it cannot
+          # assume anything upstream checked its inputs. A $GITHUB_OUTPUT write of an
+          # unvalidated string is also how a newline in a REST-dispatched input forges a
+          # later `k=v` line, and every output below is read by a job that publishes.
+          if [[ ! "$VERSION" =~ ^([0-9]+\.[0-9]+)\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'${VERSION}' is not a w.x.y.z version."
+            exit 1
+          fi
+          wx="${BASH_REMATCH[1]}"
+
+          if [[ -n "$ASADM_VERSION" && ! "$ASADM_VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+            echo "::error::'${ASADM_VERSION}' is not an asadm version (e.g. 5.0.3)."
+            exit 1
+          fi
+
+          # A full 40-hex sha, or the one sentinel that means "resolve master's tip".
+          # Any other git ref is refused: `context` and `test-images` check this ref out
+          # independently, separated by three multi-arch builds, so a floating ref could
+          # have the image generated from one commit and validated by another's test.sh,
+          # with both jobs green. Resolving here is what keeps that impossible while still
+          # letting a caller ask for the tip.
+          if [[ "$DOCKER_REPO_REF" == "master" ]]; then
+            if ! DOCKER_REPO_REF="$(bash .github/bin/docker_repo_tip.sh)"; then
+              echo "::error::docker_repo_ref=master, but aerospike-server.docker's tip could not be resolved."
+              exit 1
+            fi
+            echo "::notice::docker_repo_ref=master resolved to ${DOCKER_REPO_REF}; every job in this run uses that commit."
+          elif [[ ! "$DOCKER_REPO_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::docker_repo_ref must be a full 40-character commit sha or the literal 'master', got '${DOCKER_REPO_REF}'."
+            exit 1
+          fi
+
+          # This workflow is Ubuntu-only, and docker-build.sh generates just the distros its
+          # lineage supports, so the lineage fixes exactly one distro. Resolving it here makes
+          # an unsupported lineage fail with a reason instead of an empty `jf rt download`.
+          case "$wx" in
+            7.1)             distro=ubuntu22.04 ;;
+            7.2|8.0|8.1|8.2) distro=ubuntu24.04 ;;
+            *) echo "::error::no Ubuntu distro mapping for lineage ${wx}; add one before refreshing ${VERSION}."
+               exit 1 ;;
+          esac
+
+          if [[ -z "$(git tag --list "v${VERSION}")" ]]; then
+            echo "::error::v${VERSION} is not a release tag; only shipped versions can be refreshed."
+            exit 1
+          fi
+
+          # Release-ref policy, applied HERE as well as in the dispatcher: this workflow
+          # is directly dispatchable -- that is the supervised single-version path -- so
+          # it cannot rely on anything upstream having gated it. An off-ref dispatch would
+          # otherwise build from the branch's own unreviewed code, push it to dev-local
+          # and promote the bundle into TEST and STAGE, where someone later promotes it to
+          # PROD largely on trust.
+          #
+          # REFUSE here, rather than silently degrade as the dispatcher does. The
+          # dispatcher owns the degrade because it is where an operator sets the toggles;
+          # by the time a run reaches this file they are explicit, and quietly turning an
+          # asked-for publish into a dry run is the kind of thing nobody reads the notice
+          # about. The dispatcher's degraded children arrive with every toggle already
+          # false, so they pass this unchanged, and a branch dry run still runs end to
+          # end -- it just has to say so.
+          push_docker_jfrog="$IN_PUSH_DOCKER_JFROG"
+          promote_bundle="$IN_PROMOTE_BUNDLE"
+          if [[ "$REF_NAME" != "master" && ! "$REF_NAME" =~ ^hotfix/ ]]; then
+            offending=()
+            [[ "$push_docker_jfrog" != "true" ]] || offending+=("push_docker_jfrog")
+            [[ "$promote_bundle" != "true" ]] || offending+=("promote_bundle")
+            [[ "$IN_FORCE_PUBLISH" != "true" ]] || offending+=("force_publish")
+            [[ "$IN_ALLOW_FIRST_PUBLISH" != "true" ]] || offending+=("allow_first_publish")
+            if [[ "${#offending[@]}" -gt 0 ]]; then
+              echo "::error::'${REF_NAME}' is not a release ref (master or hotfix/*), so ${offending[*]} must be false. Re-dispatch with those unset to run this as a build-and-test dry run."
+              exit 1
+            fi
+            echo "::notice::'${REF_NAME}' is not a release ref; this is a build-and-test dry run."
+          fi
+
+          {
+            echo "version=${VERSION}"
+            echo "distro=${distro}"
+            echo "push_docker_jfrog=${push_docker_jfrog}"
+            echo "promote_bundle=${promote_bundle}"
+            echo "docker_repo_ref=${DOCKER_REPO_REF}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Refreshing ${VERSION} on ${distro} (push=${push_docker_jfrog} promote=${promote_bundle})"
+
+  # Same context preparation as build-sign-deploy, but the packages come from the public
+  # release repo instead of being built and signed in-run.
+  context:
+    needs: [validate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      # The package revision the contexts stage (w.x.y.z-n). It becomes the app-version,
+      # so the immutable tag and bundle coordinate name their contents, the same shape
+      # the release path publishes.
+      PKG_VERSION: ${{ steps.pkgs.outputs.pkg_version }}
+      # The asadm version the generated Dockerfiles pin, stamped into the image labels.
+      ASADM_VERSION: ${{ steps.contexts.outputs.asadm_version }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout (for prepare_docker_context.bash)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: |
+            .github/bin/prepare_docker_context.bash
+            .github/bin/require_docker_ref_on_master.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Install JFrog CLI
+        uses: step-security/setup-jfrog-cli@3054b554c0fb4915b3d58847fb7730c593dbb934 # v5.0.0
+        env:
+          JF_URL: https://artifact.aerospike.io
+          JF_PROJECT: database
+        with:
+          version: 2.78.8
+          oidc-provider-name: database-gh-citrusleaf
+          oidc-audience: database-gh-citrusleaf
+
+      - name: Download released packages
+        id: pkgs
+        env:
+          VERSION: ${{ needs.validate.outputs.VERSION }}
+          DISTRO: ${{ needs.validate.outputs.DISTRO }}
+        run: |
+          set -euo pipefail
+          mkdir -p packages
+
+          # Every revision of this version is fetched, then pruned to the newest:
+          # docker-build.sh's local resolver takes the FIRST glob match rather than the
+          # highest revision, so the directory handed to it must hold exactly one. The
+          # assertions below turn a version that never shipped into a failure rather
+          # than an empty build, and record the staged revision as pkg_version.
+          pattern="${DEB_REPO}/*aerospike-server*_${VERSION}-*${DISTRO}_*.deb"
+          echo "::group::search ${pattern}"
+          jf rt search "$pattern" | jq -r '.[].path'
+          echo "::endgroup::"
+
+          jf rt download --flat --fail-no-op "$pattern" packages/
+
+          ver_re="${VERSION//./\\.}"
+          pkg_version=""
+          for spec in community:amd64 community:arm64 enterprise:amd64 enterprise:arm64 federal:amd64; do
+            edition="${spec%%:*}"
+            arch="${spec##*:}"
+            glob="packages/aerospike-server-${edition}_${VERSION}-*${DISTRO}_${arch}.deb"
+            mapfile -t matches < <(compgen -G "$glob" | sort -V)
+            if [[ "${#matches[@]}" -eq 0 ]]; then
+              echo "::error::no ${edition} ${arch} package for ${VERSION} in ${DEB_REPO}."
+              exit 1
+            fi
+            top="$(basename "${matches[-1]}")"
+            if [[ ! "$top" =~ _${ver_re}-([0-9]+) ]]; then
+              echo "::error::cannot read the package revision from '${top}'."
+              exit 1
+            fi
+            # One coordinate has to name every edition's content, so a repo state where
+            # the editions' newest revisions disagree is refused rather than mislabeled.
+            if [[ -z "$pkg_version" ]]; then
+              pkg_version="${VERSION}-${BASH_REMATCH[1]}"
+            elif [[ "$pkg_version" != "${VERSION}-${BASH_REMATCH[1]}" ]]; then
+              echo "::error::${edition} ${arch} stages ${VERSION}-${BASH_REMATCH[1]}, but another edition stages ${pkg_version}."
+              exit 1
+            fi
+            echo "${edition} ${arch}: ${top} (of ${#matches[@]} revision(s))"
+          done
+
+          # Leave the resolver no choice: only the selected revision stays staged, so
+          # pkg_version and the packages in the images are the same object by
+          # construction.
+          rev="${pkg_version##*-}"
+          for f in packages/aerospike-server-*.deb; do
+            [[ "$(basename "$f")" =~ _${ver_re}-${rev}[^0-9] ]] || rm -v "$f"
+          done
+          for spec in community:amd64 community:arm64 enterprise:amd64 enterprise:arm64 federal:amd64; do
+            edition="${spec%%:*}"
+            arch="${spec##*:}"
+            mapfile -t left < <(compgen -G "packages/aerospike-server-${edition}_${VERSION}-*${DISTRO}_${arch}.deb")
+            if [[ "${#left[@]}" -ne 1 ]]; then
+              echo "::error::${edition} ${arch}: ${#left[@]} packages staged after pruning to ${pkg_version}."
+              exit 1
+            fi
+          done
+
+          echo "pkg_version=${pkg_version}" >> "$GITHUB_OUTPUT"
+          echo "Staged package revision: ${pkg_version}"
+          ls -l packages
+
+      - name: Checkout aerospike-server.docker repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: aerospike/aerospike-server.docker
+          path: pkg/docker
+          ref: ${{ needs.validate.outputs.DOCKER_REPO_REF }}
+          fetch-depth: 1
+
+      # This job executes docker-build.sh from the checkout while holding a live JFrog
+      # OIDC token; only history that made it onto the docker repo's master may run here
+      # (see the script for why any reachable sha would otherwise do).
+      - name: Require docker_repo_ref to be on aerospike-server.docker master
+        env:
+          DOCKER_REPO_DIR: ${{ github.workspace }}/pkg/docker
+          DOCKER_REPO_REF: ${{ needs.validate.outputs.DOCKER_REPO_REF }}
+        run: bash .github/bin/require_docker_ref_on_master.sh
+
+      # asadm ships as a standalone aerospike-asadm package that docker-build.sh
+      # resolves itself and SHA-pins into the Dockerfile. ASADM_SOURCE points it at the
+      # public release repo so a refresh ships released asadm only; asadm_version pins
+      # the version (default: newest published). Generation fails when no asadm
+      # resolves for a built arch, and prepare_docker_context.bash additionally asserts
+      # per arch that one actually landed in the emitted Dockerfile.
+      - name: Generate per-edition build contexts
+        id: contexts
+        env:
+          PACKAGE_VERSION: ${{ needs.validate.outputs.VERSION }}
+          ARTIFACTS_DIR: ${{ github.workspace }}/packages
+          DOCKER_REPO_DIR: ${{ github.workspace }}/pkg/docker
+          OUT_DIR: ${{ github.workspace }}/docker-contexts
+          EDITIONS: community enterprise federal
+          DISTRO_FILTER: ${{ needs.validate.outputs.DISTRO }}
+          CTX_DEST: docker-ctx
+          # Refresh only: the release path must emit the recipe aerospike-server.docker
+          # generated, unmodified. See the cache-bust block in the script.
+          CACHE_BUST_ARG: "1"
+          ASADM_SOURCE: https://aerospike.jfrog.io/artifactory/database-deb-prod-public-local
+          ASADM_VERSION: ${{ inputs.asadm_version }}
+        run: bash .github/bin/prepare_docker_context.bash
+
+      # overwrite lets "re-run failed jobs" replace an artifact a previous attempt
+      # already uploaded, instead of dying on the name conflict.
+      - name: Upload community build context
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: refresh-ctx-community-${{ needs.validate.outputs.VERSION }}
+          path: docker-contexts/community
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+      - name: Upload enterprise build context
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: refresh-ctx-enterprise-${{ needs.validate.outputs.VERSION }}
+          path: docker-contexts/enterprise
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+      - name: Upload federal build context
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: refresh-ctx-federal-${{ needs.validate.outputs.VERSION }}
+          path: docker-contexts/federal
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+  # One invocation per edition, as in build-sign-deploy: distinct image-name and
+  # jf-build-name each, federal amd64-only, and versions-override=" " so the refreshed
+  # immutable tag <w.x.y.z-n>_<timestamp> is the only tag the build pushes.
+  #
+  # No timeout-minutes: a `uses:` job cannot carry one, so these three and
+  # create-release-bundle inherit whatever bound reusable_docker-build-deploy sets
+  # internally, or GitHub's 6-hour default if it sets none. Every job this file owns
+  # does carry one.
+  #
+  # build-args-json carries AEROSPIKE_REFRESH_EPOCH per run for all three, so the apt
+  # chain below the injected ARG always re-resolves; the cache-bust block in
+  # prepare_docker_context.bash says why that is needed and what it costs.
+  #
+  # com.aerospike.refresh.run is what makes a refreshed image self-identifying. Without
+  # it a refresh and a release are indistinguishable once published -- same labels, same
+  # bundle name, same <w.x.y.z-n>_<timestamp> coordinate -- and publish-refreshed-tags
+  # would have no way to tell "a refresh nobody has tagged yet" from "a release the
+  # normal process has not tagged yet", which look identical from the registry. It reads
+  # this label and acts only on images that carry it.
+  #
+  # jf-build-name is version-qualified so the build-info names what it contains. Each
+  # version runs as its own dispatched run with its own run_number, and the reusable
+  # workflow publishes build-info as <jf-build-name>:<run_number>, so no two versions
+  # share a key.
+  image-community:
+    needs: [validate, context]
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    uses: aerospike/shared-workflows/.github/workflows/reusable_docker-build-deploy.yaml@v4.1.0
+    with:
+      app-version: ${{ needs.context.outputs.PKG_VERSION }}
+      app-name: Aerospike Server
+      image-name: aerospike-server
+      jf-project: database
+      repo-scope: -docker-dev-local
+      jf-build-name: aerospike-server-docker-refresh-community-${{ needs.validate.outputs.VERSION }}
+      oidc-provider-name: database-gh-citrusleaf
+      oidc-audience: database-gh-citrusleaf
+      gh-context-artifacts-json: '[{"name":"refresh-ctx-community-${{ needs.validate.outputs.VERSION }}","dest":"docker-ctx"}]'
+      file: docker-ctx/Dockerfile
+      platforms: linux/amd64,linux/arm64
+      versions-override: " "
+      build-args-json: '{"AEROSPIKE_REFRESH_EPOCH":"${{ github.run_id }}-${{ github.run_attempt }}"}'
+      labels-json: '{"org.opencontainers.image.source":"https://github.com/aerospike/aerospike-server.docker","org.opencontainers.image.url":"https://github.com/aerospike/aerospike-server.docker","org.opencontainers.image.vendor":"Aerospike","org.opencontainers.image.documentation":"https://hub.docker.com/_/aerospike","com.aerospike.asadm.version":"${{ needs.context.outputs.ASADM_VERSION }}","com.aerospike.refresh.run":"${{ github.run_id }}"}'
+      push: ${{ needs.validate.outputs.PUSH_DOCKER_JFROG == 'true' }}
+
+  image-enterprise:
+    needs: [validate, context]
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    uses: aerospike/shared-workflows/.github/workflows/reusable_docker-build-deploy.yaml@v4.1.0
+    with:
+      app-version: ${{ needs.context.outputs.PKG_VERSION }}
+      app-name: Aerospike Enterprise Server
+      image-name: aerospike-server-enterprise
+      jf-project: database
+      repo-scope: -docker-dev-local
+      jf-build-name: aerospike-server-docker-refresh-enterprise-${{ needs.validate.outputs.VERSION }}
+      oidc-provider-name: database-gh-citrusleaf
+      oidc-audience: database-gh-citrusleaf
+      gh-context-artifacts-json: '[{"name":"refresh-ctx-enterprise-${{ needs.validate.outputs.VERSION }}","dest":"docker-ctx"}]'
+      file: docker-ctx/Dockerfile
+      platforms: linux/amd64,linux/arm64
+      versions-override: " "
+      build-args-json: '{"AEROSPIKE_REFRESH_EPOCH":"${{ github.run_id }}-${{ github.run_attempt }}"}'
+      labels-json: '{"org.opencontainers.image.source":"https://github.com/aerospike/aerospike-server.docker","org.opencontainers.image.url":"https://github.com/aerospike/aerospike-server.docker","org.opencontainers.image.vendor":"Aerospike","org.opencontainers.image.documentation":"https://hub.docker.com/_/aerospike","com.aerospike.asadm.version":"${{ needs.context.outputs.ASADM_VERSION }}","com.aerospike.refresh.run":"${{ github.run_id }}"}'
+      push: ${{ needs.validate.outputs.PUSH_DOCKER_JFROG == 'true' }}
+
+  image-federal:
+    needs: [validate, context]
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    uses: aerospike/shared-workflows/.github/workflows/reusable_docker-build-deploy.yaml@v4.1.0
+    with:
+      app-version: ${{ needs.context.outputs.PKG_VERSION }}
+      app-name: Aerospike Federal Server
+      image-name: aerospike-server-federal
+      jf-project: database
+      repo-scope: -docker-dev-local
+      jf-build-name: aerospike-server-docker-refresh-federal-${{ needs.validate.outputs.VERSION }}
+      oidc-provider-name: database-gh-citrusleaf
+      oidc-audience: database-gh-citrusleaf
+      gh-context-artifacts-json: '[{"name":"refresh-ctx-federal-${{ needs.validate.outputs.VERSION }}","dest":"docker-ctx"}]'
+      file: docker-ctx/Dockerfile
+      platforms: linux/amd64
+      versions-override: " "
+      build-args-json: '{"AEROSPIKE_REFRESH_EPOCH":"${{ github.run_id }}-${{ github.run_attempt }}"}'
+      labels-json: '{"org.opencontainers.image.source":"https://github.com/aerospike/aerospike-server.docker","org.opencontainers.image.url":"https://github.com/aerospike/aerospike-server.docker","org.opencontainers.image.vendor":"Aerospike","org.opencontainers.image.documentation":"https://hub.docker.com/_/aerospike","com.aerospike.asadm.version":"${{ needs.context.outputs.ASADM_VERSION }}","com.aerospike.refresh.run":"${{ github.run_id }}"}'
+      push: ${{ needs.validate.outputs.PUSH_DOCKER_JFROG == 'true' }}
+
+  # A refreshed image is only worth publishing if it still passes the functional tests,
+  # and picking up base-image CVEs is the reason a refresh is cut at all -- so both run
+  # before any tag moves, and an image whose scan did not COMPLETE fails this job. The
+  # scan's findings are surfaced (run summary), not gated on; see the scan steps below.
+  #
+  # A dry run (push=false) leaves nothing to pull -- the reusable workflow neither
+  # pushes nor loads the image -- so this job rebuilds each edition for linux/amd64 from
+  # the very same context artifacts and tests those instead. That keeps the generated
+  # context under test before the first real dispatch; arm64 coverage stays on pushed
+  # runs, where the image already exists.
+  test-images:
+    needs: [validate, context, image-community, image-enterprise, image-federal, verify-refresh]
+    # Ordered behind verify-refresh rather than beside it. Five serial test.sh+Snyk legs,
+    # two of them arm64 under QEMU, are the most expensive thing this pipeline does, and
+    # on a week where the rebuild turns out identical to what is published, images-ready
+    # throws the result away. verify-refresh is skipped on a dry run (nothing was pushed,
+    # so there is nothing to compare), and THAT is the run the tests matter most on --
+    # hence the explicit 'skipped' arm rather than a bare PUBLISH check.
+    if: >
+      !cancelled() &&
+      needs.image-community.result == 'success' &&
+      needs.image-enterprise.result == 'success' &&
+      needs.image-federal.result == 'success' &&
+      (needs.verify-refresh.result == 'skipped' ||
+       (needs.verify-refresh.result == 'success' && needs.verify-refresh.outputs.PUBLISH == 'true'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout (for summarize_snyk_scan.sh)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: |
+            .github/bin/summarize_snyk_scan.sh
+            .github/bin/random_output_delimiter.sh
+            .github/bin/require_docker_ref_on_master.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve test target
+        id: mode
+        env:
+          ENTERPRISE_DIGEST: ${{ needs.image-enterprise.outputs.digest }}
+        run: |
+          set -euo pipefail
+          # A digest means the manifests reached the registry. The three build jobs
+          # share one push expression, so enterprise speaks for all of them.
+          if [[ -n "$ENTERPRISE_DIGEST" ]]; then
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+            echo "Testing the pushed immutable tags."
+          else
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::images were not pushed; testing locally rebuilt linux/amd64 images instead."
+          fi
+
+      # Only the pushed path pulls from Artifactory; a local rebuild needs nothing
+      # but the public base image.
+      - name: Install JFrog CLI
+        id: jf
+        if: steps.mode.outputs.pushed == 'true'
+        uses: step-security/setup-jfrog-cli@3054b554c0fb4915b3d58847fb7730c593dbb934 # v5.0.0
+        env:
+          JF_URL: https://artifact.aerospike.io
+          JF_PROJECT: database
+        with:
+          version: 2.78.8
+          oidc-provider-name: database-gh-citrusleaf
+          oidc-audience: database-gh-citrusleaf
+
+      - name: Docker login to Artifactory
+        if: steps.mode.outputs.pushed == 'true'
+        uses: step-security/docker-login-action@164e21d7e52229904128e2f946001cb88278c33d # v4.2.0
+        with:
+          registry: artifact.aerospike.io
+          username: ${{ steps.jf.outputs.oidc-user }}
+          password: ${{ steps.jf.outputs.oidc-token }}
+
+      - name: Checkout aerospike-server.docker repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: aerospike/aerospike-server.docker
+          path: pkg/docker
+          ref: ${{ needs.validate.outputs.DOCKER_REPO_REF }}
+          fetch-depth: 1
+
+      # Same boundary as in context: this job executes test.sh from the checkout while
+      # holding SNYK_TOKEN and (on pushed runs) a registry login.
+      - name: Require docker_repo_ref to be on aerospike-server.docker master
+        env:
+          DOCKER_REPO_DIR: ${{ github.workspace }}/pkg/docker
+          DOCKER_REPO_REF: ${{ needs.validate.outputs.DOCKER_REPO_REF }}
+        run: bash .github/bin/require_docker_ref_on_master.sh
+
+      # Running the pushed arm64 image on an amd64 runner needs binfmt handlers.
+      # The local rebuild is amd64-only, so it needs neither QEMU nor emulation.
+      - name: Set up QEMU
+        if: steps.mode.outputs.pushed == 'true'
+        uses: step-security/setup-qemu-action@fe44c529aab16157fc475f4991a7f926aa9a02a2 # v4.1.0
+
+      - name: Set up Docker Buildx
+        if: steps.mode.outputs.pushed == 'false'
+        uses: step-security/setup-buildx-action@6997872a55d77391e51b87609556578131f44402 # v4.1.0
+
+      - name: Download community build context
+        if: steps.mode.outputs.pushed == 'false'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: refresh-ctx-community-${{ needs.validate.outputs.VERSION }}
+          path: docker-ctx-root/community/docker-ctx
+
+      - name: Download enterprise build context
+        if: steps.mode.outputs.pushed == 'false'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: refresh-ctx-enterprise-${{ needs.validate.outputs.VERSION }}
+          path: docker-ctx-root/enterprise/docker-ctx
+
+      - name: Download federal build context
+        if: steps.mode.outputs.pushed == 'false'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: refresh-ctx-federal-${{ needs.validate.outputs.VERSION }}
+          path: docker-ctx-root/federal/docker-ctx
+
+      # Pinned like the action SHAs: an unpinned `latest` would run arbitrary npm
+      # install scripts in the job that holds SNYK_TOKEN and registry credentials.
+      - name: Install Snyk CLI
+        run: npm install -g snyk@1.1307.4
+
+      - name: Test pushed Docker images
+        if: steps.mode.outputs.pushed == 'true'
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          COMMUNITY_TAG: ${{ needs.image-community.outputs.immutable-tag }}
+          ENTERPRISE_TAG: ${{ needs.image-enterprise.outputs.immutable-tag }}
+          FEDERAL_TAG: ${{ needs.image-federal.outputs.immutable-tag }}
+        run: |
+          set -euo pipefail
+          cd pkg/docker
+          status=0
+          # test.sh takes one image and one platform per call, and -c drops each
+          # image once its test passes so the runner disk survives all five.
+          test_one() {
+            echo "$1 $3" >> "${GITHUB_WORKSPACE}/tested-images.txt"
+            echo "::group::test.sh -i $1 -e $2 -p $3"
+            ./test.sh -i "$1" -e "$2" -p "$3" -c -s || status=1
+            echo "::endgroup::"
+          }
+          test_one "$COMMUNITY_TAG"  community  linux/amd64
+          test_one "$COMMUNITY_TAG"  community  linux/arm64
+          test_one "$ENTERPRISE_TAG" enterprise linux/amd64
+          test_one "$ENTERPRISE_TAG" enterprise linux/arm64
+          test_one "$FEDERAL_TAG"    federal    linux/amd64
+          exit "$status"
+
+      - name: Build and test Docker images locally
+        if: steps.mode.outputs.pushed == 'false'
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          PKG_VERSION: ${{ needs.context.outputs.PKG_VERSION }}
+          CTX_ROOT: ${{ github.workspace }}/docker-ctx-root
+          REFRESH_EPOCH: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          cd pkg/docker
+          # The build context is the directory ABOVE the downloaded one: the COPY
+          # sources -- and the Dockerfile.dockerignore that keeps everything else out
+          # of the context -- are anchored under docker-ctx/, exactly as the reusable
+          # workflow lays them out.
+          build_and_test() {
+            local edition=$1 tag=$2
+            # The context carries the cache-bust ARG, declared without a default and
+            # read with :?, so every build of it must pass one. The value is constant
+            # only so the three editions share it: this is `--load` with no --cache-from
+            # on a fresh runner, so there is no cache for a dry run to hit or miss
+            # whatever the epoch is.
+            #
+            # Which means a dry run cannot show that the cache-bust actually defeats the
+            # reusable workflow's type=gha cache -- and verify-refresh, the check that it
+            # did, is skipped here. That property is first exercised on a pushed run.
+            docker buildx build --load --platform linux/amd64 -t "$tag" \
+              --build-arg "AEROSPIKE_REFRESH_EPOCH=${REFRESH_EPOCH}" \
+              -f "${CTX_ROOT}/${edition}/docker-ctx/Dockerfile" \
+              "${CTX_ROOT}/${edition}" || return 1
+            # -c drops the image once its test passes, keeping the runner disk clear
+            # for the next edition.
+            ./test.sh -i "$tag" -e "$edition" -p linux/amd64 -c -s
+          }
+          status=0
+          for edition in community enterprise federal; do
+            tag="aerospike-server-${edition}-refresh-dryrun:${PKG_VERSION}"
+            echo "$tag linux/amd64" >> "${GITHUB_WORKSPACE}/tested-images.txt"
+            echo "::group::build + test ${tag} (linux/amd64)"
+            build_and_test "$edition" "$tag" || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
+
+      # test.sh treats the scan itself as advisory (the snyk invocation is `|| true`,
+      # and a missing CLI returns 0), so "tests passed" cannot distinguish scanned from
+      # not-scanned. The scan is the point of a refresh: require one COMPLETED log per
+      # tested image/platform. "Tested" appears in both clean and vulnerable snyk
+      # output; its absence means the scan errored. The findings themselves stay
+      # advisory -- a base image with an unfixed upstream CVE must not deadlock a
+      # refresh cut for a different CVE -- and are surfaced in the run summary below.
+      #
+      # Matched back to the recorded pairs, not counted. A count cannot catch the one
+      # failure the arm64 legs invite: both arches run on an amd64 runner under QEMU, and
+      # if test.sh's -p ever stops reaching `snyk container test --platform`, snyk
+      # resolves the multi-arch tag to the host platform, both legs scan the amd64 child,
+      # two logs appear, both say "Tested" -- and half the published surface ships with
+      # an unverified claim of having been scanned. The data for a real check is already
+      # on both sides: the test steps record "<image> <platform>" per invocation, and
+      # test.sh names each log <product>-<version>-<arch>-<timestamp>.snyk.
+      - name: Require a completed Snyk scan per image and platform
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          if [[ ! -f "${GITHUB_WORKSPACE}/tested-images.txt" ]]; then
+            echo "::error::no tested-images record; the test step did not run."
+            exit 1
+          fi
+
+          # <product>-<version>-<arch>-<14-digit-ts>.snyk -> <arch>, the same parse
+          # summarize_snyk_scan.sh does.
+          log_arch() {
+            local base no_ts
+            base="$(basename "$1" .snyk)"
+            no_ts="${base%-*}"
+            echo "${no_ts##*-}"
+          }
+
+          bad=0
+          matched=()
+          while read -r image platform; do
+            [[ -n "$image" ]] || continue
+            want_arch="${platform##*/}"
+            found=""
+            for f in pkg/docker/*.snyk; do
+              [[ "$(log_arch "$f")" == "$want_arch" ]] || continue
+              grep -qF "Testing ${image}" "$f" || continue
+              if grep -q 'Tested' "$f"; then
+                found="$f"
+                break
+              fi
+              echo "::error::Snyk scan did not complete for ${image} ${platform}: $(basename "$f")"
+              bad=1
+            done
+            if [[ -z "$found" ]]; then
+              echo "::error::no completed Snyk scan for ${image} ${platform}"
+              bad=1
+            else
+              echo "${image} ${platform} -> $(basename "$found")"
+              matched+=("$found")
+            fi
+          done < "${GITHUB_WORKSPACE}/tested-images.txt"
+
+          # A log that matched no recorded pair means a leg scanned something this job
+          # does not know about -- or that the arch parse above has drifted from test.sh's
+          # naming, which would make every match above meaningless.
+          logs=(pkg/docker/*.snyk)
+          if [[ "${#logs[@]}" -ne "${#matched[@]}" ]]; then
+            echo "::error::${#logs[@]} Snyk log(s) present but only ${#matched[@]} matched a tested image/platform."
+            printf '  unmatched: %s\n' "$(comm -13 <(printf '%s\n' "${matched[@]}" | sort -u) <(printf '%s\n' "${logs[@]}" | sort))"
+            bad=1
+          fi
+
+          if [[ "$bad" -ne 0 ]]; then
+            exit 1
+          fi
+          echo "${#matched[@]} Snyk scans completed, one per tested image/platform."
+
+      # Diagnostics only: a flaky artifact upload must not fail test-images when the
+      # tests themselves passed. overwrite lets a re-run replace the previous attempt's
+      # logs instead of dying on the name conflict.
+      - name: Upload Snyk scan logs
+        id: upload_snyk
+        if: always() && hashFiles('pkg/docker/*.snyk') != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: refresh-snyk-logs-${{ needs.validate.outputs.VERSION }}
+          path: pkg/docker/*.snyk
+          retention-days: 14
+          overwrite: true
+
+      - name: Summarize Snyk scan results
+        id: snyk_scan
+        if: always()
+        continue-on-error: true
+        env:
+          ARTIFACT_URL: ${{ steps.upload_snyk.outputs.artifact-url }}
+        run: bash "${GITHUB_WORKSPACE}/.github/bin/summarize_snyk_scan.sh"
+
+      # The run summary is where the scan result is read: notify-failure fires only on
+      # failure, and a refresh whose images are clean is exactly the case nobody gets a
+      # message about. The scan result is the point of a refresh, so this write is not
+      # best-effort.
+      - name: Publish the Snyk summary to the run
+        if: always()
+        env:
+          VERSION: ${{ needs.validate.outputs.VERSION }}
+          SNYK_SUMMARY: ${{ steps.snyk_scan.outputs.summary }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Snyk scan (${VERSION})"
+            echo
+            # summarize_snyk_scan.sh emits Slack mrkdwn for build-sign-deploy's Slack
+            # job; the step summary renders GFM, so translate *bold* and <url|text>
+            # links or the log link comes out dead.
+            printf '%s\n' "$SNYK_SUMMARY" |
+              sed -E 's/\*([^*]+)\*/**\1**/g; s#<([^|>]+)\|([^>]+)>#[\2](\1)#g'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Did the rebuild actually produce a different image?
+  #
+  # Two independent reasons it might not, both of which end with this pipeline
+  # republishing the image it was supposed to replace:
+  #
+  #   - The recipe never runs apt-get upgrade, so most of what the archive is ahead on
+  #     is untouchable by a rebuild -- .github/bin/image_packages.sh's header has the
+  #     full version, and is where both this gate and the precheck's get their shape.
+  #   - reusable_docker-build-deploy hardcodes the BuildKit layer cache. The context
+  #     injects a per-run ARG to defeat it (see prepare_docker_context.bash), but that
+  #     is a rewrite of a generated file and this is the check that it worked.
+  #
+  # Either way the manifest digest still moves, because the created label changes --
+  # so nothing downstream can tell a real refresh from a replay. Comparing the
+  # INSTALLED package sets can: a replay reproduces the old set exactly.
+  #
+  # Compared on linux/amd64 only, like the precheck: Ubuntu publishes a security update
+  # for both arches at once, so one arch is a faithful proxy for "did the apt chain
+  # re-resolve". It is NOT a proxy for the arm64 image being correct -- that is
+  # test-images' job, which does run both arches on a pushed run.
+  #
+  # Unchanged is not an error. It means there was nothing to ship -- the precheck
+  # fires on any pending upgrade, including base-layer packages no rebuild can fix --
+  # so the run goes green and the publish half is skipped. What IS an error is not
+  # being able to tell, because publishing then rests on an unverified claim.
+  #
+  # One thing other than a package delta also makes a publish the right call, and it is
+  # decided here so images-ready has one flag to read: force_publish, for a recipe change
+  # that moves no package at all.
+  #
+  # Docker Hub lag is NOT a reason here. publish-refreshed-tags.yaml reconciles Hub
+  # against PROD on its own schedule, so that lag is repaired where it happens, from
+  # PROD's existing digests, without a rebuild -- and this job needs no Docker Hub
+  # credential.
+  #
+  # Push runs only: a dry run publishes nothing, and test.sh -c drops its locally
+  # rebuilt images as each test passes.
+  verify-refresh:
+    needs: [validate, image-community, image-enterprise, image-federal]
+    if: >
+      needs.image-community.result == 'success' &&
+      needs.image-enterprise.result == 'success' &&
+      needs.image-federal.result == 'success' &&
+      needs.image-enterprise.outputs.digest != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      # What the package comparison found, for the summary and the log.
+      CHANGED: ${{ steps.compare.outputs.changed }}
+      # Whether the publish half should run at all: CHANGED, or force_publish, or
+      # Docker Hub lagging PROD.
+      PUBLISH: ${{ steps.compare.outputs.publish }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout (for the image probes)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: |
+            .github/bin/image_packages.sh
+            .github/bin/image_exists.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Install JFrog CLI
+        id: jf
+        uses: step-security/setup-jfrog-cli@3054b554c0fb4915b3d58847fb7730c593dbb934 # v5.0.0
+        env:
+          JF_URL: https://artifact.aerospike.io
+          JF_PROJECT: database
+        with:
+          version: 2.78.8
+          oidc-provider-name: database-gh-citrusleaf
+          oidc-audience: database-gh-citrusleaf
+
+      # Both sides live on this host: the rebuilt images in -docker-dev-local, the
+      # published ones in the PROD repo.
+      - name: Docker login to Artifactory
+        uses: step-security/docker-login-action@164e21d7e52229904128e2f946001cb88278c33d # v4.2.0
+        with:
+          registry: artifact.aerospike.io
+          username: ${{ steps.jf.outputs.oidc-user }}
+          password: ${{ steps.jf.outputs.oidc-token }}
+
+      - name: Compare the rebuilt images against the published ones
+        id: compare
+        env:
+          VERSION: ${{ needs.validate.outputs.VERSION }}
+          COMMUNITY_TAG: ${{ needs.image-community.outputs.immutable-tag }}
+          ENTERPRISE_TAG: ${{ needs.image-enterprise.outputs.immutable-tag }}
+          FEDERAL_TAG: ${{ needs.image-federal.outputs.immutable-tag }}
+          FORCE_PUBLISH: ${{ inputs.force_publish }}
+          ALLOW_FIRST_PUBLISH: ${{ inputs.allow_first_publish }}
+        run: |
+          set -euo pipefail
+
+          installed() { bash "${GITHUB_WORKSPACE}/.github/bin/image_packages.sh" installed "$1"; }
+          exists() { bash "${GITHUB_WORKSPACE}/.github/bin/image_exists.sh" "$1"; }
+
+          changed=false
+          {
+            echo "### Refresh verification"
+            echo ""
+            echo "Installed OS packages on linux/amd64, published image vs rebuilt image."
+            echo ""
+            echo "| image | packages | changed | detail |"
+            echo "|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for entry in "aerospike-server=${COMMUNITY_TAG}" \
+                       "aerospike-server-enterprise=${ENTERPRISE_TAG}" \
+                       "aerospike-server-federal=${FEDERAL_TAG}"; do
+            image="${entry%%=*}"
+            new_ref="${entry#*=}"
+            old_ref="${REGISTRY}/${PROD_DOCKER_REPO}/${image}:${VERSION}"
+
+            # This run pushed it moments ago. If it cannot be read, the comparison did
+            # not happen, and an unverified image must not reach a release bundle.
+            if ! new_set=$(installed "$new_ref"); then
+              echo "::error::could not read the rebuilt ${image}; refusing to publish unverified."
+              exit 1
+            fi
+
+            # "Absent" and "could not tell" are different answers and must not share a
+            # branch. Collapsing them is what turns a 401 from an expired login, a 429,
+            # a 5xx or a timeout into "no published image" -- and `changed` is one flag
+            # across the loop, so a single registry blip would bundle, promote and move
+            # w.x / latest on PROD and Docker Hub with nothing verified.
+            rc=0
+            exists "$old_ref" >/dev/null || rc=$?
+            case "$rc" in
+              0) ;;
+              2)
+                # A genuine absence is not a no-op either. A refresh re-publishes an
+                # already-released image; a version with none was never promoted, or the
+                # lineage/repo mapping is wrong. Shipping its FIRST published image from
+                # here would route a release around the release process.
+                if [[ "$ALLOW_FIRST_PUBLISH" != "true" ]]; then
+                  echo "::error::no published ${image} at ${old_ref}. A refresh only re-publishes an existing release; promote ${VERSION} through the release path first, or re-dispatch with allow_first_publish=true if giving it its first published image here is deliberate."
+                  exit 1
+                fi
+                echo "::warning::no published ${image} at ${old_ref}; allow_first_publish is set, so the rebuild is treated as new."
+                echo "| ${image} | $(grep -c . <<<"$new_set") | yes | no published image to compare (allow_first_publish) |" >> "$GITHUB_STEP_SUMMARY"
+                changed=true
+                continue
+                ;;
+              *)
+                echo "::error::could not determine whether ${old_ref} is published; refusing to publish unverified."
+                exit 1
+                ;;
+            esac
+
+            if ! old_set=$(installed "$old_ref"); then
+              echo "::error::published ${image} exists at ${old_ref} but could not be read; refusing to publish unverified."
+              exit 1
+            fi
+
+            # A refresh re-publishes the SAME server build with newer OS packages. It
+            # must never change the server build itself -- `w.x.y.z` would then name one
+            # binary in the registry and another in the release bundle it came from.
+            #
+            # That is reachable without anyone doing anything wrong: `context` stages the
+            # newest `-n` revision in database-deb-prod-public-local, so a re-spin of an
+            # already-released version (published image on -1, deb repo on -2) is staged,
+            # the installed-package comparison below reads it as a difference, and the run
+            # publishes a different server under the released tags.
+            #
+            # Compared on the exact package name, not a prefix: aerospike-server-enterprise
+            # and aerospike-server-federal both have aerospike-server as a prefix.
+            old_srv="$(grep -E '^aerospike-server(-[a-z]+)? ' <<<"$old_set" || true)"
+            new_srv="$(grep -E '^aerospike-server(-[a-z]+)? ' <<<"$new_set" || true)"
+            if [[ -z "$old_srv" || -z "$new_srv" ]]; then
+              echo "::error::could not find the aerospike-server package in the installed set for ${image}; refusing to publish without confirming the server build is unchanged."
+              exit 1
+            fi
+            if [[ "$old_srv" != "$new_srv" ]]; then
+              echo "::error::${image} would ship a DIFFERENT server build than the one published under ${VERSION}: published '${old_srv}', rebuilt '${new_srv}'. A refresh changes OS packages, never the server. This usually means a re-spin landed in ${DEB_REPO} after the image was released -- context stages the newest revision. Publish that revision through the release path instead of refreshing onto it."
+              exit 1
+            fi
+
+            if [[ "$new_set" == "$old_set" ]]; then
+              echo "${image}: installed packages are identical to the published image."
+              echo "| ${image} | $(grep -c . <<<"$new_set") | no | identical |" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            delta=$(diff <(echo "$old_set") <(echo "$new_set") | grep -c '^[<>]' || true)
+            echo "${image}: ${delta} package line(s) differ from the published image."
+            echo "::group::${image}: package differences (< published, > rebuilt)"
+            diff <(echo "$old_set") <(echo "$new_set") || true
+            echo "::endgroup::"
+            echo "| ${image} | $(grep -c . <<<"$new_set") | yes | ${delta} line(s) differ |" >> "$GITHUB_STEP_SUMMARY"
+            changed=true
+          done
+
+          publish=false
+          why=""
+          if [[ "$changed" == "true" ]]; then
+            publish=true
+            why="the rebuilt images differ from the published ones"
+          elif [[ "$FORCE_PUBLISH" == "true" ]]; then
+            publish=true
+            why="force_publish is set (the package comparison found no difference)"
+          fi
+
+          {
+            echo "changed=${changed}"
+            echo "publish=${publish}"
+          } >> "$GITHUB_OUTPUT"
+
+          if [[ "$publish" == "true" ]]; then
+            echo "::notice::publishing: ${why}."
+            {
+              echo ""
+              echo "**Publishing** — ${why}."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo ""
+              echo "**Nothing to publish.** Every rebuilt image carries exactly the packages its"
+              echo "published counterpart already has and force_publish was not set, so republishing"
+              echo "would promote a functionally identical image. The bundle and promotion steps are"
+              echo "skipped, and so is test-images."
+              echo ""
+              echo "That is the expected outcome when the only pending upgrades are for base-layer"
+              echo "packages the image recipe never installs: those move when ubuntu:24.04 moves,"
+              echo "not when this pipeline runs."
+              echo ""
+              echo "A recipe change at a newer \`docker_repo_ref\` that moves no package is also"
+              echo "invisible here; re-dispatch with \`force_publish=true\` to ship one."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::no image changed; nothing will be published."
+          fi
+
+  # Single gate, so the tagging job does not have to reason about six results -- and
+  # the one place every edition's outputs are checked for coherence, BEFORE anything is
+  # bundled, so an empty digest can never surface mid-retag in PROD.
+  images-ready:
+    needs: [validate, context, image-community, image-enterprise, image-federal, test-images, verify-refresh]
+    # Gated on context so a validate refusal yields one failure with one reason,
+    # instead of this gate mislabeling an all-skipped run.
+    if: always() && needs.context.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      # Set only when the manifests reached the registry AND verify-refresh found a
+      # reason to publish -- a package delta, or force_publish. create-release-bundle
+      # gates the bundle-and-promote half on it.
+      PUBLISH: ${{ steps.gate.outputs.publish }}
+      BUNDLE_VERSION: ${{ steps.gate.outputs.bundle_version }}
+      COMMUNITY_DIGEST: ${{ needs.image-community.outputs.digest }}
+      ENTERPRISE_DIGEST: ${{ needs.image-enterprise.outputs.digest }}
+      FEDERAL_DIGEST: ${{ needs.image-federal.outputs.digest }}
+      COMMUNITY_TAG: ${{ needs.image-community.outputs.immutable-tag }}
+      ENTERPRISE_TAG: ${{ needs.image-enterprise.outputs.immutable-tag }}
+      FEDERAL_TAG: ${{ needs.image-federal.outputs.immutable-tag }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Gate
+        id: gate
+        env:
+          # context is proven 'success' by the job's own if. The build legs must always
+          # have succeeded; test-images and verify-refresh each have exactly one
+          # legitimate skip, handled explicitly below.
+          BUILD_RESULTS: >-
+            ${{ needs.image-community.result }}
+            ${{ needs.image-enterprise.result }} ${{ needs.image-federal.result }}
+          TEST_RESULT: ${{ needs.test-images.result }}
+          VERIFY_RESULT: ${{ needs.verify-refresh.result }}
+          VERIFY_PUBLISH: ${{ needs.verify-refresh.outputs.PUBLISH }}
+          COMMUNITY_DIGEST: ${{ needs.image-community.outputs.digest }}
+          ENTERPRISE_DIGEST: ${{ needs.image-enterprise.outputs.digest }}
+          FEDERAL_DIGEST: ${{ needs.image-federal.outputs.digest }}
+          COMMUNITY_TAG: ${{ needs.image-community.outputs.immutable-tag }}
+          ENTERPRISE_TAG: ${{ needs.image-enterprise.outputs.immutable-tag }}
+          FEDERAL_TAG: ${{ needs.image-federal.outputs.immutable-tag }}
+          PUSH_REQUESTED: ${{ needs.validate.outputs.PUSH_DOCKER_JFROG }}
+        run: |
+          set -euo pipefail
+          for result in $BUILD_RESULTS; do
+            if [[ "$result" != "success" ]]; then
+              echo "::error::refresh leg finished '${result}'; not bundling or moving any tag."
+              exit 1
+            fi
+          done
+
+          if [[ -z "$ENTERPRISE_DIGEST" ]]; then
+            # The reusable workflow leaves digest empty on a dry run, which is expected. On a
+            # push run an empty digest means the manifest was never published, so reporting
+            # success here would claim a refresh that does not exist.
+            if [[ "$PUSH_REQUESTED" == "true" ]]; then
+              echo "::error::push_docker_jfrog=true but no image digest was produced; nothing was pushed."
+              exit 1
+            fi
+            # A dry run is where test-images matters most -- it is the only thing that
+            # exercises the generated context before a real dispatch -- so it is not
+            # allowed to be skipped here.
+            if [[ "$TEST_RESULT" != "success" ]]; then
+              echo "::error::test-images finished '${TEST_RESULT}' on a dry run; the generated contexts were never exercised."
+              exit 1
+            fi
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing was pushed; the refreshed images were built and tested locally only."
+            exit 0
+          fi
+
+          # Enterprise pushed, so this is a real refresh, and verify-refresh is the only
+          # thing that compared it against what is already published. A skip here means
+          # it was gated out of a run that is about to bundle and promote -- exactly the
+          # case it exists for -- so an unverified refresh must not proceed.
+          if [[ "$VERIFY_RESULT" != "success" ]]; then
+            echo "::error::verify-refresh finished '${VERIFY_RESULT}'; the rebuilt images were never compared against the published ones. Not bundling."
+            exit 1
+          fi
+
+          # test-images is ordered behind verify-refresh and skipped when there is
+          # nothing to publish, which is the ONE shape a skip is allowed to have: a
+          # skipped test on a run that is about to publish would mean shipping untested
+          # images.
+          publish="$VERIFY_PUBLISH"
+          if [[ "$publish" == "true" ]]; then
+            if [[ "$TEST_RESULT" != "success" ]]; then
+              echo "::error::test-images finished '${TEST_RESULT}' on a run that is about to publish. Not bundling."
+              exit 1
+            fi
+          elif [[ "$TEST_RESULT" != "skipped" && "$TEST_RESULT" != "success" ]]; then
+            echo "::error::test-images finished '${TEST_RESULT}'."
+            exit 1
+          fi
+
+          # Enterprise pushed, so every edition must have: a digest or immutable tag
+          # missing here would otherwise surface only mid-retag in PROD.
+          for entry in "community=${COMMUNITY_DIGEST}=${COMMUNITY_TAG}" \
+                       "enterprise=${ENTERPRISE_DIGEST}=${ENTERPRISE_TAG}" \
+                       "federal=${FEDERAL_DIGEST}=${FEDERAL_TAG}"; do
+            IFS='=' read -r edition digest tag <<<"$entry"
+            if [[ -z "$digest" || -z "$tag" ]]; then
+              echo "::error::${edition} produced no digest/immutable tag while enterprise pushed; not bundling."
+              exit 1
+            fi
+          done
+
+          # Bundle version is the immutable tag's version component (w.x.y.z-n), as on
+          # the release path. Each edition stamps its own timestamp, so enterprise is
+          # the canonical one.
+          bundle_version="${ENTERPRISE_TAG##*:}"
+          if [[ ! "$bundle_version" =~ ^[^:/]+_[0-9]{8}T[0-9]{6}Z$ ]]; then
+            echo "::error::unexpected immutable tag '${ENTERPRISE_TAG}'; cannot derive a bundle version."
+            exit 1
+          fi
+
+          # Nothing to publish is a clean outcome, not a failure: the precheck fires on
+          # any pending upgrade, including base-layer packages no rebuild can fix, so a
+          # run that finds the rebuilt images identical simply has nothing to ship.
+          # Publishing anyway would move w.x.y.z / w.x / latest onto a functionally
+          # identical image and leave a bundle behind -- the churn the precheck exists
+          # to avoid, arrived at by a longer route.
+          if [[ "$publish" != "true" ]]; then
+            echo "::notice::the rebuilt images match the published ones; skipping bundle, promotion, tags and Docker Hub."
+          fi
+
+          {
+            echo "publish=${publish}"
+            echo "bundle_version=${bundle_version}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Refresh release bundle coordinate: aerospike-server-docker/${bundle_version}"
+          echo "Publish: ${publish}"
+
+  # Does this bundle coordinate already exist? `jf release-bundle-create` is not
+  # idempotent -- it errors on an existing name+version -- so without this probe a
+  # re-entry dies at creation and takes the whole publish half with it.
+  #
+  # The coordinate is <w.x.y.z-n>_<UTC timestamp>, and the timestamp is stamped by the
+  # reusable workflow's merge job, so it is per job EXECUTION, not per run. "Re-run all
+  # jobs" re-runs the image jobs and stamps a new one; "Re-run failed jobs" does not --
+  # the image jobs succeeded, so GitHub replays their immutable-tag outputs and this run
+  # asks for the same coordinate again. That is the reachable collision, and it is the
+  # one that matters: it happens exactly when create-release-bundle died after the
+  # bundle was created (a dropped connection on the --sync wait), leaving an operator
+  # with no way forward but deleting the bundle or re-dispatching a full rebuild.
+  #
+  # Fails closed, the same shape as build-sign-deploy.yaml's jfrog-precheck: only a
+  # definitive JFrog answer is trusted, and anything else -- auth, network, a truncated
+  # listing, a malformed response -- stops the run rather than reporting "no bundle" and
+  # letting the non-idempotent create run against a coordinate that may already be taken.
+  #
+  # Existence is all this probe establishes. It deliberately does NOT try to prove the
+  # existing bundle holds this run's content: there is no in-house API for reading a
+  # bundle's contents, and a check that cannot be tested is worse than none. What makes
+  # promoting an already-present coordinate safe is asserted downstream instead, against
+  # the outcome rather than the input -- see the STAGE digest assertion in promote-bundle.
+  #
+  # RECOVERY IS "Re-run" ON THIS JOB, NOT "Re-run failed jobs". GitHub replays the output
+  # of a job it does not re-run, and this one succeeded on the first attempt -- so
+  # "Re-run failed jobs" replays BUNDLE_EXISTS=false, create-release-bundle hits the same
+  # taken coordinate again, and promote-bundle stays skipped while an unpromoted bundle
+  # sits in dev-local. Re-running THIS job re-probes and re-runs its dependents, which is
+  # what reaches the already-exists arm. Same shape as sign-build-deploy.yaml's re-entry.
+  bundle-precheck:
+    needs: [images-ready]
+    if: >
+      !cancelled() &&
+      needs.images-ready.result == 'success' &&
+      needs.images-ready.outputs.PUBLISH == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      BUNDLE_EXISTS: ${{ steps.check.outputs.bundle_exists }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Setup JFrog CLI
+        uses: step-security/setup-jfrog-cli@3054b554c0fb4915b3d58847fb7730c593dbb934 # v5.0.0
+        env:
+          JF_URL: ${{ env.JFROG_URL }}
+          JF_PROJECT: ${{ env.JFROG_PROJECT }}
+        with:
+          oidc-provider-name: database-gh-citrusleaf
+          oidc-audience: database-gh-citrusleaf
+
+      - name: Does this release bundle version already exist?
+        id: check
+        env:
+          BUNDLE_NAME: aerospike-server-docker
+          BUNDLE_VERSION: ${{ needs.images-ready.outputs.BUNDLE_VERSION }}
+          JFROG_PROJECT: ${{ env.JFROG_PROJECT }}
+        run: |
+          set -euo pipefail
+
+          # Only a definitive answer counts: exit 0 plus a JSON object whose
+          # release_bundles is an array and whose total is a number. jf
+          # release-bundle-search returns exit 0 with an empty array when the bundle has
+          # no versions yet (a genuine "does not exist"); the type check is what
+          # separates that from release_bundles: null, which `has()` accepts and
+          # `.release_bundles[]?` then swallows, so the probe would examine nothing and
+          # report success.
+          rbs_rc=0
+          bundle_json="$(jf release-bundle-search versions "${BUNDLE_NAME}" \
+            --project="${JFROG_PROJECT}" --limit=255 --format=json)" || rbs_rc=$?
+          if [[ "$rbs_rc" -ne 0 ]] || ! printf '%s' "$bundle_json" \
+              | jq -e '(.release_bundles | type) == "array" and (.total | type) == "number"' >/dev/null 2>&1; then
+            echo "::error::jf release-bundle-search versions ${BUNDLE_NAME} failed (exit ${rbs_rc}) or returned no release_bundles array; failing closed (see CLI error above)."
+            exit 1
+          fi
+
+          # --limit=255 is the versions API maximum; it defaults to 25 and orders
+          # newest-first, so an unlimited probe examines only the newest page and answers
+          # "not found" for everything older. seen != total means the listing is still
+          # truncated -- fail closed rather than probe a partial list; the fix at that
+          # point is --offset paging. This bundle name is shared with the release path,
+          # so its version count grows with every release, not just every refresh.
+          seen=$(printf '%s' "$bundle_json" | jq '.release_bundles | length')
+          total=$(printf '%s' "$bundle_json" | jq '.total')
+          echo "Probed ${seen} of ${total} ${BUNDLE_NAME} release-bundle versions."
+          if [[ "$seen" -ne "$total" ]]; then
+            echo "::error::release-bundle listing truncated (${seen} of ${total} versions); failing closed. Add --offset paging to this probe."
+            exit 1
+          fi
+
+          if printf '%s' "$bundle_json" | jq -e --arg v "${BUNDLE_VERSION}" \
+              '.release_bundles[]? | select(.release_bundle_version == $v)' >/dev/null 2>&1; then
+            echo "bundle_exists=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${BUNDLE_NAME}/${BUNDLE_VERSION} already exists -- skipping creation and promoting the existing bundle. This is the re-entry path after a creation that did not report success."
+          else
+            echo "bundle_exists=false" >> "$GITHUB_OUTPUT"
+            echo "${BUNDLE_NAME}/${BUNDLE_VERSION} not found -- it will be created."
+          fi
+
+  # The refreshed images get a release bundle of their own, exactly as on the release path:
+  # one build-info per edition, bundled under the same aerospike-server-docker name at a new
+  # version. Promoting it to PROD is what copies the immutable tag into
+  # database-docker-prod-public-local. Content is the immutable tag only, since
+  # versions-override=" " means no other tag was pushed.
+  #
+  # Skipped when bundle-precheck found the coordinate already taken: the version is never
+  # re-stamped to dodge a collision. A bundle version is a content coordinate, and cutting
+  # a second one for the same rebuild leaves two bundles naming the same images in a
+  # namespace shared with the release path, with no way to tell which to keep.
+  create-release-bundle:
+    needs: [validate, images-ready, bundle-precheck]
+    # !cancelled(), not always(): always() keeps running even when the operator cancels
+    # the run, and Cancel is the only stop button a dispatched refresh has -- it must
+    # keep working right up to the irreversible half of the pipeline.
+    if: >
+      !cancelled() &&
+      needs.images-ready.result == 'success' &&
+      needs.images-ready.outputs.PUBLISH == 'true' &&
+      needs.bundle-precheck.result == 'success' &&
+      needs.bundle-precheck.outputs.BUNDLE_EXISTS == 'false'
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.7.0
+    with:
+      jf-project: "database"
+      # The reusable Docker workflow publishes build-info as <jf-build-name>:<run_number>;
+      # the build number is not an input, it is always this run's number.
+      jf-build-names: "aerospike-server-docker-refresh-community-${{ needs.validate.outputs.VERSION }}:${{ github.run_number }},aerospike-server-docker-refresh-enterprise-${{ needs.validate.outputs.VERSION }}:${{ github.run_number }},aerospike-server-docker-refresh-federal-${{ needs.validate.outputs.VERSION }}:${{ github.run_number }}"
+      jf-bundle-name: "aerospike-server-docker"
+      oidc-provider-name: gh-citrusleaf
+      oidc-audience: citrusleaf
+      version: ${{ needs.images-ready.outputs.BUNDLE_VERSION }}
+      gh-workflows-ref: "v3.7.0"
+      runs-on: ubuntu-24.04
+      dry-run: false
+
+  # TEST then STAGE, in order: JFrog Lifecycle environments are ordered, and a bundle
+  # cannot appear in a later one without the earlier.
+  #
+  # STAGE is as far as this workflow's identity reaches. PROD is promoted out of band by
+  # someone else, and only after that may the mutable tags move -- which is why nothing
+  # downstream of here lives in this file. publish-refreshed-tags.yaml does that half.
+  promote-bundle:
+    needs: [validate, images-ready, bundle-precheck, create-release-bundle]
+    # Runs when THIS run created the bundle, or when bundle-precheck found it already
+    # there -- a previous attempt created it and died before promoting. Skipping the
+    # creation of an existing coordinate is only half of making a re-entry work; this
+    # is the other half, and without it a re-run would skip creation and then skip
+    # promotion too, converging on nothing.
+    if: >
+      !cancelled() &&
+      needs.bundle-precheck.result == 'success' &&
+      (needs.create-release-bundle.result == 'success' ||
+       needs.bundle-precheck.outputs.BUNDLE_EXISTS == 'true') &&
+      needs.validate.outputs.PROMOTE_BUNDLE == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Setup JFrog CLI
+        id: jf
+        uses: step-security/setup-jfrog-cli@3054b554c0fb4915b3d58847fb7730c593dbb934 # v5.0.0
+        env:
+          JF_URL: ${{ env.JFROG_URL }}
+          JF_PROJECT: ${{ env.JFROG_PROJECT }}
+        with:
+          oidc-provider-name: database-gh-citrusleaf
+          oidc-audience: database-gh-citrusleaf
+
+      - name: Promote release bundle to TEST, then STAGE
+        env:
+          JFROG_PROJECT: ${{ env.JFROG_PROJECT }}
+          RELEASE_BUNDLE_NAME: aerospike-server-docker
+          JF_SIGNING_KEY: aerospike
+          JF_TOKEN: ${{ steps.jf.outputs.oidc-token }}
+          VERSION: ${{ needs.images-ready.outputs.BUNDLE_VERSION }}
+        run: |
+          set -euo pipefail
+
+          # Already-promoted is a skip, not a failure: this guards a re-run of this job,
+          # and the re-entry path where bundle-precheck handed over an already-created
+          # bundle that may also already be part-way through the chain. The Lifecycle API
+          # lives at the platform root, which `jf rt curl` cannot reach (it pins
+          # /artifactory), so query the platform URL directly.
+          promoted_to() {
+            local env_name=$1 code
+            code=$(curl -sS -o /tmp/promotions.json -w '%{http_code}' \
+              -H "Authorization: Bearer ${JF_TOKEN}" \
+              "${JFROG_URL}/lifecycle/api/v2/promotion/records/${RELEASE_BUNDLE_NAME}/${VERSION}?project=${JFROG_PROJECT}")
+            case "$code" in
+              200)
+                jq -e --arg e "$env_name" \
+                  '[.promotions[]? | select(.environment == $e and .status == "COMPLETED")] | length > 0' \
+                  /tmp/promotions.json >/dev/null
+                ;;
+              404) return 1 ;;  # no promotion records yet
+              *)
+                echo "::error::promotion-record lookup failed (HTTP ${code})."
+                cat /tmp/promotions.json || true
+                exit 1 ;;
+            esac
+          }
+
+          for env_name in TEST STAGE; do
+            if promoted_to "$env_name"; then
+              echo "Release bundle '${RELEASE_BUNDLE_NAME}:${VERSION}' is already promoted to ${env_name} — skipping."
+              continue
+            fi
+            echo "Promoting release bundle '${RELEASE_BUNDLE_NAME}:${VERSION}' to ${env_name}..."
+            jf rbp \
+              --signing-key="${JF_SIGNING_KEY}" \
+              --project="${JFROG_PROJECT}" \
+              --sync=true \
+              "${RELEASE_BUNDLE_NAME}" "${VERSION}" "${env_name}"
+          done
+
+      - name: Docker login to Artifactory
+        uses: step-security/docker-login-action@164e21d7e52229904128e2f946001cb88278c33d # v4.2.0
+        with:
+          registry: artifact.aerospike.io
+          username: ${{ steps.jf.outputs.oidc-user }}
+          password: ${{ steps.jf.outputs.oidc-token }}
+
+      - name: Set up Docker Buildx
+        uses: step-security/setup-buildx-action@6997872a55d77391e51b87609556578131f44402 # v4.1.0
+
+      # Did the promotion put THIS run's images in STAGE?
+      #
+      # This is what makes it safe for bundle-precheck to hand over a bundle it only
+      # knows the name of. Proving the bundle's contents up front would need an API for
+      # reading them that this org does not use; checking the outcome needs nothing new,
+      # and it is the stronger claim anyway -- it covers a bundle built from the wrong
+      # build-infos just as well as one created by someone else.
+      #
+      # STAGE and not TEST: it is the last environment this run reaches, so it is what
+      # the PROD promotion will be made from.
+      - name: Verify STAGE carries this run's images
+        env:
+          COMMUNITY_DIGEST: ${{ needs.images-ready.outputs.COMMUNITY_DIGEST }}
+          ENTERPRISE_DIGEST: ${{ needs.images-ready.outputs.ENTERPRISE_DIGEST }}
+          FEDERAL_DIGEST: ${{ needs.images-ready.outputs.FEDERAL_DIGEST }}
+          COMMUNITY_TAG: ${{ needs.images-ready.outputs.COMMUNITY_TAG }}
+          ENTERPRISE_TAG: ${{ needs.images-ready.outputs.ENTERPRISE_TAG }}
+          FEDERAL_TAG: ${{ needs.images-ready.outputs.FEDERAL_TAG }}
+        run: |
+          set -euo pipefail
+
+          bad=0
+          for entry in "aerospike-server=${COMMUNITY_TAG}=${COMMUNITY_DIGEST}" \
+                       "aerospike-server-enterprise=${ENTERPRISE_TAG}=${ENTERPRISE_DIGEST}" \
+                       "aerospike-server-federal=${FEDERAL_TAG}=${FEDERAL_DIGEST}"; do
+            IFS='=' read -r image immutable_ref digest <<<"$entry"
+            # The immutable tag is the only tag the build pushed (versions-override=" "),
+            # and promotion copies it onward under the same spelling.
+            ref="${REGISTRY}/${STAGE_DOCKER_REPO}/${image}:${immutable_ref##*:}"
+            got="$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' 2>/dev/null | jq -r '.digest' 2>/dev/null)" || got=""
+            if [[ "$got" != "$digest" ]]; then
+              echo "::error::${ref} resolves to '${got:-<absent>}', expected ${digest}. The promoted bundle does not carry this run's images."
+              bad=1
+            else
+              echo "${ref} -> ${got}"
+            fi
+          done
+          [[ "$bad" -eq 0 ]]
+
+      # The handoff. This run cannot finish the job, and the half it cannot do is the
+      # half that actually ships: patched images sitting in STAGE while w.x / latest stay
+      # on the vulnerable build is indistinguishable, from the outside, from no refresh at
+      # all. Exactly one manual step remains -- the PROD promotion -- because
+      # publish-refreshed-tags.yaml reconciles rather than waits to be told, so a forgotten
+      # dispatch cannot strand the refresh. Say which step that is anyway.
+      - name: Record the handoff
+        env:
+          VERSION: ${{ needs.validate.outputs.VERSION }}
+          BUNDLE_VERSION: ${{ needs.images-ready.outputs.BUNDLE_VERSION }}
+          COMMUNITY_TAG: ${{ needs.images-ready.outputs.COMMUNITY_TAG }}
+          ENTERPRISE_TAG: ${{ needs.images-ready.outputs.ENTERPRISE_TAG }}
+          FEDERAL_TAG: ${{ needs.images-ready.outputs.FEDERAL_TAG }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Refreshed images are in STAGE — one step remains"
+            echo ""
+            echo "Release bundle \`aerospike-server-docker:${BUNDLE_VERSION}\` is promoted to STAGE."
+            echo ""
+            echo "| edition | immutable tag |"
+            echo "|---|---|"
+            echo "| community | \`${COMMUNITY_TAG##*:}\` |"
+            echo "| enterprise | \`${ENTERPRISE_TAG##*:}\` |"
+            echo "| federal | \`${FEDERAL_TAG##*:}\` |"
+            echo ""
+            echo "**Promote the bundle STAGE → PROD.** This workflow's identity cannot."
+            echo ""
+            echo "Nothing else is required: \`Publish refreshed Docker tags\` runs daily, notices that"
+            echo "PROD holds a refreshed image its mutable tags do not point at, and moves"
+            echo "\`w.x.y.z\` / \`w.x.y\` / \`w.x\` / \`latest\` and copies to Docker Hub. Dispatch it with"
+            echo "\`version=${VERSION}\` to do it immediately instead of waiting for the next run."
+            echo ""
+            echo "Until the promotion happens, PROD still serves the unpatched image under every mutable tag."
+            echo ""
+            echo "https://github.com/${REPO}/actions/workflows/publish-refreshed-tags.yaml"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::${VERSION} is in STAGE as ${BUNDLE_VERSION}. Promote STAGE->PROD, then run publish-refreshed-tags.yaml with version=${VERSION}."
+
+      - name: Send Slack message to CORE
+        continue-on-error: true
+        uses: step-security/slack-github-action@16410fbfd088e8034b2d1cda051d29ada4097065 # v3.0.3
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.DB_SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ secrets.DB_SLACK_CHANNEL }}",
+              "text": "Refreshed Docker images for ${{ needs.validate.outputs.VERSION }} are in STAGE and need promoting",
+              "blocks": [
+                { "type": "header", "text": { "type": "plain_text", "text": "Refreshed images awaiting PROD: ${{ needs.validate.outputs.VERSION }}", "emoji": true } },
+                { "type": "section", "text": { "type": "mrkdwn", "text": "*Bundle:* `aerospike-server-docker:${{ needs.images-ready.outputs.BUNDLE_VERSION }}` (in STAGE)\n\n*Promote it STAGE → PROD.* That is the only manual step — *Publish refreshed Docker tags* runs daily and picks it up from there, or dispatch it with `version=${{ needs.validate.outputs.VERSION }}` to publish immediately.\n\nUntil the promotion happens, PROD still serves the unpatched image under every mutable tag." } },
+                { "type": "section", "text": { "type": "mrkdwn", "text": "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>" } }
+              ]
+            }
+
+  # The weekly cron has no operator watching it, and neither failure mode renders as
+  # anything in most views: a run that dies before promote-bundle leaves the week's
+  # patched images unbuilt, and one that dies during it can leave the bundle half-way
+  # through TEST -> STAGE with no handoff posted, so nobody knows to finish it.
+  #
+  # failure(), not always(): a cancelled run is someone deciding to stop, and a green run
+  # needs no alarm. No event filter either -- every run of this workflow is a
+  # workflow_dispatch, including the ones the weekly cron fans out, so gating on
+  # github.event_name == 'schedule' would mean the alarm never fires at all.
+  notify-failure:
+    needs: [validate, context, image-community, image-enterprise, image-federal, test-images, verify-refresh, images-ready, bundle-precheck, create-release-bundle, promote-bundle]
+    if: failure()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Describe what stopped
+        id: state
+        env:
+          VERSION: ${{ inputs.version }}
+          PROMOTE: ${{ needs.promote-bundle.result }}
+          RESULTS: >-
+            validate=${{ needs.validate.result }}
+            context=${{ needs.context.result }}
+            image-community=${{ needs.image-community.result }}
+            image-enterprise=${{ needs.image-enterprise.result }}
+            image-federal=${{ needs.image-federal.result }}
+            test-images=${{ needs.test-images.result }}
+            verify-refresh=${{ needs.verify-refresh.result }}
+            images-ready=${{ needs.images-ready.result }}
+            bundle-precheck=${{ needs.bundle-precheck.result }}
+            create-release-bundle=${{ needs.create-release-bundle.result }}
+            promote-bundle=${{ needs.promote-bundle.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # Which half the run stopped in is the first thing anyone reading the alert
+          # needs: a failure before promote-bundle left nothing behind, one during it may
+          # have left the bundle in TEST or STAGE with no handoff posted.
+          failed=""
+          for pair in $RESULTS; do
+            [[ "${pair#*=}" == "failure" ]] && failed="${failed}${failed:+, }${pair%%=*}"
+          done
+          delimiter="SLACK_$(openssl rand -hex 8)"
+          {
+            echo "body<<${delimiter}"
+            echo "*Version:* ${VERSION}"
+            echo "*Failed jobs:* ${failed:-<none reported; see the run>}"
+            echo "*promote-bundle:* ${PROMOTE}"
+            echo ""
+            # Three outcomes, not two: promote-bundle runs `jf rbp --sync` for TEST then
+            # STAGE and then verifies STAGE, so a failure in the verify step follows a
+            # promotion that completed -- "did not reach STAGE" would be wrong.
+            case "$PROMOTE" in
+            success) echo "The bundle reached STAGE. Promote it STAGE->PROD; publish-refreshed-tags.yaml takes it from there." ;;
+            skipped) echo "This run did not promote. If create-release-bundle failed on an already-taken coordinate, re-run *bundle-precheck* (not 'Re-run failed jobs', which replays its cached result) to reach the already-exists path." ;;
+            *) echo "promote-bundle ended ${PROMOTE:-without a result}; the bundle may already be in TEST or STAGE. Check its promotion record before re-running." ;;
+            esac
+            echo ""
+            echo "<${RUN_URL}|View run>"
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Send Slack message to CORE
+        continue-on-error: true
+        uses: step-security/slack-github-action@16410fbfd088e8034b2d1cda051d29ada4097065 # v3.0.3
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.DB_SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ secrets.DB_SLACK_CHANNEL }}",
+              "text": ${{ toJSON(format('Docker image refresh failed: {0}', inputs.version)) }},
+              "blocks": [
+                { "type": "header", "text": { "type": "plain_text", "text": ${{ toJSON(format('Docker image refresh failed: {0}', inputs.version)) }}, "emoji": true } },
+                { "type": "section", "text": { "type": "mrkdwn", "text": ${{ toJSON(steps.state.outputs.body) }} } }
+              ]
+            }

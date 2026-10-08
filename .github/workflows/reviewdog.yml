@@ -91,6 +91,44 @@ jobs:
       - name: Run PR review nudge tests
         run: node .github/bin/test_pr_review_nudge.js
 
+  refresh-docker-helpers-test:
+    name: runner / docker refresh helper tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # The helpers behind the three Docker refresh workflows: refresh-docker-images,
+      # refresh-docker-image-version and publish-refreshed-tags. require_docker_ref_on_master.sh is
+      # the security boundary for three jobs that hold a live JFrog OIDC token and
+      # SNYK_TOKEN; released_versions.sh decides which mutable tags may move on a public
+      # registry; the other two decide whether an image is safe to publish. Every one of
+      # them fails silently when it regresses -- shellcheck, shfmt and actionlint all stay
+      # green on an inverted merge-base, an `|| true`, or a fetcher that returns nothing.
+      - name: Run docker_repo_ref master-membership tests
+        run: bash .github/bin/test_require_docker_ref_on_master.sh
+      - name: Run released-version union tests
+        run: bash .github/bin/test_released_versions.sh
+      - name: Run image package probe tests
+        run: bash .github/bin/test_image_packages.sh
+      - name: Run image existence probe tests
+        run: bash .github/bin/test_image_exists.sh
+      - name: Run docker context cache-bust tests
+        run: bash .github/bin/test_prepare_docker_context.bash
+      # The decision logic in the workflows' own `run:` blocks, lifted out with
+      # extract_run_block.py: the schedule kill switch, the release-ref degrade, the
+      # input grammars, the precheck's fail-open/fail-closed split, and the mutable-tag
+      # re-derivation that keeps `latest` off a superseded build.
+      - name: Run docker repo tip resolution tests
+        run: bash .github/bin/test_docker_repo_tip.sh
+      - name: Run refresh workflow step tests
+        run: bash .github/bin/test_refresh_workflow_steps.sh
+
   actionlint:
     name: runner / actionlint
     runs-on: ubuntu-latest

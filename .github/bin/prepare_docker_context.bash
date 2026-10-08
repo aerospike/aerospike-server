@@ -30,7 +30,92 @@
 #                    .deb/.rpm URL, a local directory, or a local package.
 #                    Unless it is "none", the resolved package must actually
 #                    materialize in the generated Dockerfile — see below.
+#   CACHE_BUST_ARG   Set to "1" to inject an ARG/RUN pair above the first RUN so the
+#                    caller can force the apt chain to re-resolve instead of replaying
+#                    the layer cache. Only the refresh pipeline sets it; a release
+#                    context must be the recipe aerospike-server.docker generated.
 set -euo pipefail
+
+die() {
+    echo "::error::prepare_docker_context: $*" >&2
+    exit 1
+}
+
+# Make the layer cache miss on demand, from the caller's side.
+#
+# Opt-in, because this script also generates the context for the signed release
+# path (build-sign-deploy.yaml, sign-build-deploy.yaml). Those must emit the recipe
+# aerospike-server.docker generated and nothing else; only the refresh sets
+# CACHE_BUST_ARG.
+#
+# Why a refresh can replay the vulnerable layers unchanged is written out in
+# .github/bin/image_packages.sh's header; the short form is that the distro ships
+# the fix through its archive while the base tag's digest stays put, so every layer
+# keys identically. reusable_docker-build-deploy hardcodes cache-from/cache-to and
+# exposes no way to turn them off, so the only lever a caller has is the Dockerfile
+# it generates into the context -- this one.
+#
+# A declared ARG alone does not do it: BuildKit keys an instruction on a build-arg
+# only where the arg is REFERENCED. Hence the no-op RUN, which reads it and does
+# nothing else; every later layer inherits the miss through its parent. That costs
+# one extra metadata-only layer (no filesystem diff) in a refreshed image, which a
+# released image of the same version does not have -- the release path does not set
+# CACHE_BUST_ARG.
+#
+# The ARG is declared WITHOUT a default and read with :? so a build that does not
+# supply it fails loudly. The arg name is a contract between this script and the
+# caller's build-args-json, and nothing else checks that the two agree: BuildKit
+# ignores an unmatched --build-arg silently, so a typo would otherwise cache the
+# whole chain and republish the image this exists to replace.
+inject_cache_bust() {
+    local dockerfile=$1 arg_line next_run
+    # Contiguous comments immediately above the first RUN are held back and
+    # re-emitted under the injection, so a `# hadolint ignore=` directive stays
+    # attached to the instruction it annotates.
+    awk '
+        !injected && /^#/ { buf = buf $0 "\n"; next }
+        !injected && /^RUN/ {
+            print "ARG AEROSPIKE_REFRESH_EPOCH"
+            print "RUN : \"${AEROSPIKE_REFRESH_EPOCH:?cache-bust build-arg not supplied}\""
+            printf "%s", buf; buf = ""
+            injected = 1
+            print; next
+        }
+        !injected { printf "%s", buf; buf = ""; print; next }
+        { print }
+        END { printf "%s", buf }
+    ' "$dockerfile" >"${dockerfile}.tmp" && mv "${dockerfile}.tmp" "$dockerfile"
+
+    # Assert the POSITION, not just the presence. ARG is stage-scoped in BuildKit,
+    # so an injection in the wrong stage -- or below the apt chain -- compiles and
+    # silently busts nothing. The generated recipe comes from another repo at a
+    # caller-supplied ref, so neither property can be assumed.
+    # || true so a no-match does not kill the script under set -e before the die
+    # below can name the reason, the same way remote_server does above.
+    # shellcheck disable=SC2016
+    arg_line=$(grep -nxF 'RUN : "${AEROSPIKE_REFRESH_EPOCH:?cache-bust build-arg not supplied}"' \
+        "$dockerfile" | cut -d: -f1 || true)
+    [[ -n "$arg_line" ]] || die \
+        "no RUN instruction in ${dockerfile}; cannot anchor the cache-bust ARG"
+    [[ "$(grep -ciE '^FROM[[:space:]]' "$dockerfile")" -eq 1 ]] || die \
+        "multi-stage ${dockerfile}; ARG is stage-scoped, so one injection cannot cover the apt chain"
+    # Every OTHER RUN must sit below the injected one -- that is what makes the
+    # whole chain inherit the cache miss. Matching the apt RUN specifically would
+    # not work: the generated recipe writes it as `RUN \` with the apt-get calls
+    # on continuation lines, so a `^RUN .*apt-get` probe silently matches nothing
+    # and the check passes vacuously.
+    next_run=$(awk -v inj="$arg_line" 'NR != inj && /^RUN/ { print NR; exit }' "$dockerfile")
+    [[ -n "$next_run" ]] || die \
+        "only the injected RUN in ${dockerfile}; the recipe has no build steps to bust"
+    [[ "$arg_line" -lt "$next_run" ]] || die \
+        "cache-bust ARG landed at line ${arg_line}, below the first build RUN at line ${next_run}"
+}
+
+# Sourced by test_prepare_docker_context.bash to exercise inject_cache_bust on its
+# own; everything below is the generation run.
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    return 0
+fi
 
 : "${PACKAGE_VERSION:?}"
 : "${ARTIFACTS_DIR:?}"
@@ -39,11 +124,6 @@ set -euo pipefail
 : "${EDITIONS:?}"
 : "${DISTRO_FILTER:?}"
 : "${CTX_DEST:?}"
-
-die() {
-    echo "::error::prepare_docker_context: $*" >&2
-    exit 1
-}
 
 artifacts_dir="$(cd "$ARTIFACTS_DIR" && pwd)"
 out_dir="$(mkdir -p "$OUT_DIR" && cd "$OUT_DIR" && pwd)"
@@ -217,6 +297,10 @@ for edition in "${editions[@]}"; do
         's{^\Q$ENV{COPY_LINE}\E$}{$&\nRUN chmod 0755 /entrypoint.sh}' "$dockerfile"
     grep -qxF 'RUN chmod 0755 /entrypoint.sh' "$dockerfile" || die \
         "no '${CTX_DEST}/entrypoint.sh' COPY in ${dockerfile}; cannot restore its exec bit"
+
+    if [[ "${CACHE_BUST_ARG:-}" == "1" ]]; then
+        inject_cache_bust "$dockerfile"
+    fi
 
     # BuildKit prefers <dockerfile>.dockerignore over the context root's
     # .dockerignore. It is the only hook we have for keeping the rest of this
