@@ -119,7 +119,7 @@ env:
   # on master. A recipe change ships when someone bumps this line, deliberately. The
   # resolve step below reports how far the pin has drifted from the tip, so that stays
   # visible rather than being discovered when a recipe fix turns out not to have shipped.
-  DEFAULT_DOCKER_REPO_REF: 7e472d5ad886eaca4d944e8ac3fd994af1f6a826
+  DEFAULT_DOCKER_REPO_REF: d2a0368abedf9aa216f5cd7c7e97d86b0111cdd6
   REGISTRY: artifact.aerospike.io
   # The repo the refresh actually re-tags, and therefore the one the precheck reads.
   PROD_DOCKER_REPO: database-docker-prod-public-local

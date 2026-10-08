@@ -76,7 +76,7 @@ env:
   # test.sh against them). Hoisted here because a partial bump -- three of the
   # four checkouts updated, one missed -- would generate the Dockerfile from one
   # commit and validate it with test.sh from another, and both jobs would pass.
-  DOCKER_IMAGE_REPO_REF: 7e472d5ad886eaca4d944e8ac3fd994af1f6a826
+  DOCKER_IMAGE_REPO_REF: d2a0368abedf9aa216f5cd7c7e97d86b0111cdd6
   JFROG_URL: https://aerospike.jfrog.io
   # Scheduled nightly runs are gated by the repository variable BUILD_SIGN_DEPLOY_ENABLED
   # (Settings → Secrets and variables → Actions → Variables). When unset or not 'true', the

@@ -59,7 +59,7 @@ run_settings() {
     (
         set +u
         export GITHUB_OUTPUT="$out"
-        export DEFAULT_DOCKER_REPO_REF="${DEFAULT_DOCKER_REPO_REF:-7e472d5ad886eaca4d944e8ac3fd994af1f6a826}"
+        export DEFAULT_DOCKER_REPO_REF="${DEFAULT_DOCKER_REPO_REF:-d2a0368abedf9aa216f5cd7c7e97d86b0111cdd6}"
         export ENABLED="${ENABLED:-}" EVENT="${EVENT:-workflow_dispatch}" REF_NAME="${REF_NAME:-master}"
         export IN_VERSION="${IN_VERSION:-}" IN_ASADM_VERSION="${IN_ASADM_VERSION:-}"
         export IN_DOCKER_REPO_REF="${IN_DOCKER_REPO_REF:-}"
@@ -108,7 +108,7 @@ EVENT=schedule ENABLED=true IN_PUSH_DOCKER_JFROG=false IN_VERSION=8.1.2.5 run_se
 check_out "an armed schedule resolves the full-publish defaults" push_docker_jfrog true
 check_out "an armed schedule ignores stray inputs (version)" version ""
 check_out "an armed schedule promotes the bundle" promote_bundle true
-check_out "an armed schedule takes the pinned ref" docker_repo_ref 7e472d5ad886eaca4d944e8ac3fd994af1f6a826
+check_out "an armed schedule takes the pinned ref" docker_repo_ref d2a0368abedf9aa216f5cd7c7e97d86b0111cdd6
 # force_publish is the one default a cron does not take: "identical to what is published"
 # means there was nothing to ship, and republishing is churn on shared tags.
 check_out "an armed schedule never forces a publish" force_publish false
@@ -137,7 +137,7 @@ check_out "preview/ is not a release ref for a refresh" promote_bundle false
 # The pin lives in exactly one place now, so an empty input must land on it.
 settings_case
 IN_DOCKER_REPO_REF='' run_settings
-check_out "an empty docker_repo_ref falls back to the pin" docker_repo_ref 7e472d5ad886eaca4d944e8ac3fd994af1f6a826
+check_out "an empty docker_repo_ref falls back to the pin" docker_repo_ref d2a0368abedf9aa216f5cd7c7e97d86b0111cdd6
 
 expect_settings_error() {
     local name=$1 want=$2
@@ -163,7 +163,7 @@ settings_case
 IN_DOCKER_REPO_REF=master run_settings
 check_out "the master sentinel is accepted" docker_repo_ref master
 settings_case
-IN_DOCKER_REPO_REF=7e472d5 expect_settings_error "an abbreviated sha is refused" "40-character commit sha"
+IN_DOCKER_REPO_REF=d2a0368 expect_settings_error "an abbreviated sha is refused" "40-character commit sha"
 settings_case
 IN_DOCKER_REPO_REF=7E472D5AD886EACA4D944E8AC3FD994AF1F6A826 expect_settings_error "an uppercase sha is refused" "40-character commit sha"
 
@@ -173,7 +173,7 @@ IN_DOCKER_REPO_REF=7E472D5AD886EACA4D944E8AC3FD994AF1F6A826 expect_settings_erro
 settings_case
 IN_VERSION=$'8.1.2.5\nversion=9.9.9.9' expect_settings_error "a newline in version is refused" "neither a w.x.y.z version nor a w.x lineage"
 settings_case
-IN_DOCKER_REPO_REF=$'7e472d5ad886eaca4d944e8ac3fd994af1f6a826\nversion=8.1.2.5' expect_settings_error "a newline in docker_repo_ref is refused" "40-character commit sha"
+IN_DOCKER_REPO_REF=$'d2a0368abedf9aa216f5cd7c7e97d86b0111cdd6\nversion=8.1.2.5' expect_settings_error "a newline in docker_repo_ref is refused" "40-character commit sha"
 
 settings_case
 IN_VERSION=8.1.2 expect_settings_error "a three-segment version is refused" "neither a w.x.y.z version nor a w.x lineage"
@@ -191,7 +191,7 @@ check_out "a w.x.y.z version is accepted" version 8.1.2.5
 
 # Structural: the pin is a single literal. The whole point of dropping the input's
 # default was that a partial bump silently had dispatches and the cron on different refs.
-pin_count="$(grep -c '7e472d5ad886eaca4d944e8ac3fd994af1f6a826' "$WF_DISPATCHER")"
+pin_count="$(grep -c 'd2a0368abedf9aa216f5cd7c7e97d86b0111cdd6' "$WF_DISPATCHER")"
 if [[ "$pin_count" -eq 1 ]]; then
     pass "the docker_repo_ref pin appears exactly once in the dispatcher"
 else
@@ -767,7 +767,7 @@ printf '%s\n' "${TIP:-dddddddddddddddddddddddddddddddddddddddd}"
 STUB
 chmod +x "${RWS}/.github/bin/docker_repo_tip.sh"
 
-PIN=7e472d5ad886eaca4d944e8ac3fd994af1f6a826
+PIN=d2a0368abedf9aa216f5cd7c7e97d86b0111cdd6
 
 run_rref() {
     local out="${WORK}/rref.out"
@@ -896,7 +896,7 @@ run_validate() {
         export GIT_TAGS="${GIT_TAGS-v${VERSION}}"
         export VERSION="${VERSION}" ASADM_VERSION=""
         export TIP="${TIP:-}" TIP_FAILS="${TIP_FAILS:-false}"
-        export DOCKER_REPO_REF="${DOCKER_REPO_REF:-7e472d5ad886eaca4d944e8ac3fd994af1f6a826}"
+        export DOCKER_REPO_REF="${DOCKER_REPO_REF:-d2a0368abedf9aa216f5cd7c7e97d86b0111cdd6}"
         export REF_NAME="${REF_NAME:-master}"
         export IN_PUSH_DOCKER_JFROG="${IN_PUSH_DOCKER_JFROG:-true}"
         export IN_PROMOTE_BUNDLE="${IN_PROMOTE_BUNDLE:-true}"
@@ -940,8 +940,8 @@ VERSION=8.1.2.5 DOCKER_REPO_REF=master TIP=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 check_validate "the master sentinel resolves to a sha" docker_repo_ref aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 validate_case
-VERSION=8.1.2.5 DOCKER_REPO_REF=7e472d5ad886eaca4d944e8ac3fd994af1f6a826 run_validate
-check_validate "an explicit sha passes through" docker_repo_ref 7e472d5ad886eaca4d944e8ac3fd994af1f6a826
+VERSION=8.1.2.5 DOCKER_REPO_REF=d2a0368abedf9aa216f5cd7c7e97d86b0111cdd6 run_validate
+check_validate "an explicit sha passes through" docker_repo_ref d2a0368abedf9aa216f5cd7c7e97d86b0111cdd6
 
 expect_validate_error() {
     local name=$1 want=$2
