@@ -702,7 +702,8 @@ jobs:
       # test-local's `w.x` at it would drag a development pointer backwards onto a shipped
       # build. They are not meant to agree, and nothing should make them.
       #
-      # `latest` is only ever written here: the release path never writes it in any repo.
+      # `latest` in PROD is only ever written here. The release path writes `latest` only in
+      # dev-local and test-local, where it tracks master's newest tested build.
       - name: Decide which mutable tags may move
         id: decide
         if: needs.scan.outputs.UPDATE_MUTABLE_TAGS == 'true'

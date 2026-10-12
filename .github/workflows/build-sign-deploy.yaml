@@ -17,9 +17,13 @@ on:
         default: true
       docker_mutable_tags:
         description: >-
-          Update the mutable Docker tags. 'auto' applies w.x.y.z, w.x.y and w.x on master and
-          w.x.y.z, w.x.y on hotfix/**; 'force' applies the master set on any ref that pushes
-          images (a preview build then owns the shared tags); 'off' leaves them untouched.
+          Update the mutable Docker tags in dev-local and test-local, as resolved by
+          .github/bin/mutable_docker_tags.sh. 'auto' applies w.x.y.z, w.x.y, w.x and latest on
+          master (only latest while hotfix/<master's w.x.y> exists); w.x.y.z and w.x.y on
+          hotfix/W.X.Y, plus w.x when it is the newest line of its w.x family; nothing on any
+          other ref. A nightly run never moves w.x.y.z. 'force' applies the master set on any
+          ref other than master and hotfix/**, and changes nothing on those two; 'off' leaves
+          the tags untouched.
         type: choice
         options:
           - auto
@@ -27,7 +31,7 @@ on:
           - "off"
         default: auto
       slack_notify:
-        description: Send Slack notifications (only applies on manual runs when artifacts upload, Docker push, and this flag are all enabled)
+        description: Send Slack notifications (only when artifacts upload, Docker push, and this flag are all enabled; nightly dispatches always set it)
         type: boolean
         default: false
       ext:
@@ -180,8 +184,10 @@ jobs:
           eligible=0
           failed=0
 
+          # A bare prefix, not 'refs/remotes/origin/*': for-each-ref's '*' does not cross '/',
+          # so the glob form silently drops every hotfix/** and preview/** ref.
           mapfile -t refs < <(
-            git for-each-ref --format='%(refname)' 'refs/remotes/origin/*' 2>/dev/null \
+            git for-each-ref --format='%(refname)' 'refs/remotes/origin/' 2>/dev/null \
               | while IFS= read -r ref; do
                   short="${ref#refs/remotes/origin/}"
                   [[ "$short" == "HEAD" ]] && continue
@@ -210,29 +216,33 @@ jobs:
             fi
 
             echo "Dispatching workflow for '${short}' (commits in the last 24h)."
-            # docker_mutable_tags=off: a nightly must keep only its immutable
-            # <version>_<timestamp> tag. The release-coordinate regex in
-            # docker-mutable-tags accepts the build-number suffix a nightly carries
-            # (8.1.3.0-88 -> w.x.y.z=8.1.3.0), and on master the case arm takes all
-            # three tags -- so a nightly would repoint :8.1.3.0, :8.1.3 and :8.1 in
-            # both dev-local and test-local at that night's build, overwriting the
-            # release they were pointed at. That is the same contention
-            # versions-override=" " exists to avoid; applying it here would only
-            # reintroduce it further down the graph.
+            # docker_mutable_tags=auto: every master and hotfix/W.X.Y nightly that reaches
+            # TEST moves its line's mutable tags in dev-local and test-local (never
+            # prod-public), so QE can pull :w.x.y / :w.x / :latest and get the newest tested
+            # build of that line. preview/** nightlies move nothing under auto. A nightly
+            # never moves w.x.y.z: release and bump tags are placed by hand, sometimes after
+            # later commits land, so that night's build can still carry the released w.x.y.z.
+            # A ref whose workflow copy predates .github/bin/mutable_docker_tags.sh has no
+            # nightly rule and would move w.x.y.z, so it is dispatched with off until the
+            # resolver is cherry-picked there.
+            mutable_tags=off
+            if git cat-file -e "${ref}:.github/bin/mutable_docker_tags.sh" 2>/dev/null; then
+              mutable_tags=auto
+            fi
             eligible=$((eligible + 1))
             # The dispatch API validates -f inputs against the workflow definition on the
             # TARGET ref, so an input added here is rejected ("Unexpected inputs provided")
-            # on any branch that has not picked it up yet -- every active hotfix line, for
-            # docker_mutable_tags. Keep the per-ref warning, but count the failures: a run
-            # where every eligible ref was rejected must not look like a quiet success.
+            # on any branch whose copy of this file doesn't define it yet. Keep the per-ref
+            # warning, but count the failures: a run where every eligible ref was rejected
+            # must not look like a quiet success.
             gh workflow run build-sign-deploy.yaml \
               --repo "${repo}" \
               --ref "${short}" \
               -f upload_built_artifacts_jfrog=true \
               -f build_docker_images=true \
               -f push_docker_jfrog=true \
-              -f docker_mutable_tags=off \
-              -f slack_notify=false \
+              -f docker_mutable_tags="${mutable_tags}" \
+              -f slack_notify=true \
               -f ext= || { echo "::warning::dispatch failed for '${short}', continuing."; failed=$((failed + 1)); continue; }
             dispatched=$((dispatched + 1))
           done
@@ -331,8 +341,8 @@ jobs:
           # of the release-line predicate that is exported as an output —
           # artifacts-ready's docker_app_version reads it as
           # needs.setup.outputs.IS_RELEASE_LINE. docker-mutable-tags re-derives the same
-          # master/hotfix split from GITHUB_REF_NAME for its three-way tag choice; keep
-          # the two in sync, and with sign-build-deploy.yaml.
+          # master/hotfix split from GITHUB_REF_NAME in .github/bin/mutable_docker_tags.sh;
+          # keep the two in sync, and with sign-build-deploy.yaml.
           if [[ "$GITHUB_REF_NAME" == "master" || "$GITHUB_REF_NAME" =~ ^hotfix/ ]]; then
             is_release_line=true
             bundle_version="$version"
@@ -1116,7 +1126,7 @@ jobs:
       # the always-present immutable tag; a blank entry is dropped. So a single
       # blank leaves the immutable tag as the ONLY tag — no :latest / :<major> /
       # :<version> for concurrent builds to fight over, and the release bundle
-      # references exactly one tag. The mutable w.x/w.x.y/w.x.y.z tags are applied
+      # references exactly one tag. The mutable w.x/w.x.y/w.x.y.z/latest tags are applied
       # by docker-mutable-tags once the images are tested and promoted.
       versions-override: " "
       # The reusable workflow stamps its own OCI labels over the generated
@@ -1652,8 +1662,8 @@ jobs:
             "${RELEASE_BUNDLE_NAME}" "${VERSION}" TEST
 
   # These tags are mutable: each points at the newest tested build of the line it names.
-  # master owns w.x as well as w.x.y and w.x.y.z, because the trunk is the newest build of
-  # the lineage; a hotfix line owns only its own w.x.y and w.x.y.z.
+  # .github/bin/mutable_docker_tags.sh decides which ones a build may move, so that no two
+  # lines write the same tag; sign-build-deploy.yaml calls the same script.
   # They are applied here, not through the reusable workflow's versions-override, for two
   # reasons: versions-override tags at build time, so a build that later fails docker-test
   # would leave x.y pointing at a broken image, and the tag has to be written in both repos
@@ -1707,67 +1717,32 @@ jobs:
       - name: Set up Docker Buildx
         uses: step-security/setup-buildx-action@6997872a55d77391e51b87609556578131f44402 # v4.1.0
 
+      # Full history, tags and every branch, treeless: the resolver ranks a hotfix's w.x
+      # against master's bare w.x.y.z tag and the hotfix/W.X.Y branch names, and a master
+      # run checks whether hotfix/<its w.x.y> exists.
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          filter: tree:0
+          sparse-checkout: .github/bin/mutable_docker_tags.sh
+          sparse-checkout-cone-mode: false
+
       - name: Resolve mutable tags
         id: tags
         env:
           MODE: ${{ github.event.inputs.docker_mutable_tags }}
           PACKAGE_VERSION: ${{ needs.artifacts-ready.outputs.PACKAGE_VERSION }}
+          # nightly-dispatch-branches dispatches with GITHUB_TOKEN; a re-run keeps this actor.
+          UNATTENDED: ${{ github.actor == 'github-actions[bot]' }}
         run: |
           set -euo pipefail
-
-          # A trailing -<n> is the build number the packages carry (8.1.2.5-3, 8.1.3.0-88);
-          # anything else after w.x.y.z is a git descriptor (8.1.3.0-88-g0f294c425-1), which is
-          # what a preview build produces. Both forms still yield the tags, so 'force' can
-          # exercise this job on a preview ref.
-          if [[ "$PACKAGE_VERSION" =~ ^((([0-9]+\.[0-9]+)\.[0-9]+)\.[0-9]+)(-[0-9]+)?$ ]]; then
-            release_coordinate=true
-          elif [[ "$PACKAGE_VERSION" =~ ^((([0-9]+\.[0-9]+)\.[0-9]+)\.[0-9]+)-.*$ ]]; then
-            release_coordinate=false
-          else
-            echo "::error::cannot derive w.x.y.z from package version '${PACKAGE_VERSION}'."
-            exit 1
+          tags="$(REF_NAME="$GITHUB_REF_NAME" bash .github/bin/mutable_docker_tags.sh)"
+          if [[ -z "$tags" ]]; then
+            echo "apply=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
-          wxyz="${BASH_REMATCH[1]}"
-          wxy="${BASH_REMATCH[2]}"
-          wx="${BASH_REMATCH[3]}"
-
-          # master is the newest build of the lineage, so it owns w.x on top of its own
-          # w.x.y/w.x.y.z. A hotfix line is an older patch line within that lineage and must
-          # not take w.x from the trunk.
-          case "$GITHUB_REF_NAME" in
-          master)
-            tags="${wxyz} ${wxy} ${wx}"
-            ;;
-          hotfix/*)
-            tags="${wxyz} ${wxy}"
-            ;;
-          *)
-            if [[ "$MODE" != "force" ]]; then
-              echo "::notice::'${GITHUB_REF_NAME}' is not master or a hotfix release line; leaving the mutable tags untouched (re-dispatch with docker_mutable_tags=force to override)."
-              echo "apply=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            tags="${wxyz} ${wxy} ${wx}"
-            ;;
-          esac
-
-          if [[ "$release_coordinate" != "true" ]]; then
-            if [[ "$MODE" == "force" ]]; then
-              # Deliberately not "re-run master to reclaim them": nothing reclaims these.
-              # A later master run computes w.x.y.z/w.x.y/w.x from ITS OWN version, so
-              # once master has moved to the next lineage these tags are never written
-              # again by any release, and a hotfix line never takes w.x at all. They stay
-              # on this build until someone repoints them by hand.
-              echo "::warning::docker_mutable_tags=force: pointing ${tags// /, } at ${PACKAGE_VERSION}, which is not a release-line build. NO later run reclaims these — a release writes only its own version's tags. Repoint them by hand (or delete them, if this run created them) using the pre-move digests printed by the next step."
-            else
-              # master and hotfix/** always publish a w.x.y.z-<n> coordinate. A descriptor here
-              # means the version derivation changed, and moving a shared tag on a guess is
-              # worse than stopping.
-              echo "::error::package version '${PACKAGE_VERSION}' carries a git descriptor, so it names no release coordinate."
-              exit 1
-            fi
-          fi
-
           {
             echo "apply=true"
             echo "tags=${tags}"
@@ -1885,7 +1860,7 @@ jobs:
           done
 
           if [[ "${#failed[@]}" -gt 0 ]]; then
-            echo "::error::mutable tags not applied for: ${failed[*]}. These images still point at their previous build while the others moved to this one; re-run this job to converge them."
+            echo "::error::mutable tags not applied for: ${failed[*]}. These images still point at their previous build while the others moved to this one; The line's next run converges w.x.y, w.x and latest, so re-run this job only if no later run of this line has applied its tags since (otherwise the re-run moves them back onto this build). A w.x.y.z this run moved is never rewritten by a nightly: repoint it by hand from the pre-move digests above, or re-run this job."
             exit 1
           fi
 
@@ -2046,7 +2021,7 @@ jobs:
             case "$MUTABLE_TAGS_RESULT" in
               success | skipped) ;;
               *) echo ""
-                 echo ":warning: *Mutable tags:* not applied (${MUTABLE_TAGS_RESULT}) — the w.x/w.x.y tags may still point at the previous build." ;;
+                 echo ":warning: *Mutable tags:* not applied (${MUTABLE_TAGS_RESULT}) — the mutable tags (w.x.y.z, w.x.y, w.x, latest) may still point at the previous build." ;;
             esac
             echo "${delimiter}"
           } >> "$GITHUB_OUTPUT"
