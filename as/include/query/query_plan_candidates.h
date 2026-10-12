@@ -71,6 +71,8 @@ typedef struct as_exp_sindex_candidate_s {
 	uint8_t ctx_buf[AS_EXP_SINDEX_CTX_MAX]; // packed ctx, byte-comparable with si->ctx_buf
 
 	// Set for exp=... candidates, matched via subtree_equals_exp (sindex.c).
+	// itype is DEFAULT for a comparison on the expression's value, or a
+	// collection type for containment in its result ('v' in <exp>).
 	// Pointers below are borrowed into the filter's as_exp->mem - never
 	// persist past this call.
 	bool is_exp;

@@ -126,17 +126,37 @@ typedef struct path_step_s {
 
 #define PATH_READ_MAX_STEPS 7
 
-// A CDT path read recognized on a bare bin. Holds the step list, the read
-// kind (EXISTS / COUNT / VALUE), and, if the last step's value is a scalar
-// literal, that literal parsed out for containment matching.
+// A CDT path read. Holds the step list, the read kind (EXISTS / COUNT /
+// VALUE), and, if the last step's value is a scalar literal, that literal
+// parsed out for containment matching. params_ok and the receiver span are
+// set once the call's params parse; valid only when the receiver is a bare
+// bin (bin_op).
 typedef struct cdt_path_read_s {
 	path_step steps[PATH_READ_MAX_STEPS];
 	uint32_t n_steps;
 	result_type_t result_type;
 	parsed_literal last_value;
+	bool params_ok;
+	const uint8_t* recv_ptr;
+	uint32_t recv_start_ix;
+	uint32_t recv_end_ix;
 	const op_var* bin_op;
 	bool valid;
 } cdt_path_read;
+
+// A single-step containment read (EXISTS / COUNT) whose receiver is a
+// sub-expression, not a bare bin - e.g. ($.vehicles:LIST.*.license)
+// .[='x'].exists(). Served by an expression-based collection sindex on the
+// receiver, so the receiver span is kept for structural matching.
+typedef struct cdt_exp_read_s {
+	as_sindex_type itype;
+	result_type_t result_type;
+	parsed_literal value;
+	const uint8_t* recv_ptr;
+	uint32_t recv_start_ix;
+	uint32_t recv_end_ix;
+	bool valid;
+} cdt_exp_read;
 
 typedef struct resolved_bin_literal_s {
 	op_var* bin_op;
@@ -188,9 +208,11 @@ static bool parse_get_op_tail(msgpack_in* mp, uint64_t op_code,
 		cdt_path_read* pr);
 static cdt_path_read parse_cdt_path_read(const uint8_t* call_ptr,
 		uint32_t call_ix);
+static cdt_exp_read exp_read_from_path_read(const cdt_path_read* pr);
 static bool is_cdt_path_read_subtree(const uint8_t* ptr, uint32_t start_ix,
 		uint32_t end_ix, cdt_path_read* pr_r);
 static bool is_singular_nav_step(const path_step* step);
+static bool are_singular_nav_steps(const path_step* steps, uint32_t n_steps);
 static as_sindex_type itype_from_selector(uint64_t ctx_type);
 static bool build_ctx_buf(const path_step* steps, uint32_t n_steps,
 		uint8_t* buf, uint32_t* sz_r);
@@ -211,9 +233,14 @@ static call_lit_operands locate_call_and_literal_operands(const cmp_operand_span
 static walk_status extract_exists_cmp_candidate(const as_exp* exp,
 		cf_vector* candidates, const cdt_path_read* pr, const uint8_t* lit_ptr,
 		uint32_t lit_start_ix, uint32_t lit_end_ix, exp_op_code effective_cmp);
+static bool count_cmp_implies_containment(const parsed_literal* cmp_lit,
+		exp_op_code effective_cmp);
 static walk_status extract_count_cmp_candidate(const as_exp* exp,
 		cf_vector* candidates, const cdt_path_read* pr,
 		const parsed_literal* cmp_lit, exp_op_code effective_cmp);
+static walk_status extract_exp_exists_cmp_candidate(const as_exp* exp,
+		cf_vector* candidates, const cdt_path_read* pr,
+		const call_lit_operands* ops);
 static walk_status extract_value_cmp_candidate(const as_exp* exp,
 		cf_vector* candidates, const cdt_path_read* pr,
 		const parsed_literal* cmp_lit, exp_op_code effective_cmp);
@@ -222,10 +249,14 @@ static walk_status extract_call_cmp_candidate(const as_exp* exp,
 		cf_vector* candidates, const resolved_bin_literal* sides);
 static bool is_indexable_deterministic_subtree(const uint8_t* ptr,
 		uint32_t start_ix, uint32_t end_ix);
+static bool subtree_has_bin_ref(const uint8_t* ptr, uint32_t start_ix,
+		uint32_t end_ix);
 static walk_status append_exp_candidate(const as_exp* exp,
 		cf_vector* candidates, const uint8_t* subtree_ptr,
-		uint32_t subtree_start_ix, uint32_t subtree_end_ix,
-		exp_op_code cmp_code, const parsed_literal* literal);
+		uint32_t subtree_start_ix, uint32_t subtree_end_ix, exp_op_code cmp_code,
+		const parsed_literal* literal, as_sindex_type itype);
+static walk_status append_exp_containment_candidate(const as_exp* exp,
+		cf_vector* candidates, const cdt_exp_read* er);
 static bool intersect_into(as_exp_sindex_candidate* c, int64_t lo, int64_t hi);
 static as_exp_sindex_candidate* find_candidate(cf_vector* candidates,
 		const char* bin_name, uint32_t bin_name_sz, as_particle_type ktype,
@@ -842,11 +873,32 @@ is_indexable_deterministic_subtree(const uint8_t* ptr, uint32_t start_ix,
 	return true;
 }
 
+// An expression-based sindex must read a bin - a pure-literal operand can't
+// serve one.
+static bool
+subtree_has_bin_ref(const uint8_t* ptr, uint32_t start_ix, uint32_t end_ix)
+{
+	uint32_t ix = start_ix;
+
+	while (ix < end_ix) {
+		op_base_mem* ob = (op_base_mem*)ptr;
+
+		if (ob->code == EXP_BIN) {
+			return true;
+		}
+
+		ptr += op_table[ob->code].size;
+		ix++;
+	}
+
+	return false;
+}
+
 static walk_status
 append_exp_candidate(const as_exp* exp, cf_vector* candidates,
 		const uint8_t* subtree_ptr, uint32_t subtree_start_ix,
 		uint32_t subtree_end_ix, exp_op_code cmp_code,
-		const parsed_literal* literal)
+		const parsed_literal* literal, as_sindex_type itype)
 {
 	const as_particle_type ktype = literal->ktype;
 	const uint8_t* bound_val = literal->bound_val;
@@ -872,7 +924,7 @@ append_exp_candidate(const as_exp* exp, cf_vector* candidates,
 
 	as_exp_sindex_candidate fresh = {
 		.ktype = ktype,
-		.itype = AS_SINDEX_ITYPE_DEFAULT,
+		.itype = itype,
 		.bval_low = lo,
 		.bval_high = hi,
 		.is_range = lo != hi,
@@ -894,6 +946,14 @@ append_exp_candidate(const as_exp* exp, cf_vector* candidates,
 	cf_vector_append(candidates, &fresh);
 
 	return WALK_OK;
+}
+
+static walk_status
+append_exp_containment_candidate(const as_exp* exp, cf_vector* candidates,
+		const cdt_exp_read* er)
+{
+	return append_exp_candidate(exp, candidates, er->recv_ptr, er->recv_start_ix,
+			er->recv_end_ix, EXP_CMP_EQ, &er->value, er->itype);
 }
 
 static void
@@ -1154,15 +1214,17 @@ parse_get_op_tail(msgpack_in* mp, uint64_t op_code, cdt_path_read* pr)
 			: parse_path_step_value(mp, &pr->steps[pr->n_steps++], ctx_type);
 }
 
-// Parse a compiled EXP_CALL that is a recognized CDT path read on a bare
-// bin: CDT family, no eval-token params, and one of:
+// Parse a compiled EXP_CALL that is a recognized CDT path read: CDT family,
+// no eval-token params, and one of:
 // - flat get-op: [op, flags, value] (single-step path - AEL exists(),
 //   scalar-at-path reads);
 // - CONTEXT_EVAL: [0xFF, [type, val, ...], [inner]] where inner is either
 //   a get-op (steps = pairs + synthesized op step) or SIZE (steps = pairs;
 //   COUNT semantics - AEL count() folds the final selector into the ctx).
 // Anything else is left unrecognized (valid == false) - the query still
-// runs, the path read just can't drive an index.
+// runs, the path read just can't drive an index. Once the params parse
+// (params_ok) the receiver span is recorded whatever its shape; valid is set
+// only for a bare-bin receiver.
 static cdt_path_read
 parse_cdt_path_read(const uint8_t* call_ptr, uint32_t call_ix)
 {
@@ -1273,6 +1335,8 @@ parse_cdt_path_read(const uint8_t* call_ptr, uint32_t call_ix)
 		return pr;
 	}
 
+	pr.params_ok = true;
+
 	const uint8_t* p = call_ptr + op_table[EXP_CALL].size;
 	uint32_t ix = call_ix + 1;
 	const uint32_t call_end_ix = call->base.instr_end_ix;
@@ -1280,6 +1344,10 @@ parse_cdt_path_read(const uint8_t* call_ptr, uint32_t call_ix)
 	if (ix >= call_end_ix) {
 		return pr;
 	}
+
+	pr.recv_ptr = p;
+	pr.recv_start_ix = ix;
+	pr.recv_end_ix = call_end_ix;
 
 	const op_base_mem* ob = (const op_base_mem*)p;
 
@@ -1291,6 +1359,53 @@ parse_cdt_path_read(const uint8_t* call_ptr, uint32_t call_ix)
 	pr.valid = true;
 
 	return pr;
+}
+
+// A single-step equality containment read (EXISTS / COUNT) whose receiver is
+// a sub-expression, derived from an already-parsed call. Single-step only -
+// sindex-create rejects 'context' with 'exp', so no expression-based sindex
+// can serve a longer path.
+static cdt_exp_read
+exp_read_from_path_read(const cdt_path_read* pr)
+{
+	cdt_exp_read er = { 0 };
+
+	// valid means a bare-bin receiver - served by the bin / ctx candidates,
+	// not here.
+	if (! pr->params_ok || pr->valid || pr->recv_ptr == NULL || pr->n_steps != 1) {
+		return er;
+	}
+
+	if (pr->result_type != RESULT_TYPE_EXISTS &&
+			pr->result_type != RESULT_TYPE_COUNT) {
+		return er;
+	}
+
+	const path_step* step = &pr->steps[0];
+	as_sindex_type itype = itype_from_selector(step->ctx_type);
+
+	if (itype == AS_SINDEX_N_ITYPES || step->is_range || ! pr->last_value.parsed) {
+		return er;
+	}
+
+	if (! is_indexable_deterministic_subtree(pr->recv_ptr, pr->recv_start_ix,
+				pr->recv_end_ix) ||
+			! subtree_has_bin_ref(pr->recv_ptr, pr->recv_start_ix,
+					pr->recv_end_ix)) {
+		return er;
+	}
+
+	er = (cdt_exp_read){
+		.itype = itype,
+		.result_type = pr->result_type,
+		.value = pr->last_value,
+		.recv_ptr = pr->recv_ptr,
+		.recv_start_ix = pr->recv_start_ix,
+		.recv_end_ix = pr->recv_end_ix,
+		.valid = true,
+	};
+
+	return er;
 }
 
 static bool
@@ -1310,6 +1425,18 @@ is_singular_nav_step(const path_step* step)
 	default:
 		return false;
 	}
+}
+
+static bool
+are_singular_nav_steps(const path_step* steps, uint32_t n_steps)
+{
+	for (uint32_t i = 0; i < n_steps; i++) {
+		if (! is_singular_nav_step(&steps[i])) {
+			return false;
+		}
+	}
+
+	return true;
 }
 
 static as_sindex_type
@@ -1446,10 +1573,8 @@ append_containment_candidate(const as_exp* exp, cf_vector* candidates,
 		return WALK_OK;
 	}
 
-	for (uint32_t i = 0; i < pr->n_steps - 1; i++) {
-		if (! is_singular_nav_step(&pr->steps[i])) {
-			return WALK_OK;
-		}
+	if (! are_singular_nav_steps(pr->steps, pr->n_steps - 1)) {
+		return WALK_OK;
 	}
 
 	uint8_t ctx_buf[AS_EXP_SINDEX_CTX_MAX];
@@ -1503,33 +1628,34 @@ extract_in_list_candidate(const as_exp* exp, const uint8_t* node_ptr,
 				(const op_var*)list_ob, AS_SINDEX_ITYPE_LIST, &literal, NULL, 0);
 	}
 
-	if (list_ob->code == EXP_CALL && list_ob->instr_end_ix == node_end_ix) {
+	if (list_ob->instr_end_ix != node_end_ix) {
+		return WALK_OK;
+	}
+
+	if (list_ob->code == EXP_CALL) {
 		// Nested list - "x" in $.attrs.specs. The call is a VALUE read of
 		// the list at a singular path; that full path is the candidate ctx.
 		cdt_path_read pr = parse_cdt_path_read(list_ptr, list_ix);
-
-		if (! pr.valid || pr.result_type != RESULT_TYPE_VALUE) {
-			return WALK_OK;
-		}
-
-		for (uint32_t i = 0; i < pr.n_steps; i++) {
-			if (! is_singular_nav_step(&pr.steps[i])) {
-				return WALK_OK;
-			}
-		}
-
 		uint8_t ctx_buf[AS_EXP_SINDEX_CTX_MAX];
 		uint32_t ctx_buf_sz;
 
-		if (! build_ctx_buf(pr.steps, pr.n_steps, ctx_buf, &ctx_buf_sz)) {
-			return WALK_OK;
+		if (pr.valid && pr.result_type == RESULT_TYPE_VALUE &&
+				are_singular_nav_steps(pr.steps, pr.n_steps) &&
+				build_ctx_buf(pr.steps, pr.n_steps, ctx_buf, &ctx_buf_sz)) {
+			return append_collection_candidate(exp, candidates, pr.bin_op,
+					AS_SINDEX_ITYPE_LIST, &literal, ctx_buf, ctx_buf_sz);
 		}
-
-		return append_collection_candidate(exp, candidates, pr.bin_op,
-				AS_SINDEX_ITYPE_LIST, &literal, ctx_buf, ctx_buf_sz);
 	}
 
-	return WALK_OK;
+	// "x" in <exp> - e.g. 'x' in $.vehicles:LIST.*.license (a wildcard
+	// SELECT) - is served by an expression-based LIST sindex on <exp>.
+	if (! is_indexable_deterministic_subtree(list_ptr, list_ix, node_end_ix) ||
+			! subtree_has_bin_ref(list_ptr, list_ix, node_end_ix)) {
+		return WALK_OK;
+	}
+
+	return append_exp_candidate(exp, candidates, list_ptr, list_ix, node_end_ix,
+			EXP_CMP_EQ, &literal, AS_SINDEX_ITYPE_LIST);
 }
 
 // A bare trilean CDT call at conjunct level - AEL exists(), e.g.
@@ -1541,7 +1667,17 @@ extract_exists_call_candidate(const as_exp* exp, const uint8_t* call_ptr,
 {
 	cdt_path_read pr = parse_cdt_path_read(call_ptr, call_ix);
 
-	if (! pr.valid || pr.result_type != RESULT_TYPE_EXISTS) {
+	if (! pr.valid) {
+		cdt_exp_read er = exp_read_from_path_read(&pr);
+
+		if (er.valid && er.result_type == RESULT_TYPE_EXISTS) {
+			return append_exp_containment_candidate(exp, candidates, &er);
+		}
+
+		return WALK_OK;
+	}
+
+	if (pr.result_type != RESULT_TYPE_EXISTS) {
 		return WALK_OK;
 	}
 
@@ -1641,36 +1777,59 @@ extract_exists_cmp_candidate(const as_exp* exp, cf_vector* candidates,
 // containment candidate when the comparison implies "count >= 1" - the index
 // yields a superset and the filter expression re-checks exact counts per
 // record. Negations / exact zero / upper bounds stay residual-only.
+static bool
+count_cmp_implies_containment(const parsed_literal* cmp_lit,
+		exp_op_code effective_cmp)
+{
+	if (cmp_lit->ktype != AS_PARTICLE_TYPE_INTEGER) {
+		return false;
+	}
+
+	const int64_t n = cmp_lit->bval;
+
+	switch (effective_cmp) {
+	case EXP_CMP_GT:
+		return n >= 0;
+	case EXP_CMP_GE:
+	case EXP_CMP_EQ:
+		return n >= 1;
+	default:
+		return false;
+	}
+}
+
 static walk_status
 extract_count_cmp_candidate(const as_exp* exp, cf_vector* candidates,
 		const cdt_path_read* pr, const parsed_literal* cmp_lit,
 		exp_op_code effective_cmp)
 {
-	if (cmp_lit->ktype != AS_PARTICLE_TYPE_INTEGER) {
-		return WALK_OK;
-	}
-
-	const int64_t n = cmp_lit->bval;
-	bool implies_containment;
-
-	switch (effective_cmp) {
-	case EXP_CMP_GT:
-		implies_containment = n >= 0;
-		break;
-	case EXP_CMP_GE:
-	case EXP_CMP_EQ:
-		implies_containment = n >= 1;
-		break;
-	default:
-		implies_containment = false;
-		break;
-	}
-
-	if (! implies_containment) {
+	if (! count_cmp_implies_containment(cmp_lit, effective_cmp)) {
 		return WALK_OK;
 	}
 
 	return append_containment_candidate(exp, candidates, pr);
+}
+
+// (<exp>).[=v].exists() == true on a sub-expression receiver - the exp twin
+// of extract_exists_cmp_candidate. COUNT comparisons on such a receiver
+// never arrive here: with a parseable literal resolve_bin_and_literal
+// reports is_exp, and extract_candidate's is_exp branch handles the
+// containment.
+static walk_status
+extract_exp_exists_cmp_candidate(const as_exp* exp, cf_vector* candidates,
+		const cdt_path_read* pr, const call_lit_operands* ops)
+{
+	cdt_exp_read er = exp_read_from_path_read(pr);
+	bool bool_val;
+
+	if (! er.valid || er.result_type != RESULT_TYPE_EXISTS ||
+			! try_bool_literal(ops->lit_ptr, ops->lit_start_ix, ops->lit_end_ix,
+					&bool_val) ||
+			ops->effective_cmp != EXP_CMP_EQ || ! bool_val) {
+		return WALK_OK;
+	}
+
+	return append_exp_containment_candidate(exp, candidates, &er);
 }
 
 // VALUE semantics (scalar at a singular nested path, e.g.
@@ -1683,10 +1842,8 @@ extract_value_cmp_candidate(const as_exp* exp, cf_vector* candidates,
 {
 	// Family B - every step must land on a single location for the read to
 	// have scalar semantics.
-	for (uint32_t i = 0; i < pr->n_steps; i++) {
-		if (! is_singular_nav_step(&pr->steps[i])) {
-			return WALK_OK;
-		}
+	if (! are_singular_nav_steps(pr->steps, pr->n_steps)) {
+		return WALK_OK;
 	}
 
 	uint8_t ctx_buf[AS_EXP_SINDEX_CTX_MAX];
@@ -1726,7 +1883,7 @@ extract_call_cmp_candidate(const as_exp* exp, const cmp_operand_spans* spans,
 			: parse_cdt_path_read(ops.call_ptr, ops.call_ix);
 
 	if (! pr.valid) {
-		return WALK_OK;
+		return extract_exp_exists_cmp_candidate(exp, candidates, &pr, &ops);
 	}
 
 	if (pr.result_type == RESULT_TYPE_EXISTS) {
@@ -1790,9 +1947,26 @@ extract_candidate(const as_exp* exp, const uint8_t* cmp_ptr,
 	}
 
 	if (sides.is_exp) {
-		return append_exp_candidate(exp, candidates, sides.exp_ptr,
+		walk_status st = append_exp_candidate(exp, candidates, sides.exp_ptr,
 				sides.exp_start_ix, sides.exp_end_ix, sides.effective_cmp,
-				&literal);
+				&literal, AS_SINDEX_ITYPE_DEFAULT);
+
+		if (st != WALK_OK) {
+			return st;
+		}
+
+		// (<exp>).[=v].count() <cmp> n is also containment of v in <exp> -
+		// resolve_bin_and_literal already parsed the call.
+		if (sides.cdt_probe_done && sides.cdt_probe_ptr == sides.exp_ptr) {
+			cdt_exp_read er = exp_read_from_path_read(&sides.cdt_probe_result);
+
+			if (er.valid && er.result_type == RESULT_TYPE_COUNT &&
+					count_cmp_implies_containment(&literal, sides.effective_cmp)) {
+				return append_exp_containment_candidate(exp, candidates, &er);
+			}
+		}
+
+		return WALK_OK;
 	}
 
 	const exp_rt_bin_table* bt = (const exp_rt_bin_table*)exp->bin_table;
@@ -2004,14 +2178,9 @@ extract_geo_ctx_candidate(const as_exp* exp, const cmp_operand_spans* spans,
 
 	cdt_path_read pr = parse_cdt_path_read(call_ptr, call_ix);
 
-	if (! pr.valid || pr.result_type != RESULT_TYPE_VALUE) {
+	if (! pr.valid || pr.result_type != RESULT_TYPE_VALUE ||
+			! are_singular_nav_steps(pr.steps, pr.n_steps)) {
 		return WALK_OK;
-	}
-
-	for (uint32_t i = 0; i < pr.n_steps; i++) {
-		if (! is_singular_nav_step(&pr.steps[i])) {
-			return WALK_OK;
-		}
 	}
 
 	uint8_t ctx_buf[AS_EXP_SINDEX_CTX_MAX];
