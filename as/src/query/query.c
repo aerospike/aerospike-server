@@ -2783,8 +2783,8 @@ aggr_query_job_slice(as_query_job* _job, as_partition_reservation* rsv,
 		as_result result;
 		as_result_init(&result);
 
-		int ret = as_aggr_process(_job->ns, rsv, &job->aggr_call, &ll,
-				(void*)&slice, &result);
+		int ret = as_aggr_process(_job->ns, rsv, &job->aggr_call,
+				_job->username, &ll, (void*)&slice, &result);
 
 		if (ret != 0) {
 			char* rs = as_module_err_string(ret);

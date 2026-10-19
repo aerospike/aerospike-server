@@ -89,8 +89,8 @@ typedef struct as_aggr_release_udata_s {
 //
 
 int as_aggr_process(struct as_namespace_s* ns, as_partition_reservation* rsv,
-		as_aggr_call* ag_call, cf_ll* ap_recl, void* udata,
-		struct as_result_s* ap_res);
+		as_aggr_call* ag_call, const char* username, cf_ll* ap_recl,
+		void* udata, struct as_result_s* ap_res);
 
 int as_aggr_keys_release_cb(cf_ll_element* ele, void* udata);
 void as_aggr_keys_destroy_cb(cf_ll_element* ele);

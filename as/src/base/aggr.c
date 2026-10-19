@@ -237,7 +237,8 @@ static const as_aerospike_hooks as_aggr_aerospike_hooks = { .rec_update = NULL,
 
 int
 as_aggr_process(as_namespace* ns, as_partition_reservation* rsv,
-		as_aggr_call* ag_call, cf_ll* ap_recl, void* udata, as_result* ap_res)
+		as_aggr_call* ag_call, const char* username, cf_ll* ap_recl,
+		void* udata, as_result* ap_res)
 {
 	as_index_ref r_ref;
 	as_storage_rd rd;
@@ -247,6 +248,7 @@ as_aggr_process(as_namespace* ns, as_partition_reservation* rsv,
 	udf_record urecord;
 	udf_record_init(&urecord);
 	urecord.tr = &tr;
+	urecord.username = username;
 	urecord.r_ref = &r_ref;
 	urecord.rd = &rd;
 	as_rec* urec = as_rec_new(&urecord, &as_aggr_record_hooks);

@@ -133,6 +133,7 @@ void
 udf_record_init(udf_record* urecord)
 {
 	urecord->tr = NULL;
+	urecord->username = NULL;
 	urecord->r_ref = NULL;
 	urecord->rd = NULL;
 
@@ -334,10 +335,12 @@ udf_record_load(udf_record* urecord)
 	as_storage_record_get_set_name(rd);
 	as_storage_rd_load_key(rd);
 
-	if (as_masking_ctx_init(NULL, rd->ns->name, rd->p_set, NULL, urecord->tr)) {
+	const char* username = urecord->username;
+	const as_transaction* tr = username == NULL ? urecord->tr : NULL;
+
+	if (as_masking_ctx_init(NULL, rd->ns->name, rd->p_set, username, tr)) {
 		rd->mask_ctx = cf_malloc(sizeof(as_masking_ctx));
-		as_masking_ctx_init(rd->mask_ctx, rd->ns->name, rd->p_set, NULL,
-				urecord->tr);
+		as_masking_ctx_init(rd->mask_ctx, rd->ns->name, rd->p_set, username, tr);
 	}
 	else {
 		rd->mask_ctx = NULL;

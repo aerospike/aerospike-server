@@ -64,6 +64,7 @@ typedef struct udf_record_bin_s {
 
 typedef struct udf_record_s {
 	struct as_transaction_s* tr;
+	const char* username; // aggregations only - their tr has no origin
 	struct as_index_ref_s* r_ref;
 	struct as_storage_rd_s* rd;
 
