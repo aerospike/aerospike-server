@@ -1,4 +1,9 @@
 ASD_CONFIG_FILE=/etc/aerospike/aerospike.conf
 
-# Uncomment to start with cold start
+# Extra asd command-line options, e.g. preview features:
+#ASD_OPTIONS="--preview index-checkpoint"
+
+# Uncomment to cold start on EVERY service start. For a one-time cold start,
+# leave this commented and run asd-coldstart. Do not set it to an empty value:
+# any value here overrides the asd-coldstart drop-in.
 #ASD_COLDSTART="--cold-start"

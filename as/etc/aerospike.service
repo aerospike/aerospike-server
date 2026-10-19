@@ -10,7 +10,10 @@ User=root
 Group=root
 EnvironmentFile=/etc/sysconfig/aerospike
 PermissionsStartOnly=True
-ExecStart=/usr/bin/asd $ASD_OPTIONS --config-file $ASD_CONFIG_FILE --fgdaemon
+# ASD_COLDSTART is deliberately separate from ASD_OPTIONS: asd-coldstart sets it
+# via an Environment= drop-in, and EnvironmentFile= (above) overrides Environment=,
+# so carrying --cold-start in ASD_OPTIONS would silently drop it.
+ExecStart=/usr/bin/asd $ASD_OPTIONS $ASD_COLDSTART --config-file $ASD_CONFIG_FILE --fgdaemon
 
 [Install]
 WantedBy=multi-user.target
