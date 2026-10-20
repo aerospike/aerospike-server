@@ -182,8 +182,8 @@ as_sindex_start(void)
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_namespace* ns = g_config.namespaces[ns_ix];
 
-		cf_thread_create_detached(as_sindex_run_gc, ns);
-		cf_thread_create_detached(run_cardinality, ns);
+		cf_thread_create_detached_named(as_sindex_run_gc, ns, "as-sidx-gc");
+		cf_thread_create_detached_named(run_cardinality, ns, "as-sidx-card");
 	}
 }
 

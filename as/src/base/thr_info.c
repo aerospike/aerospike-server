@@ -528,7 +528,7 @@ as_info_init()
 	}
 
 	for (uint32_t i = 0; i < g_config.n_info_threads; i++) {
-		cf_thread_create_transient(run_info, NULL);
+		cf_thread_create_transient_named(run_info, NULL, "as-info");
 	}
 }
 
@@ -721,7 +721,7 @@ as_info_set_num_info_threads(uint32_t n_threads)
 	else {
 		// Increase the number of info threads to n_threads.
 		while (g_config.n_info_threads < n_threads) {
-			cf_thread_create_transient(run_info, NULL);
+			cf_thread_create_transient_named(run_info, NULL, "as-info");
 			g_config.n_info_threads++;
 		}
 	}

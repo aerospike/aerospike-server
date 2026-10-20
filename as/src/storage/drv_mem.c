@@ -1645,7 +1645,7 @@ start_loading_records(drv_mems* mems, cf_queue* complete_q)
 		lri->complete_q = complete_q;
 		lri->complete_rc = p;
 
-		cf_thread_create_transient(run_mem_cold_start, (void*)lri);
+		cf_thread_create_transient_named(run_mem_cold_start, (void*)lri, "as-mem-cold");
 	}
 }
 
@@ -1660,7 +1660,7 @@ load_wblock_queues(drv_mems* mems)
 	for (int i = 0; i < mems->n_mems; i++) {
 		drv_mem* mem = &mems->mems[i];
 
-		tids[i] = cf_thread_create_joinable(run_load_queues, (void*)mem);
+		tids[i] = cf_thread_create_joinable_named(run_load_queues, (void*)mem, "as-mem-load");
 	}
 
 	for (int i = 0; i < mems->n_mems; i++) {
@@ -1806,7 +1806,7 @@ start_maintenance_threads(drv_mems* mems)
 	for (int i = 0; i < mems->n_mems; i++) {
 		drv_mem* mem = &mems->mems[i];
 
-		cf_thread_create_detached(run_mem_maintenance, (void*)mem);
+		cf_thread_create_detached_named(run_mem_maintenance, (void*)mem, "as-mem-maint");
 	}
 }
 
@@ -1819,7 +1819,7 @@ start_write_threads(drv_mems* mems)
 		drv_mem* mem = &mems->mems[i];
 
 		if (mem->shadow_name != NULL) {
-			mem->shadow_tid = cf_thread_create_joinable(run_shadow, (void*)mem);
+			mem->shadow_tid = cf_thread_create_joinable_named(run_shadow, (void*)mem, "as-mem-shadow");
 		}
 	}
 }
@@ -1832,7 +1832,7 @@ start_defrag_threads(drv_mems* mems)
 	for (int i = 0; i < mems->n_mems; i++) {
 		drv_mem* mem = &mems->mems[i];
 
-		cf_thread_create_detached(run_defrag, (void*)mem);
+		cf_thread_create_detached_named(run_defrag, (void*)mem, "as-mem-defrag");
 	}
 }
 

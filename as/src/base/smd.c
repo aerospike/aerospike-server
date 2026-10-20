@@ -634,7 +634,7 @@ as_smd_start(void)
 
 	as_exchange_register_listener(smd_cluster_changed_cb, NULL);
 
-	cf_thread_create_detached(run_smd, NULL);
+	cf_thread_create_detached_named(run_smd, NULL, "as-smd");
 }
 
 void

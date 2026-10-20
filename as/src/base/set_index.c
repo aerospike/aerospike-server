@@ -170,7 +170,7 @@ as_set_index_start(void)
 {
 	cf_queue_init(&g_populate_q, sizeof(populate_info), 4, true);
 
-	cf_thread_create_detached(run_populate_q, NULL);
+	cf_thread_create_detached_named(run_populate_q, NULL, "as-set-pop-q");
 }
 
 //==========================================================
@@ -693,7 +693,7 @@ run_populate_q(void* udata)
 		cf_tid tids[N_POPULATE_THREADS];
 
 		for (uint32_t n = 0; n < N_POPULATE_THREADS; n++) {
-			tids[n] = cf_thread_create_joinable(run_populate, &popi);
+			tids[n] = cf_thread_create_joinable_named(run_populate, &popi, "as-set-pop");
 		}
 
 		for (uint32_t n = 0; n < N_POPULATE_THREADS; n++) {

@@ -5011,7 +5011,7 @@ channel_start()
 
 	// Start the channel tender.
 	g_hb.channel_state.channel_tender_tid =
-			cf_thread_create_joinable(channel_tender, (void*)&g_hb);
+			cf_thread_create_joinable_named(channel_tender, (void*)&g_hb, "as-hb-channel");
 
 Exit:
 	CHANNEL_UNLOCK();
@@ -6972,7 +6972,7 @@ mesh_start()
 
 	// Start the mesh tender thread.
 	g_hb.mode_state.mesh_state.mesh_tender_tid =
-			cf_thread_create_joinable(mesh_tender, (void*)&g_hb);
+			cf_thread_create_joinable_named(mesh_tender, (void*)&g_hb, "as-hb-mesh");
 
 	MESH_UNLOCK();
 }
@@ -8068,7 +8068,7 @@ hb_tx_start()
 {
 	// Start the transmitter thread.
 	g_hb.transmitter_tid =
-			cf_thread_create_joinable(hb_transmitter, (void*)&g_hb);
+			cf_thread_create_joinable_named(hb_transmitter, (void*)&g_hb, "as-hb-tx");
 }
 
 /**
@@ -8090,7 +8090,7 @@ hb_adjacency_tender_start()
 {
 	// Start the transmitter thread.
 	g_hb.adjacency_tender_tid =
-			cf_thread_create_joinable(hb_adjacency_tender, (void*)&g_hb);
+			cf_thread_create_joinable_named(hb_adjacency_tender, (void*)&g_hb, "as-hb-adj");
 }
 
 /**

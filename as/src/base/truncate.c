@@ -374,7 +374,7 @@ truncate_action_do(as_namespace* ns, const char* set_name, uint64_t lut)
 		.n_threads = n_threads };
 
 	for (uint32_t i = 0; i < n_threads; i++) {
-		cf_thread_create_transient(run_truncate, jobi);
+		cf_thread_create_transient_named(run_truncate, jobi, "as-truncate");
 	}
 }
 

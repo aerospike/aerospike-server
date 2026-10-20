@@ -324,7 +324,7 @@ as_health_start()
 
 	cf_info(AS_HEALTH, "starting health monitor thread");
 
-	cf_thread_create_detached(run_health, NULL);
+	cf_thread_create_detached_named(run_health, NULL, "as-health");
 }
 
 void

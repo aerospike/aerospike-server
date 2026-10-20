@@ -63,6 +63,13 @@ extern __thread pid_t g_sys_tid;
 //
 
 void cf_thread_init(void);
+// Names are copied before the new thread or pooled task starts (15 bytes max).
+void cf_thread_create_transient_named(cf_thread_run_fn run, void* udata,
+		const char* name);
+cf_tid cf_thread_create_detached_named(cf_thread_run_fn run, void* udata,
+		const char* name);
+cf_tid cf_thread_create_joinable_named(cf_thread_run_fn run, void* udata,
+		const char* name);
 void cf_thread_create_transient(cf_thread_run_fn run, void* udata);
 cf_tid cf_thread_create_detached(cf_thread_run_fn run, void* udata);
 cf_tid cf_thread_create_joinable(cf_thread_run_fn run, void* udata);

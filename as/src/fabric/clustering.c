@@ -1834,7 +1834,7 @@ static void
 timer_start()
 {
 	CLUSTERING_LOCK();
-	g_timer.timer_tid = cf_thread_create_joinable(timer_thr, NULL);
+	g_timer.timer_tid = cf_thread_create_joinable_named(timer_thr, NULL, "as-clust-timer");
 	CLUSTERING_UNLOCK();
 }
 
@@ -5509,7 +5509,7 @@ external_event_publisher_start()
 	CLUSTERING_EVENT_PUBLISHER_LOCK();
 	g_external_event_publisher.sys_state = AS_CLUSTERING_SYS_STATE_RUNNING;
 	g_external_event_publisher.event_publisher_tid =
-			cf_thread_create_joinable(external_event_publisher_thr, NULL);
+			cf_thread_create_joinable_named(external_event_publisher_thr, NULL, "as-clust-event");
 	CLUSTERING_EVENT_PUBLISHER_UNLOCK();
 }
 

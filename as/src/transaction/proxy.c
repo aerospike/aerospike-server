@@ -191,7 +191,7 @@ as_proxy_init()
 	g_proxy_hash = cf_shash_create(cf_shash_fn_u32, sizeof(uint32_t),
 			sizeof(proxy_request), 4 * 1024, true);
 
-	cf_thread_create_detached(run_proxy_timeout, NULL);
+	cf_thread_create_detached_named(run_proxy_timeout, NULL, "as-proxy-time");
 
 	as_fabric_register_msg_fn(M_TYPE_PROXY, proxy_mt, sizeof(proxy_mt),
 			PROXY_MSG_SCRATCH_SIZE, proxy_msg_cb, NULL);
