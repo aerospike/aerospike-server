@@ -3795,11 +3795,12 @@ rt_bin_translate(rt_value* bin, rt_value* ret_val)
 	case AS_PARTICLE_TYPE_MAP:
 	case AS_PARTICLE_TYPE_LIST:
 	case AS_PARTICLE_TYPE_GEOJSON:
+	default:
+		// Storable types no expression declares stay as stored - type and
+		// existence checks see them, and a typed read finds them mismatched.
 		ret_val->type = RT_BIN_PTR;
 		ret_val->r_bin_p = b;
 		break;
-	default:
-		cf_crash(AS_EXP, "unexpected");
 	}
 }
 
