@@ -151,9 +151,10 @@ static void cfg_bad_practices_remove_token(cf_dyn_buf* db, const char* tok);
 		cfg_bad_practices_append_token(_db, _name);                            \
 	} while (false)
 
-// Legacy text note: over_budget now set based on stop_writes_budget, not sys_mem.
 #define CFG_MEMORY_BUDGET_FAIL_MSG                                             \
-	"data & indexes memory spec for all namespaces (%lu) exceeds system memory (%lu)"
+	"data & indexes memory spec for all namespaces (%lu) exceeds "             \
+	"stop-writes budget (%lu) - 'stop-writes-sys-memory-pct' %u%% of "         \
+	"system memory (%lu)"
 
 //==========================================================
 // Helper - set as_config defaults.
@@ -6273,7 +6274,7 @@ cfg_memory_budget_check(void)
 
 	if (m.over_budget) {
 		check_failed(&g_bad_practices, "memory", CFG_MEMORY_BUDGET_FAIL_MSG,
-				m.ns_mem, m.stop_writes_budget);
+				m.ns_mem, m.stop_writes_budget, m.stop_writes_pct, m.sys_mem);
 	}
 }
 
@@ -6506,7 +6507,7 @@ as_config_check_memory_budget(void)
 	// hot one.
 	if (m.over_budget) {
 		check_failed(&g_bad_practices, "memory", CFG_MEMORY_BUDGET_FAIL_MSG,
-				m.ns_mem, m.stop_writes_budget);
+				m.ns_mem, m.stop_writes_budget, m.stop_writes_pct, m.sys_mem);
 
 		// The same condition is only advisory here but fatal at startup - the
 		// enforce gate in as_config_post_process() crashes on any token. Say so,
