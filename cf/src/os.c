@@ -864,31 +864,24 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 
 	if (cg_stats != NULL) {
 		// A real, finite limit was resolved - the "max"/0/sentinel cases were
-		// rejected above. Store it once, so the value has a single writer
-		// regardless of which exit is taken. Every consumer gates on 'usable'
-		// or 'limit_governs' before reading it.
+		// rejected above. Raw used above the limit is a legitimate kernel state
+		// (transient overshoot, or a limit lowered below current usage) - it is
+		// monitoring data, not a parse failure, so it is reported as is.
+		cg_stats->usable = true;
 		cg_stats->limit_bytes = stats.limit_bytes;
-
-		if (stats.used_bytes <= stats.limit_bytes) {
-			cg_stats->usable = true;
-			// Reports raw cgroup RSS (memory.current). The throttle path below
-			// acts on the inactive-file-adjusted value (cg_used_bytes); this
-			// stat intentionally mirrors the kernel's reported usage.
-			cg_stats->used_bytes = stats.used_bytes;
-		}
-		else {
-			// Rate-limited - this sits on the statistics poll path. Keep only
-			// the (process-constant) limit in the message: used_bytes drifts
-			// every poll, which would make each rendered message a distinct
-			// ticker cache key and defeat suppression.
-			cf_ticker_warning(CF_OS,
-					"cgroup used exceeds limit of %lu bytes; cgroup stats unusable",
-					stats.limit_bytes);
-		}
+		// Reports raw cgroup RSS (memory.current). The throttle path below acts
+		// on the inactive-file-adjusted value (cg_used_bytes); this stat
+		// intentionally mirrors the kernel's reported usage.
+		cg_stats->used_bytes = stats.used_bytes;
 	}
 
 	uint64_t cg_used_bytes = stats.used_bytes;
 	uint64_t cg_limit_bytes = stats.limit_bytes;
+	uint64_t cg_limit_kbytes = cg_limit_bytes / 1024;
+
+	if (cg_limit_kbytes == 0) {
+		return false;
+	}
 
 	if (stats.stat_path[0] != '\0') {
 		uint64_t inactive_file_bytes = 0;
@@ -905,21 +898,15 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 		}
 	}
 
-	if (cg_used_bytes > cg_limit_bytes) {
+	if (cg_used_bytes >= cg_limit_bytes) {
+		// The cgroup budget is exhausted - report zero against the cgroup
+		// limit. Falling back to the (much larger) host view here would fail
+		// open at exactly the moment the container is most constrained. Print
+		// only the limit, which rarely changes: used drifts every poll, which
+		// would make each rendered message a distinct ticker cache key and
+		// defeat suppression.
 		cf_ticker_warning(CF_OS,
-				"cgroup used exceeds limit of %lu bytes; cgroup stats unusable",
-				cg_limit_bytes);
-		return false;
-	}
-
-	uint64_t cg_free_bytes = (cg_limit_bytes - cg_used_bytes);
-
-	if (cg_free_bytes == 0) {
-		// Used equals limit by construction here, so printing only the
-		// (process-constant) limit loses nothing and keeps the ticker key
-		// stable.
-		cf_ticker_warning(CF_OS,
-				"zero available cg memory: used equals limit of %lu bytes",
+				"zero available cg memory: used at or above limit of %lu bytes",
 				cg_limit_bytes);
 		*free_mem_pct = 0;
 		*free_mem_kbytes = 0;
@@ -927,16 +914,10 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 		return true;
 	}
 
-	uint64_t effective_free_kbytes = cg_free_bytes / 1024;
+	uint64_t effective_free_kbytes = (cg_limit_bytes - cg_used_bytes) / 1024;
 
 	if (host_free_mem_kbytes < effective_free_kbytes) {
 		effective_free_kbytes = host_free_mem_kbytes;
-	}
-
-	uint64_t cg_limit_kbytes = cg_limit_bytes / 1024;
-
-	if (cg_limit_kbytes == 0) {
-		return false;
 	}
 
 	*free_mem_kbytes = effective_free_kbytes;
@@ -1013,9 +994,9 @@ get_mem_info(bool cgroup_mode, uint64_t* free_mem_kbytes, uint32_t* free_mem_pct
 	}
 
 	// Gate on limit_governs, and keep the cgroup_mode conjunct: 'usable' only
-	// says the kernel's raw used was within the limit, while limit_governs says
-	// a cgroup limit supplied the cgroup free-memory numbers - and it is set the
-	// same way whether or not cgroup_mode is on. Both together mean the numbers
+	// says the cgroup stats were read, while limit_governs says a cgroup limit
+	// supplied the cgroup free-memory numbers - and it is set the same way
+	// whether or not cgroup_mode is on. Both together mean the numbers
 	// above came from that limit, which keeps this budget's denominator
 	// identical to the one the stop-writes trigger enforces.
 	if (cgroup_mode && cg_stats.limit_governs) {
