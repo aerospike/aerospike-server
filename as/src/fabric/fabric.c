@@ -2237,7 +2237,8 @@ fabric_recv_thread_pool_set_size(fabric_recv_thread_pool* pool, uint32_t size)
 	}
 
 	while (size > cf_vector_size(&pool->threads)) {
-		cf_tid tid = cf_thread_create_detached_named(run_fabric_recv, (void*)pool, "as-fab-rx");
+		cf_tid tid = cf_thread_create_detached_named(run_fabric_recv,
+				(void*)pool, "as-fab-rx");
 
 		cf_vector_append(&pool->threads, &tid);
 	}

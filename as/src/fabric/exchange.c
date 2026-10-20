@@ -3638,8 +3638,8 @@ exchange_start()
 
 	g_exchange.sys_state = AS_EXCHANGE_SYS_STATE_RUNNING;
 
-	g_exchange.timer_tid =
-			cf_thread_create_joinable_named(exchange_timer_thr, (void*)&g_exchange, "as-exch-timer");
+	g_exchange.timer_tid = cf_thread_create_joinable_named(exchange_timer_thr,
+			(void*)&g_exchange, "as-exch-timer");
 
 	DEBUG("exchange module started");
 

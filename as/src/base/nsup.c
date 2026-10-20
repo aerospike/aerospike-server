@@ -431,7 +431,8 @@ expire(as_namespace* ns)
 	expire_overall_info overall = { .ns = ns, .now = as_record_void_time_get() };
 
 	for (uint32_t i = 0; i < n_threads; i++) {
-		tids[i] = cf_thread_create_joinable_named(run_expire, (void*)&overall, "as-expire");
+		tids[i] = cf_thread_create_joinable_named(run_expire, (void*)&overall,
+				"as-expire");
 	}
 
 	for (uint32_t i = 0; i < n_threads; i++) {
@@ -552,7 +553,8 @@ evict(as_namespace* ns)
 		.sets_not_evicting = (const bool*)sets_not_evicting };
 
 	for (uint32_t i = 0; i < n_threads; i++) {
-		tids[i] = cf_thread_create_joinable_named(run_evict, (void*)&overall, "as-evict");
+		tids[i] = cf_thread_create_joinable_named(run_evict, (void*)&overall,
+				"as-evict");
 	}
 
 	for (uint32_t i = 0; i < n_threads; i++) {
@@ -783,7 +785,8 @@ find_evict_void_time(as_namespace* ns, uint32_t now)
 		per_thread->evict_hist = linear_hist_create("per-thread-hist",
 				LINEAR_HIST_SECONDS, now, ttl_range, n_buckets);
 
-		tids[i] = cf_thread_create_joinable_named(run_prep_evict, (void*)per_thread, "as-prep-evict");
+		tids[i] = cf_thread_create_joinable_named(run_prep_evict,
+				(void*)per_thread, "as-prep-evict");
 	}
 
 	for (uint32_t i = 0; i < n_threads; i++) {
@@ -1282,8 +1285,8 @@ cold_start_evict(as_namespace* ns)
 	};
 
 	for (uint32_t n = 0; n < n_cpus; n++) {
-		tids[n] =
-				cf_thread_create_joinable_named(run_cold_start_evict, (void*)&overall, "as-cold-evict");
+		tids[n] = cf_thread_create_joinable_named(run_cold_start_evict,
+				(void*)&overall, "as-cold-evict");
 	}
 
 	for (uint32_t n = 0; n < n_cpus; n++) {

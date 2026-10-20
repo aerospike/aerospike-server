@@ -135,6 +135,8 @@ jobs:
           set -euo pipefail
           pkg_dir="$GITHUB_WORKSPACE/aerospike-server/pkg/packages"
 
+          # actionlint substitutes a constant for matrix.distro during ShellCheck.
+          # shellcheck disable=SC2193
           if [[ "${{ matrix.distro }}" == ubuntu* ]]; then
             sudo dpkg -i "$(find "$pkg_dir" -name '*.deb' -print -quit)"
           else
@@ -154,6 +156,33 @@ jobs:
           /usr/bin/asd \
             --config-file aerospike-server/as/etc/gh-action.conf \
             --cold-start &
+          echo "ASD_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Verify a server thread is named
+        run: |
+          set -euo pipefail
+
+          for ((attempt = 0; attempt < 60; attempt++)); do
+            if ! kill -0 "$ASD_PID" 2>/dev/null; then
+              echo "Aerospike server exited before a named thread appeared" >&2
+              exit 1
+            fi
+
+            for comm in "/proc/$ASD_PID"/task/*/comm; do
+              [[ -f "$comm" ]] || continue
+              IFS= read -r name < "$comm" || continue
+
+              if [[ "$name" == as-* ]]; then
+                echo "Found named server thread: $name"
+                exit 0
+              fi
+            done
+
+            sleep 1
+          done
+
+          echo "No named server thread appeared within 60 seconds" >&2
+          exit 1
 
       - name: Checkout C client repo
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -168,4 +197,3 @@ jobs:
           set -euo pipefail
           make
           make test
-

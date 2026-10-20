@@ -1031,7 +1031,8 @@ ssd_load_wblock_queues(drv_ssds* ssds)
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd* ssd = &ssds->ssds[i];
 
-		tids[i] = cf_thread_create_joinable_named(run_load_queues, (void*)ssd, "as-ssd-load");
+		tids[i] = cf_thread_create_joinable_named(run_load_queues, (void*)ssd,
+				"as-ssd-load");
 	}
 
 	for (int i = 0; i < ssds->n_ssds; i++) {
@@ -1713,11 +1714,12 @@ ssd_start_write_threads(drv_ssds* ssds)
 		cf_assert(n > 0 && n < (int)sizeof(name), AS_DRV_SSD,
 				"ssd writer thread name too long");
 
-		ssd->write_tid = cf_thread_create_joinable_named(run_write, (void*)ssd,
-				name);
+		ssd->write_tid =
+				cf_thread_create_joinable_named(run_write, (void*)ssd, name);
 
 		if (ssd->shadow_name) {
-			ssd->shadow_tid = cf_thread_create_joinable_named(run_shadow, (void*)ssd, "as-ssd-shadow");
+			ssd->shadow_tid = cf_thread_create_joinable_named(run_shadow,
+					(void*)ssd, "as-ssd-shadow");
 		}
 	}
 }
@@ -2429,7 +2431,8 @@ ssd_start_maintenance_threads(drv_ssds* ssds)
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd* ssd = &ssds->ssds[i];
 
-		cf_thread_create_detached_named(run_ssd_maintenance, (void*)ssd, "as-ssd-maint");
+		cf_thread_create_detached_named(run_ssd_maintenance, (void*)ssd,
+				"as-ssd-maint");
 	}
 }
 
@@ -3084,7 +3087,8 @@ start_loading_records(drv_ssds* ssds, cf_queue* complete_q)
 		lri->complete_q = complete_q;
 		lri->complete_rc = p;
 
-		cf_thread_create_transient_named(run_ssd_cold_start, (void*)lri, "as-ssd-cold");
+		cf_thread_create_transient_named(run_ssd_cold_start, (void*)lri,
+				"as-ssd-cold");
 	}
 }
 
@@ -4027,7 +4031,8 @@ as_storage_sindex_build_all_ssd(as_namespace* ns)
 	cf_tid tids[ssds->n_ssds];
 
 	for (int i = 0; i < ssds->n_ssds; i++) {
-		tids[i] = cf_thread_create_joinable_named(run_si_startup, &ssds->ssds[i], "as-ssd-si");
+		tids[i] = cf_thread_create_joinable_named(run_si_startup,
+				&ssds->ssds[i], "as-ssd-si");
 	}
 
 	for (int i = 0; i < ssds->n_ssds; i++) {

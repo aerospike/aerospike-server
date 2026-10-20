@@ -693,7 +693,8 @@ run_populate_q(void* udata)
 		cf_tid tids[N_POPULATE_THREADS];
 
 		for (uint32_t n = 0; n < N_POPULATE_THREADS; n++) {
-			tids[n] = cf_thread_create_joinable_named(run_populate, &popi, "as-set-pop");
+			tids[n] = cf_thread_create_joinable_named(run_populate, &popi,
+					"as-set-pop");
 		}
 
 		for (uint32_t n = 0; n < N_POPULATE_THREADS; n++) {
