@@ -121,7 +121,7 @@ void dump_namespace_histograms(as_namespace* ns);
 void
 as_ticker_start()
 {
-	cf_thread_create_detached(run_ticker, NULL);
+	cf_thread_create_detached_named(run_ticker, NULL, "as-ticker");
 }
 
 //==========================================================

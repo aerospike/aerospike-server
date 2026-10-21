@@ -128,7 +128,7 @@ cf_dns_init()
 
 	// Start the resolver threads.
 	for (int i = 0; i < CF_DNS_NUM_RESOLVERS; i++) {
-		cf_thread_create_detached(cf_dns_resolve_worker, NULL);
+		cf_thread_create_detached_named(cf_dns_resolve_worker, NULL, "as-dns");
 	}
 }
 

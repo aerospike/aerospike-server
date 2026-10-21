@@ -151,8 +151,8 @@ as_sindex_populate_startup(void)
 	cf_queue_init(&g_add_sindex_q, sizeof(as_sindex*), 4, true);
 	cf_queue_init(&g_destroy_sindex_q, sizeof(as_sindex*), 4, true);
 
-	cf_thread_create_detached(run_add_sindex, NULL);
-	cf_thread_create_detached(run_destroy_sindex, NULL);
+	cf_thread_create_detached_named(run_add_sindex, NULL, "as-sidx-add");
+	cf_thread_create_detached_named(run_destroy_sindex, NULL, "as-sidx-del");
 }
 
 void
@@ -175,7 +175,8 @@ as_sindex_populate_destroy(as_sindex* si)
 static void
 populate_startup(as_namespace* ns)
 {
-	cf_tid ticker_tid = cf_thread_create_joinable(run_ticker, ns);
+	cf_tid ticker_tid =
+			cf_thread_create_joinable_named(run_ticker, ns, "as-sidx-tick");
 
 	if (ns->storage_sindex_startup_device_scan) {
 		cf_info(AS_SINDEX, "{%s} populating sindex by device scan", ns->name);
@@ -191,7 +192,8 @@ populate_startup(as_namespace* ns)
 		cf_tid tids[N_STARTUP_THREADS];
 
 		for (uint32_t i = 0; i < N_STARTUP_THREADS; i++) {
-			tids[i] = cf_thread_create_joinable(run_startup, &starti);
+			tids[i] = cf_thread_create_joinable_named(run_startup, &starti,
+					"as-sidx-start");
 		}
 
 		for (uint32_t i = 0; i < N_STARTUP_THREADS; i++) {
@@ -339,7 +341,8 @@ populate(as_sindex* si)
 	cf_tid tids[n_threads];
 
 	for (uint32_t i = 0; i < n_threads; i++) {
-		tids[i] = cf_thread_create_joinable(run_populate, &popi);
+		tids[i] = cf_thread_create_joinable_named(run_populate, &popi,
+				"as-sidx-pop");
 	}
 
 	for (uint32_t i = 0; i < n_threads; i++) {

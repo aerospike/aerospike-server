@@ -124,7 +124,7 @@ as_rw_init()
 	g_rw_request_hash = cf_rchash_create(rw_request_hash_fn,
 			rw_request_hdestroy, sizeof(rw_request_hkey), 32 * 1024);
 
-	cf_thread_create_detached(run_retransmit, NULL);
+	cf_thread_create_detached_named(run_retransmit, NULL, "as-rw-retry");
 
 	as_fabric_register_msg_fn(M_TYPE_RW, rw_mt, sizeof(rw_mt),
 			RW_MSG_SCRATCH_SIZE, rw_msg_cb, NULL);

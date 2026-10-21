@@ -1596,7 +1596,7 @@ static uint32_t
 thread_pool_create_threads(thread_pool* pool, uint32_t n_threads)
 {
 	for (uint32_t i = 0; i < n_threads; i++) {
-		cf_thread_create_transient(run_pool_worker, pool);
+		cf_thread_create_transient_named(run_pool_worker, pool, "as-batch");
 	}
 
 	return n_threads;

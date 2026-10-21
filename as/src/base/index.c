@@ -115,7 +115,7 @@ void
 as_index_tree_gc_init()
 {
 	cf_queue_init(&g_gc_queue, sizeof(as_index_tree*), 4096, true);
-	cf_thread_create_detached(run_index_tree_gc, NULL);
+	cf_thread_create_detached_named(run_index_tree_gc, NULL, "as-index-gc");
 }
 
 uint32_t

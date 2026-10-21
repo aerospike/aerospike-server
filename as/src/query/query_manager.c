@@ -335,7 +335,7 @@ add_query_job_thread(as_query_job* _job)
 	as_incr_uint32(&g_n_query_threads);
 	as_incr_uint32(&_job->n_threads);
 
-	cf_thread_create_transient(as_query_job_run, _job);
+	cf_thread_create_transient_named(as_query_job_run, _job, "as-query");
 }
 
 static void

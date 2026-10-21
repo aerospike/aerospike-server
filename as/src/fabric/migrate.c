@@ -220,11 +220,12 @@ as_migrate_init()
 
 	// Looks like an as_priority_thread_pool, but the reduce-pop is different.
 	for (uint32_t i = 0; i < g_config.n_migrate_threads; i++) {
-		cf_thread_create_transient(run_emigration, NULL);
+		cf_thread_create_transient_named(run_emigration, NULL, "as-migrate-out");
 	}
 
-	cf_thread_create_detached(run_emigration_slow, NULL);
-	cf_thread_create_detached(run_immigration_reaper, NULL);
+	cf_thread_create_detached_named(run_emigration_slow, NULL, "as-migrate-slow");
+	cf_thread_create_detached_named(run_immigration_reaper, NULL,
+			"as-migrate-reap");
 
 	emigrate_fill_queue_init();
 
@@ -276,7 +277,8 @@ as_migrate_set_num_xmit_threads(uint32_t n_threads)
 	else {
 		// Increase the number of migrate transmit threads to n_threads.
 		while (g_config.n_migrate_threads < n_threads) {
-			cf_thread_create_transient(run_emigration, NULL);
+			cf_thread_create_transient_named(run_emigration, NULL,
+					"as-migrate-out");
 			g_config.n_migrate_threads++;
 		}
 	}
@@ -744,8 +746,8 @@ emigrate_tree(emigration* emig)
 
 	emig->state = EMIG_STATE_ACTIVE;
 
-	cf_tid tid =
-			cf_thread_create_joinable(run_emigration_reinserter, (void*)emig);
+	cf_tid tid = cf_thread_create_joinable_named(run_emigration_reinserter,
+			(void*)emig, "as-migrate-ins");
 
 	if (as_index_reduce(emig->rsv.tree, emigrate_tree_reduce_fn, emig)) {
 		// Sets EMIG_STATE_FINISHED only if not already EMIG_STATE_ABORTED.

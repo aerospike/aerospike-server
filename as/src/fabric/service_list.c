@@ -351,7 +351,7 @@ as_service_list_init(void)
 			SCRATCH_SZ, handle_fabric_message, NULL);
 
 	as_exchange_register_listener(handle_cluster_change, NULL);
-	cf_thread_create_detached(run_update_thread, NULL);
+	cf_thread_create_detached_named(run_update_thread, NULL, "as-serv-list");
 }
 
 void

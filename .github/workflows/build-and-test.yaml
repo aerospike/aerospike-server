@@ -49,15 +49,15 @@ jobs:
 
           case "${{ matrix.distro }}" in
             ubuntu*)
-              if ! command -v git >/dev/null; then
+              if ! command -v git >/dev/null || ! command -v pgrep >/dev/null; then
                 sudo apt-get update
-                sudo apt-get install -y git ca-certificates
+                sudo apt-get install -y git ca-certificates procps
               fi
               ;;
             el9)
               # UBI minimal may only have microdnf
               command -v dnf >/dev/null || microdnf install -y dnf
-              dnf -y install git ca-certificates libyaml-devel
+              dnf -y install git ca-certificates libyaml-devel procps-ng
               ;;
           esac
 
@@ -135,6 +135,8 @@ jobs:
           set -euo pipefail
           pkg_dir="$GITHUB_WORKSPACE/aerospike-server/pkg/packages"
 
+          # actionlint substitutes a constant for matrix.distro during ShellCheck.
+          # shellcheck disable=SC2193
           if [[ "${{ matrix.distro }}" == ubuntu* ]]; then
             sudo dpkg -i "$(find "$pkg_dir" -name '*.deb' -print -quit)"
           else
@@ -155,6 +157,30 @@ jobs:
             --config-file aerospike-server/as/etc/gh-action.conf \
             --cold-start &
 
+      - name: Verify a server thread is named
+        run: |
+          set -euo pipefail
+
+          for ((attempt = 0; attempt < 60; attempt++)); do
+            # asd daemonizes, so the launcher's $! is not the server PID.
+            for pid in $(pgrep -x asd || true); do
+              for comm in "/proc/$pid"/task/*/comm; do
+                [[ -f "$comm" ]] || continue
+                IFS= read -r name < "$comm" || continue
+
+                if [[ "$name" == as-* ]]; then
+                  echo "Found named server thread in PID $pid: $name"
+                  exit 0
+                fi
+              done
+            done
+
+            sleep 1
+          done
+
+          echo "No named server thread appeared within 60 seconds" >&2
+          exit 1
+
       - name: Checkout C client repo
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -168,4 +194,3 @@ jobs:
           set -euo pipefail
           make
           make test
-

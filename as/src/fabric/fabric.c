@@ -54,6 +54,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -429,7 +430,12 @@ as_fabric_start()
 		g_fabric.sends[i].count = 0;
 		g_fabric.sends[i].next = g_fabric.sends + i + 1;
 
-		cf_thread_create_detached(run_fabric_send, (void*)&g_fabric.sends[i]);
+		char name[16];
+		int n = snprintf(name, sizeof(name), "as-fab-tx-%d", i);
+		cf_assert(n > 0 && n < (int)sizeof(name), AS_FABRIC,
+				"fabric send thread name too long");
+		cf_thread_create_detached_named(run_fabric_send,
+				(void*)&g_fabric.sends[i], name);
 	}
 
 	g_fabric.sends[g_config.n_fabric_send_threads - 1].next = NULL;
@@ -450,7 +456,7 @@ as_fabric_start()
 
 	cf_info(AS_FABRIC, "starting fabric accept thread");
 
-	cf_thread_create_detached(run_fabric_accept, NULL);
+	cf_thread_create_detached_named(run_fabric_accept, NULL, "as-fab-accept");
 }
 
 void
@@ -2231,7 +2237,8 @@ fabric_recv_thread_pool_set_size(fabric_recv_thread_pool* pool, uint32_t size)
 	}
 
 	while (size > cf_vector_size(&pool->threads)) {
-		cf_tid tid = cf_thread_create_detached(run_fabric_recv, (void*)pool);
+		cf_tid tid = cf_thread_create_detached_named(run_fabric_recv,
+				(void*)pool, "as-fab-rx");
 
 		cf_vector_append(&pool->threads, &tid);
 	}

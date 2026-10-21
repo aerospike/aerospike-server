@@ -30,6 +30,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
+#include <string.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -53,12 +54,14 @@
 typedef struct thread_req_s {
 	cf_thread_run_fn run;
 	void* udata;
+	char name[16];
 } thread_req;
 
 typedef struct thread_info_s {
 	cf_ll_element link; // base object must be first
 	cf_thread_run_fn run;
 	void* udata;
+	char name[16];
 	pid_t sys_tid;
 	uint32_t n_addrs;
 	void* addrs[MAX_BACKTRACE_DEPTH];
@@ -112,7 +115,10 @@ static __thread uint32_t g_n_exits = 0;
 //
 
 static void* run_pool(void* udata);
-static thread_info* make_thread_info(cf_thread_run_fn run, void* udata);
+static void copy_name(char dst[16], const char* name);
+static void set_name(const char* name);
+static thread_info* make_thread_info(cf_thread_run_fn run, void* udata,
+		const char* name);
 static void register_thread_info(void* udata);
 static void deregister_thread_info(void);
 static void* pool_shim_fn(void* udata);
@@ -141,16 +147,24 @@ cf_thread_init(void)
 void
 cf_thread_create_transient(cf_thread_run_fn run, void* udata)
 {
+	cf_thread_create_transient_named(run, udata, NULL);
+}
+
+void
+cf_thread_create_transient_named(cf_thread_run_fn run, void* udata,
+		const char* name)
+{
 	cf_assert(g_alloc_started, CF_MISC, "started thread too early");
 
 	thread_req treq = { .run = run, .udata = udata };
+	copy_name(treq.name, name);
 
 	cf_mutex_lock(&g_pool_lock);
 
 	if (g_n_pool_active == g_n_pool_total) {
 		g_n_pool_total++;
 
-		thread_info* info = make_thread_info(run_pool, NULL);
+		thread_info* info = make_thread_info(run_pool, NULL, "as-pool-idle");
 		pthread_t tid;
 		int result = pthread_create(&tid, &g_attr_detached, pool_shim_fn, info);
 
@@ -170,11 +184,18 @@ cf_thread_create_transient(cf_thread_run_fn run, void* udata)
 cf_tid
 cf_thread_create_detached(cf_thread_run_fn run, void* udata)
 {
+	return cf_thread_create_detached_named(run, udata, NULL);
+}
+
+cf_tid
+cf_thread_create_detached_named(cf_thread_run_fn run, void* udata,
+		const char* name)
+{
 	cf_assert(g_alloc_started, CF_MISC, "started thread too early");
 
 	as_incr_uint32(&g_n_detached);
 
-	thread_info* info = make_thread_info(run, udata);
+	thread_info* info = make_thread_info(run, udata, name);
 	pthread_t tid;
 	int result = pthread_create(&tid, &g_attr_detached, detached_shim_fn, info);
 
@@ -190,11 +211,18 @@ cf_thread_create_detached(cf_thread_run_fn run, void* udata)
 cf_tid
 cf_thread_create_joinable(cf_thread_run_fn run, void* udata)
 {
+	return cf_thread_create_joinable_named(run, udata, NULL);
+}
+
+cf_tid
+cf_thread_create_joinable_named(cf_thread_run_fn run, void* udata,
+		const char* name)
+{
 	cf_assert(g_alloc_started, CF_MISC, "started thread too early");
 
 	as_incr_uint32(&g_n_joinable);
 
-	thread_info* info = make_thread_info(run, udata);
+	thread_info* info = make_thread_info(run, udata, name);
 	pthread_t tid;
 	int result = pthread_create(&tid, NULL, joinable_shim_fn, info);
 
@@ -338,22 +366,54 @@ run_pool(void* udata)
 
 		cf_queue_pop(&g_thread_req_q, &treq, CF_QUEUE_FOREVER);
 
+		set_name(treq.name);
 		treq.run(treq.udata);
 
 		cleanup();
+		set_name("as-pool-idle");
 		as_decr_uint32(&g_n_pool_active);
 	}
 
 	return NULL;
 }
 
+static void
+copy_name(char dst[16], const char* name)
+{
+	if (name == NULL) {
+		dst[0] = 0;
+		return;
+	}
+
+	size_t len = strlen(name);
+	cf_assert(len <= 15, CF_MISC, "thread name too long: %s", name);
+	memcpy(dst, name, len + 1);
+}
+
+static void
+set_name(const char* name)
+{
+	if (name[0] == 0) {
+		return;
+	}
+
+	int result = pthread_setname_np(pthread_self(), name);
+
+	if (result != 0) {
+		// Avoid a warning for every task when the pool reuses a thread.
+		cf_detail(CF_MISC, "failed to name thread: %d (%s)", result,
+				cf_strerror(result));
+	}
+}
+
 static thread_info*
-make_thread_info(cf_thread_run_fn run, void* udata)
+make_thread_info(cf_thread_run_fn run, void* udata, const char* name)
 {
 	thread_info* info = cf_calloc(1, sizeof(thread_info));
 
 	info->run = run;
 	info->udata = udata;
+	copy_name(info->name, name);
 
 	return info;
 }
@@ -362,6 +422,7 @@ static void
 register_thread_info(void* udata)
 {
 	g_thread_info = (thread_info*)udata;
+	set_name(g_thread_info->name);
 	g_thread_info->sys_tid = cf_thread_sys_tid();
 
 	cf_ll_append(&g_thread_list, &g_thread_info->link);

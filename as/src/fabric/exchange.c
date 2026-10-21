@@ -1152,8 +1152,8 @@ exchange_external_event_publisher_start()
 	EXTERNAL_EVENT_PUBLISHER_LOCK();
 	g_external_event_publisher.sys_state = AS_EXCHANGE_SYS_STATE_RUNNING;
 	g_external_event_publisher.event_publisher_tid =
-			cf_thread_create_joinable(exchange_external_event_publisher_thr,
-					NULL);
+			cf_thread_create_joinable_named(exchange_external_event_publisher_thr,
+					NULL, "as-exch-event");
 	EXTERNAL_EVENT_PUBLISHER_UNLOCK();
 }
 
@@ -3638,8 +3638,8 @@ exchange_start()
 
 	g_exchange.sys_state = AS_EXCHANGE_SYS_STATE_RUNNING;
 
-	g_exchange.timer_tid =
-			cf_thread_create_joinable(exchange_timer_thr, (void*)&g_exchange);
+	g_exchange.timer_tid = cf_thread_create_joinable_named(exchange_timer_thr,
+			(void*)&g_exchange, "as-exch-timer");
 
 	DEBUG("exchange module started");
 

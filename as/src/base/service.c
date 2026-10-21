@@ -31,6 +31,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <sys/epoll.h>
 #include <sys/resource.h>
 #include <sys/time.h>
@@ -244,7 +245,7 @@ as_service_start(void)
 
 	cf_info(AS_SERVICE, "starting accept thread");
 
-	cf_thread_create_detached(run_accept, NULL);
+	cf_thread_create_detached_named(run_accept, NULL, "as-accept");
 }
 
 void
@@ -435,7 +436,11 @@ create_service_thread(uint32_t sid)
 	cf_poll_create(&ctx->poll);
 	cf_epoll_queue_init(&ctx->trans_q, AS_TRANSACTION_HEAD_SIZE, 64);
 
-	cf_thread_create_transient(run_service, ctx);
+	char name[16];
+	int n = snprintf(name, sizeof(name), "as-service-%u", sid);
+	cf_assert(n > 0 && n < (int)sizeof(name), AS_SERVICE,
+			"service thread name too long");
+	cf_thread_create_transient_named(run_service, ctx, name);
 
 	cf_mutex_lock(&g_thread_locks[sid]);
 
@@ -449,7 +454,7 @@ create_admin_thread(void)
 {
 	cf_poll_create(&g_admin_poll);
 
-	cf_thread_create_detached(run_admin, &g_admin_poll);
+	cf_thread_create_detached_named(run_admin, &g_admin_poll, "as-admin");
 }
 
 static void
@@ -1139,7 +1144,7 @@ start_reaper(void)
 
 	cf_info(AS_SERVICE, "starting reaper thread");
 
-	cf_thread_create_detached(run_reaper, NULL);
+	cf_thread_create_detached_named(run_reaper, NULL, "as-reaper");
 }
 
 static void*
