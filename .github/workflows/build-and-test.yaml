@@ -49,15 +49,15 @@ jobs:
 
           case "${{ matrix.distro }}" in
             ubuntu*)
-              if ! command -v git >/dev/null; then
+              if ! command -v git >/dev/null || ! command -v pgrep >/dev/null; then
                 sudo apt-get update
-                sudo apt-get install -y git ca-certificates
+                sudo apt-get install -y git ca-certificates procps
               fi
               ;;
             el9)
               # UBI minimal may only have microdnf
               command -v dnf >/dev/null || microdnf install -y dnf
-              dnf -y install git ca-certificates libyaml-devel
+              dnf -y install git ca-certificates libyaml-devel procps-ng
               ;;
           esac
 
@@ -156,26 +156,23 @@ jobs:
           /usr/bin/asd \
             --config-file aerospike-server/as/etc/gh-action.conf \
             --cold-start &
-          echo "ASD_PID=$!" >> "$GITHUB_ENV"
 
       - name: Verify a server thread is named
         run: |
           set -euo pipefail
 
           for ((attempt = 0; attempt < 60; attempt++)); do
-            if ! kill -0 "$ASD_PID" 2>/dev/null; then
-              echo "Aerospike server exited before a named thread appeared" >&2
-              exit 1
-            fi
+            # asd daemonizes, so the launcher's $! is not the server PID.
+            for pid in $(pgrep -x asd || true); do
+              for comm in "/proc/$pid"/task/*/comm; do
+                [[ -f "$comm" ]] || continue
+                IFS= read -r name < "$comm" || continue
 
-            for comm in "/proc/$ASD_PID"/task/*/comm; do
-              [[ -f "$comm" ]] || continue
-              IFS= read -r name < "$comm" || continue
-
-              if [[ "$name" == as-* ]]; then
-                echo "Found named server thread: $name"
-                exit 0
-              fi
+                if [[ "$name" == as-* ]]; then
+                  echo "Found named server thread in PID $pid: $name"
+                  exit 0
+                fi
+              done
             done
 
             sleep 1
