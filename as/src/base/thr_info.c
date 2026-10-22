@@ -2432,7 +2432,7 @@ cmd_log(as_info_cmd_args* args)
 	cf_dyn_buf* db = args->db;
 
 	int sink_id;
-	char* context = strchr(params, ARG_SEP);
+	char* context = (char*)strchr(params, ARG_SEP);
 
 	if (context != NULL) { // this means: log/id/context,
 		*context = 0;
@@ -3110,7 +3110,7 @@ cmd_sets(as_info_cmd_args* args)
 	// format w namespace & set name is
 	//   prop1=val1:prop2=val2...propn=valn;
 
-	char* set_name = NULL;
+	const char* set_name = NULL;
 	as_namespace* ns = NULL;
 
 	if (strlen(params) > 0) {
@@ -3163,7 +3163,7 @@ cmd_sindex(as_info_cmd_args* args)
 	as_info_warn_deprecated(
 			"'sindex' info command is deprecated - use 'sindex-list' instead");
 
-	char* index_name = NULL;
+	const char* index_name = NULL;
 	as_namespace* ns = NULL;
 
 	if (strlen(params) > 0) {
