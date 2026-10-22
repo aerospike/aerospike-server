@@ -709,7 +709,7 @@ as_sindex_manager_sindex_exists(struct as_info_cmd_args_s* args)
 }
 
 bool
-as_sindex_manager_stats_str(as_namespace* ns, char* iname, cf_dyn_buf* db)
+as_sindex_manager_stats_str(as_namespace* ns, const char* iname, cf_dyn_buf* db)
 {
 	SINDEX_GRLOCK();
 
