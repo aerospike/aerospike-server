@@ -2354,7 +2354,7 @@
               "minimum": 0,
               "maximum": 4294967295,
               "description": "Node-local limit for concurrently executing direct local single-record client read handlers in this namespace. Zero disables admission control. Excess requests receive KEY_BUSY before entering the record handler.",
-              "dynamic": false,
+              "dynamic": true,
               "enterpriseOnly": false
             },
             "single-record-write-concurrency-limit": {
@@ -2363,7 +2363,7 @@
               "minimum": 0,
               "maximum": 4294967295,
               "description": "Node-local limit for concurrently executing direct local single-record client write handlers in this namespace. Zero disables admission control. Excess requests receive KEY_BUSY before entering the record handler.",
-              "dynamic": false,
+              "dynamic": true,
               "enterpriseOnly": false
             },
             "transaction-pending-limit": {

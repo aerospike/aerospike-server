@@ -516,9 +516,9 @@ cfg_get_namespace(const as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint32(db, "tomb-raider-unmark-threads",
 			ns->n_tomb_raider_unmark_threads);
 	info_append_uint32(db, "single-record-read-concurrency-limit",
-			ns->single_record_read_concurrency_limit);
+			as_load_uint32(&ns->single_record_read_concurrency_limit));
 	info_append_uint32(db, "single-record-write-concurrency-limit",
-			ns->single_record_write_concurrency_limit);
+			as_load_uint32(&ns->single_record_write_concurrency_limit));
 	info_append_uint32(db, "transaction-pending-limit",
 			ns->transaction_pending_limit);
 	info_append_uint32(db, "truncate-threads", ns->n_truncate_threads);
@@ -1440,6 +1440,21 @@ cfg_set_network(const char* cmd)
 }
 
 static bool
+set_admission_limit(as_namespace* ns, const char* name, const char* value,
+		uint32_t* limit)
+{
+	uint32_t next;
+	if (value[0] < '0' || value[0] > '9' || cf_str_atoi_u32(value, &next) != 0) {
+		return false;
+	}
+
+	cf_info(AS_INFO, "Changing value of %s of ns %s from %u to %u", name,
+			ns->name, as_load_uint32(limit), next);
+	as_store_uint32(limit, next);
+	return true;
+}
+
+static bool
 cfg_set_namespace(const char* cmd, as_namespace* ns)
 {
 	char v[1024];
@@ -2265,6 +2280,16 @@ cfg_set_namespace(const char* cmd, as_namespace* ns)
 				"Changing value of tomb-raider-unmark-threads of ns %s from %u to %u",
 				ns->name, ns->n_tomb_raider_unmark_threads, val);
 		as_store_uint32(&ns->n_tomb_raider_unmark_threads, val);
+	}
+	else if (as_info_parameter_get(cmd, "single-record-read-concurrency-limit",
+					 v, &v_len) == 0) {
+		return set_admission_limit(ns, "single-record-read-concurrency-limit", v,
+				&ns->single_record_read_concurrency_limit);
+	}
+	else if (as_info_parameter_get(cmd, "single-record-write-concurrency-limit",
+					 v, &v_len) == 0) {
+		return set_admission_limit(ns, "single-record-write-concurrency-limit", v,
+				&ns->single_record_write_concurrency_limit);
 	}
 	else if (as_info_parameter_get(cmd, "transaction-pending-limit", v,
 					 &v_len) == 0) {

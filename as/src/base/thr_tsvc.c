@@ -84,17 +84,18 @@ query_perm(const as_transaction* tr)
 }
 
 // Count only synchronous handler occupancy. No work is published via this
-// counter, so the atomic operations only need to serialize slot accounting.
+// counter.
 static inline bool
 try_admit(uint32_t* active, uint32_t limit)
 {
-	uint32_t count = __atomic_load_n(active, __ATOMIC_RELAXED);
+	uint32_t count = as_load_uint32(active);
 
 	while (count < limit) {
-		if (__atomic_compare_exchange_n(active, &count, count + 1, true,
-				__ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+		if (as_cas_uint32(active, count, count + 1)) {
 			return true;
 		}
+
+		count = as_load_uint32(active);
 	}
 
 	return false;
@@ -307,8 +308,10 @@ as_tsvc_process_transaction(as_transaction* tr)
 		uint32_t* admitted = NULL;
 
 		if (tr->origin == FROM_CLIENT && ! as_transaction_is_batch_sub(tr)) {
-			uint32_t limit = is_write ? ns->single_record_write_concurrency_limit
-									  : ns->single_record_read_concurrency_limit;
+			uint32_t* configured_limit = is_write ?
+					&ns->single_record_write_concurrency_limit :
+					&ns->single_record_read_concurrency_limit;
+			uint32_t limit = as_load_uint32(configured_limit);
 
 			if (limit != 0) {
 				admitted = is_write ? &ns->single_record_write_active
@@ -359,7 +362,7 @@ as_tsvc_process_transaction(as_transaction* tr)
 		}
 
 		if (admitted != NULL) {
-			__atomic_fetch_sub(admitted, 1, __ATOMIC_RELAXED);
+			as_decr_uint32(admitted);
 		}
 
 		switch (status) {
