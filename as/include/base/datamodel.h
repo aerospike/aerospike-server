@@ -883,6 +883,8 @@ typedef struct as_namespace_s {
 	uint32_t tomb_raider_eligible_age; // relevant only for enterprise edition
 	uint32_t tomb_raider_period; // relevant only for enterprise edition
 	uint32_t n_tomb_raider_unmark_threads; // relevant only for enterprise edition
+	uint32_t single_record_read_concurrency_limit; // startup-only, 0 means unlimited
+	uint32_t single_record_write_concurrency_limit; // startup-only, 0 means unlimited
 	uint32_t transaction_pending_limit; // 0 means no limit
 	uint32_t n_truncate_threads;
 	as_write_commit_level write_commit_level;
@@ -1341,6 +1343,10 @@ typedef struct as_namespace_s {
 	// Special errors that deserve their own counters:
 
 	uint64_t n_fail_xdr_forbidden;
+	uint32_t single_record_read_active;
+	uint32_t single_record_write_active;
+	uint64_t n_fail_read_admission;
+	uint64_t n_fail_write_admission;
 	uint64_t n_fail_key_busy;
 	uint64_t n_fail_xdr_key_busy;
 	uint64_t n_fail_generation;

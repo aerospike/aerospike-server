@@ -515,6 +515,10 @@ cfg_get_namespace(const as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint32(db, "tomb-raider-period", ns->tomb_raider_period);
 	info_append_uint32(db, "tomb-raider-unmark-threads",
 			ns->n_tomb_raider_unmark_threads);
+	info_append_uint32(db, "single-record-read-concurrency-limit",
+			ns->single_record_read_concurrency_limit);
+	info_append_uint32(db, "single-record-write-concurrency-limit",
+			ns->single_record_write_concurrency_limit);
 	info_append_uint32(db, "transaction-pending-limit",
 			ns->transaction_pending_limit);
 	info_append_uint32(db, "truncate-threads", ns->n_truncate_threads);

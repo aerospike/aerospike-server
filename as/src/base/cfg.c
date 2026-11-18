@@ -498,6 +498,8 @@ typedef enum {
 	CASE_NAMESPACE_TOMB_RAIDER_ELIGIBLE_AGE,
 	CASE_NAMESPACE_TOMB_RAIDER_PERIOD,
 	CASE_NAMESPACE_TOMB_RAIDER_UNMARK_THREADS,
+	CASE_NAMESPACE_SINGLE_RECORD_READ_CONCURRENCY_LIMIT,
+	CASE_NAMESPACE_SINGLE_RECORD_WRITE_CONCURRENCY_LIMIT,
 	CASE_NAMESPACE_TRANSACTION_PENDING_LIMIT,
 	CASE_NAMESPACE_TRUNCATE_THREADS,
 	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE,
@@ -1113,6 +1115,8 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "tomb-raider-eligible-age",		CASE_NAMESPACE_TOMB_RAIDER_ELIGIBLE_AGE },
 		{ "tomb-raider-period",				CASE_NAMESPACE_TOMB_RAIDER_PERIOD },
 		{ "tomb-raider-unmark-threads",		CASE_NAMESPACE_TOMB_RAIDER_UNMARK_THREADS },
+		{ "single-record-read-concurrency-limit", CASE_NAMESPACE_SINGLE_RECORD_READ_CONCURRENCY_LIMIT },
+		{ "single-record-write-concurrency-limit", CASE_NAMESPACE_SINGLE_RECORD_WRITE_CONCURRENCY_LIMIT },
 		{ "transaction-pending-limit",		CASE_NAMESPACE_TRANSACTION_PENDING_LIMIT },
 		{ "truncate-threads",				CASE_NAMESPACE_TRUNCATE_THREADS },
 		{ "write-commit-level-override",	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE },
@@ -3296,6 +3300,12 @@ as_config_init(const char* config_file)
 				cfg_enterprise_only(&line);
 				ns->n_tomb_raider_unmark_threads =
 						cfg_u32(&line, 0, AS_STORAGE_MAX_DEVICES);
+				break;
+			case CASE_NAMESPACE_SINGLE_RECORD_READ_CONCURRENCY_LIMIT:
+				ns->single_record_read_concurrency_limit = cfg_u32_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_SINGLE_RECORD_WRITE_CONCURRENCY_LIMIT:
+				ns->single_record_write_concurrency_limit = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_TRANSACTION_PENDING_LIMIT:
 				ns->transaction_pending_limit = cfg_u32_no_checks(&line);

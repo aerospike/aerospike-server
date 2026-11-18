@@ -83,6 +83,23 @@ query_perm(const as_transaction* tr)
 														   : PERM_QUERY;
 }
 
+// Count only synchronous handler occupancy. No work is published via this
+// counter, so the atomic operations only need to serialize slot accounting.
+static inline bool
+try_admit(uint32_t* active, uint32_t limit)
+{
+	uint32_t count = __atomic_load_n(active, __ATOMIC_RELAXED);
+
+	while (count < limit) {
+		if (__atomic_compare_exchange_n(active, &count, count + 1, true,
+				__ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
 static inline const char*
 write_type_tag(const as_transaction* tr)
 {
@@ -287,6 +304,26 @@ as_tsvc_process_transaction(as_transaction* tr)
 	if (rv == 0) {
 		// <><><><><><>  Reservation Succeeded  <><><><><><>
 
+		uint32_t* admitted = NULL;
+
+		if (tr->origin == FROM_CLIENT && ! as_transaction_is_batch_sub(tr)) {
+			uint32_t limit = is_write ? ns->single_record_write_concurrency_limit
+									  : ns->single_record_read_concurrency_limit;
+
+			if (limit != 0) {
+				admitted = is_write ? &ns->single_record_write_active
+									: &ns->single_record_read_active;
+
+				if (! try_admit(admitted, limit)) {
+					as_incr_uint64(is_write ? &ns->n_fail_write_admission
+											: &ns->n_fail_read_admission);
+					as_partition_release(&tr->rsv);
+					as_transaction_error(tr, ns, AS_ERR_KEY_BUSY);
+					goto Cleanup;
+				}
+			}
+		}
+
 		detail_unique(tr, is_write);
 
 		transaction_status status;
@@ -319,6 +356,10 @@ as_tsvc_process_transaction(as_transaction* tr)
 			else {
 				status = as_read_start(tr);
 			}
+		}
+
+		if (admitted != NULL) {
+			__atomic_fetch_sub(admitted, 1, __ATOMIC_RELAXED);
 		}
 
 		switch (status) {
