@@ -2268,6 +2268,24 @@
               "dynamic": true,
               "enterpriseOnly": false
             },
+            "single-record-read-concurrency-limit": {
+              "type": "integer",
+              "default": 0,
+              "minimum": 0,
+              "maximum": 4294967295,
+              "description": "Node-local cap on synchronous single-record read handlers for direct clients in this namespace. Read-only requests, including direct client MRT verify-reads, use this lane. Proxy, batch and query requests are excluded. An asynchronous handoff releases the slot at handler return. A cap at or above service-threads cannot shed load. Zero disables the cap. Excess requests receive KEY_BUSY before the handler.",
+              "dynamic": true,
+              "enterpriseOnly": false
+            },
+            "single-record-write-concurrency-limit": {
+              "type": "integer",
+              "default": 0,
+              "minimum": 0,
+              "maximum": 4294967295,
+              "description": "Node-local cap on synchronous single-record write handlers for direct clients in this namespace. Requests with INFO2_WRITE, including deletes, UDFs, mixed read/write operations, and direct client XDR writes and MRT rolls, use this lane. Proxy, batch and query requests are excluded. An asynchronous handoff releases the slot at handler return. A cap at or above service-threads cannot shed load. Zero disables the cap. Excess requests receive KEY_BUSY before the handler.",
+              "dynamic": true,
+              "enterpriseOnly": false
+            },
             "stop-writes-sys-memory-pct": {
               "type": "integer",
               "default": 90,
@@ -2347,24 +2365,6 @@
               "description": "Maximum number of threads for the tomb raider unmark phase. If set to 0, one thread per device is used.",
               "dynamic": true,
               "enterpriseOnly": true
-            },
-            "single-record-read-concurrency-limit": {
-              "type": "integer",
-              "default": 0,
-              "minimum": 0,
-              "maximum": 4294967295,
-              "description": "Node-local limit for concurrently executing direct local single-record client read handlers in this namespace. Zero disables admission control. Excess requests receive KEY_BUSY before entering the record handler.",
-              "dynamic": true,
-              "enterpriseOnly": false
-            },
-            "single-record-write-concurrency-limit": {
-              "type": "integer",
-              "default": 0,
-              "minimum": 0,
-              "maximum": 4294967295,
-              "description": "Node-local limit for concurrently executing direct local single-record client write handlers in this namespace. Zero disables admission control. Excess requests receive KEY_BUSY before entering the record handler.",
-              "dynamic": true,
-              "enterpriseOnly": false
             },
             "transaction-pending-limit": {
               "type": "integer",

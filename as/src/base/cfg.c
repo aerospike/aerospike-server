@@ -492,14 +492,14 @@ typedef enum {
 	CASE_NAMESPACE_REPLICATION_FACTOR,
 	CASE_NAMESPACE_SINDEX_STAGE_SIZE,
 	CASE_NAMESPACE_SINGLE_QUERY_THREADS,
+	CASE_NAMESPACE_SINGLE_RECORD_READ_CONCURRENCY_LIMIT,
+	CASE_NAMESPACE_SINGLE_RECORD_WRITE_CONCURRENCY_LIMIT,
 	CASE_NAMESPACE_STOP_WRITES_SYS_MEMORY_PCT,
 	CASE_NAMESPACE_STRONG_CONSISTENCY,
 	CASE_NAMESPACE_STRONG_CONSISTENCY_ALLOW_EXPUNGE,
 	CASE_NAMESPACE_TOMB_RAIDER_ELIGIBLE_AGE,
 	CASE_NAMESPACE_TOMB_RAIDER_PERIOD,
 	CASE_NAMESPACE_TOMB_RAIDER_UNMARK_THREADS,
-	CASE_NAMESPACE_SINGLE_RECORD_READ_CONCURRENCY_LIMIT,
-	CASE_NAMESPACE_SINGLE_RECORD_WRITE_CONCURRENCY_LIMIT,
 	CASE_NAMESPACE_TRANSACTION_PENDING_LIMIT,
 	CASE_NAMESPACE_TRUNCATE_THREADS,
 	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE,
@@ -1109,14 +1109,14 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "replication-factor",				CASE_NAMESPACE_REPLICATION_FACTOR },
 		{ "sindex-stage-size",				CASE_NAMESPACE_SINDEX_STAGE_SIZE },
 		{ "single-query-threads",			CASE_NAMESPACE_SINGLE_QUERY_THREADS },
+		{ "single-record-read-concurrency-limit", CASE_NAMESPACE_SINGLE_RECORD_READ_CONCURRENCY_LIMIT },
+		{ "single-record-write-concurrency-limit", CASE_NAMESPACE_SINGLE_RECORD_WRITE_CONCURRENCY_LIMIT },
 		{ "stop-writes-sys-memory-pct",		CASE_NAMESPACE_STOP_WRITES_SYS_MEMORY_PCT },
 		{ "strong-consistency",				CASE_NAMESPACE_STRONG_CONSISTENCY },
 		{ "strong-consistency-allow-expunge", CASE_NAMESPACE_STRONG_CONSISTENCY_ALLOW_EXPUNGE },
 		{ "tomb-raider-eligible-age",		CASE_NAMESPACE_TOMB_RAIDER_ELIGIBLE_AGE },
 		{ "tomb-raider-period",				CASE_NAMESPACE_TOMB_RAIDER_PERIOD },
 		{ "tomb-raider-unmark-threads",		CASE_NAMESPACE_TOMB_RAIDER_UNMARK_THREADS },
-		{ "single-record-read-concurrency-limit", CASE_NAMESPACE_SINGLE_RECORD_READ_CONCURRENCY_LIMIT },
-		{ "single-record-write-concurrency-limit", CASE_NAMESPACE_SINGLE_RECORD_WRITE_CONCURRENCY_LIMIT },
 		{ "transaction-pending-limit",		CASE_NAMESPACE_TRANSACTION_PENDING_LIMIT },
 		{ "truncate-threads",				CASE_NAMESPACE_TRUNCATE_THREADS },
 		{ "write-commit-level-override",	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE },
@@ -3277,6 +3277,14 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_SINGLE_QUERY_THREADS:
 				ns->n_single_query_threads = cfg_u32(&line, 1, 128);
 				break;
+			case CASE_NAMESPACE_SINGLE_RECORD_READ_CONCURRENCY_LIMIT:
+				ns->single_record_read_concurrency_limit =
+						cfg_u32_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_SINGLE_RECORD_WRITE_CONCURRENCY_LIMIT:
+				ns->single_record_write_concurrency_limit =
+						cfg_u32_no_checks(&line);
+				break;
 			case CASE_NAMESPACE_STOP_WRITES_SYS_MEMORY_PCT:
 				ns->stop_writes_sys_memory_pct = cfg_u32(&line, 0, 100);
 				break;
@@ -3300,12 +3308,6 @@ as_config_init(const char* config_file)
 				cfg_enterprise_only(&line);
 				ns->n_tomb_raider_unmark_threads =
 						cfg_u32(&line, 0, AS_STORAGE_MAX_DEVICES);
-				break;
-			case CASE_NAMESPACE_SINGLE_RECORD_READ_CONCURRENCY_LIMIT:
-				ns->single_record_read_concurrency_limit = cfg_u32_no_checks(&line);
-				break;
-			case CASE_NAMESPACE_SINGLE_RECORD_WRITE_CONCURRENCY_LIMIT:
-				ns->single_record_write_concurrency_limit = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_TRANSACTION_PENDING_LIMIT:
 				ns->transaction_pending_limit = cfg_u32_no_checks(&line);

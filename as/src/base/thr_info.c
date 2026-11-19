@@ -4826,6 +4826,13 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint64(db, "mrt_monitor_roll_back_timeout",
 			ns->n_mrt_monitor_roll_back_timeout);
 
+	// Active single-record client handlers with an admission slot.
+
+	info_append_uint32(db, "single_record_read_active",
+			as_load_uint32(&ns->single_record_read_active));
+	info_append_uint32(db, "single_record_write_active",
+			as_load_uint32(&ns->single_record_write_active));
+
 	// Special errors that deserve their own counters:
 
 	info_append_uint64(db, "fail_xdr_forbidden", ns->n_fail_xdr_forbidden);
@@ -4833,10 +4840,6 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 			as_load_uint64(&ns->n_fail_read_admission));
 	info_append_uint64(db, "fail_write_admission",
 			as_load_uint64(&ns->n_fail_write_admission));
-	info_append_uint32(db, "single_record_read_active",
-			as_load_uint32(&ns->single_record_read_active));
-	info_append_uint32(db, "single_record_write_active",
-			as_load_uint32(&ns->single_record_write_active));
 	info_append_uint64(db, "fail_key_busy", ns->n_fail_key_busy);
 	info_append_uint64(db, "fail_xdr_key_busy", ns->n_fail_xdr_key_busy);
 	info_append_uint64(db, "fail_generation", ns->n_fail_generation);

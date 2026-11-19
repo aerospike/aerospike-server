@@ -83,8 +83,8 @@ query_perm(const as_transaction* tr)
 														   : PERM_QUERY;
 }
 
-// Count only synchronous handler occupancy. No work is published via this
-// counter.
+// Take a slot for the synchronous handler. A write that hands work off to
+// replication releases its slot when the handler returns.
 static inline bool
 try_admit(uint32_t* active, uint32_t limit)
 {
@@ -307,10 +307,12 @@ as_tsvc_process_transaction(as_transaction* tr)
 
 		uint32_t* admitted = NULL;
 
-		if (tr->origin == FROM_CLIENT && ! as_transaction_is_batch_sub(tr)) {
-			uint32_t* configured_limit = is_write ?
-					&ns->single_record_write_concurrency_limit :
-					&ns->single_record_read_concurrency_limit;
+		// Client-origin XDR and MRT messages use the same lanes. Their
+		// wire flags must not let a request bypass admission.
+		if (tr->origin == FROM_CLIENT) {
+			uint32_t* configured_limit = is_write
+					? &ns->single_record_write_concurrency_limit
+					: &ns->single_record_read_concurrency_limit;
 			uint32_t limit = as_load_uint32(configured_limit);
 
 			if (limit != 0) {
@@ -320,6 +322,9 @@ as_tsvc_process_transaction(as_transaction* tr)
 				if (! try_admit(admitted, limit)) {
 					as_incr_uint64(is_write ? &ns->n_fail_write_admission
 											: &ns->n_fail_read_admission);
+					cf_ticker_detail(AS_KEY_BUSY,
+							"{%s} %s admission limit reached", ns->name,
+							is_write ? "write" : "read");
 					as_partition_release(&tr->rsv);
 					as_transaction_error(tr, ns, AS_ERR_KEY_BUSY);
 					goto Cleanup;
