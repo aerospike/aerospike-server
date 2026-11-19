@@ -361,7 +361,8 @@ as_tsvc_process_transaction(as_transaction* tr)
 				slot.keyd = tr->keyd;
 				slot.is_write = is_write;
 
-				uint32_t hash = ((uint32_t)slot.keyd.digest[DIGEST_HASH_BASE_BYTE] << 8) |
+				uint32_t hash =
+						((uint32_t)slot.keyd.digest[DIGEST_HASH_BASE_BYTE] << 8) |
 						slot.keyd.digest[DIGEST_HASH_BASE_BYTE + 1];
 				shard = &g_admission_shards[hash % ADMISSION_SHARDS];
 
@@ -417,6 +418,8 @@ as_tsvc_process_transaction(as_transaction* tr)
 		}
 
 		if (shard != NULL) {
+			// The slot covers only the synchronous handler call. Async work
+			// continues without it, and requeued requests check admission again.
 			release_admission(shard, &slot);
 			as_decr_uint32(active);
 		}

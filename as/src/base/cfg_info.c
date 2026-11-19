@@ -2181,15 +2181,17 @@ cfg_set_namespace(const char* cmd, as_namespace* ns)
 				ns->name, ns->n_single_query_threads, val);
 		ns->n_single_query_threads = (uint32_t)val;
 	}
-	else if (as_info_parameter_get(cmd, "single-record-read-key-concurrency-limit",
-					 v, &v_len) == 0) {
+	else if (as_info_parameter_get(cmd,
+					 "single-record-read-key-concurrency-limit", v, &v_len) == 0) {
 		return set_admission_limit(ns, "single-record-read-key-concurrency-limit",
 				v, &ns->single_record_read_key_concurrency_limit);
 	}
-	else if (as_info_parameter_get(cmd, "single-record-write-key-concurrency-limit",
-					 v, &v_len) == 0) {
-		return set_admission_limit(ns, "single-record-write-key-concurrency-limit",
-				v, &ns->single_record_write_key_concurrency_limit);
+	else if (as_info_parameter_get(cmd,
+					 "single-record-write-key-concurrency-limit", v,
+					 &v_len) == 0) {
+		return set_admission_limit(ns,
+				"single-record-write-key-concurrency-limit", v,
+				&ns->single_record_write_key_concurrency_limit);
 	}
 	else if (as_info_parameter_get(cmd, "stop-writes-sys-memory-pct", v,
 					 &v_len) == 0) {
