@@ -879,8 +879,8 @@ typedef struct as_namespace_s {
 	uint32_t replication_factor; // indirect config - can become less than cfg_replication_factor
 	uint64_t sindex_stage_size;
 	uint32_t n_single_query_threads;
-	uint32_t single_record_read_concurrency_limit; // 0 means unlimited
-	uint32_t single_record_write_concurrency_limit; // 0 means unlimited
+	uint32_t single_record_read_key_concurrency_limit; // 0 means unlimited
+	uint32_t single_record_write_key_concurrency_limit; // 0 means unlimited
 	uint32_t stop_writes_sys_memory_pct;
 	uint32_t tomb_raider_eligible_age; // relevant only for enterprise edition
 	uint32_t tomb_raider_period; // relevant only for enterprise edition

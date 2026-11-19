@@ -35,6 +35,7 @@
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 
+#include "cf_mutex.h"
 #include "log.h"
 #include "node.h"
 
@@ -83,22 +84,60 @@ query_perm(const as_transaction* tr)
 														   : PERM_QUERY;
 }
 
-// Take a slot for the synchronous handler. A write that hands work off to
-// replication releases its slot when the handler returns.
-static inline bool
-try_admit(uint32_t* active, uint32_t limit)
+// Each enabled handler contributes one stack entry. Shard locks protect
+// the lists, and are released before any handler work.
+#define ADMISSION_SHARDS 4096
+
+typedef struct admission_slot_s {
+	struct admission_slot_s* next;
+	const as_namespace* ns;
+	cf_digest keyd;
+	bool is_write;
+} admission_slot;
+
+typedef struct admission_shard_s {
+	cf_mutex lock;
+	admission_slot* head;
+} admission_shard;
+
+static admission_shard g_admission_shards[ADMISSION_SHARDS];
+
+static bool
+try_admit(admission_shard* shard, admission_slot* slot, uint32_t limit)
 {
-	uint32_t count = as_load_uint32(active);
+	cf_mutex_lock(&shard->lock);
 
-	while (count < limit) {
-		if (as_cas_uint32(active, count, count + 1)) {
-			return true;
+	uint32_t count = 0;
+
+	for (admission_slot* active = shard->head; active != NULL;
+			active = active->next) {
+		if (active->ns == slot->ns && active->is_write == slot->is_write &&
+				cf_digest_compare(&active->keyd, &slot->keyd) == 0 &&
+				++count == limit) {
+			cf_mutex_unlock(&shard->lock);
+			return false;
 		}
-
-		count = as_load_uint32(active);
 	}
 
-	return false;
+	slot->next = shard->head;
+	shard->head = slot;
+	cf_mutex_unlock(&shard->lock);
+	return true;
+}
+
+static void
+release_admission(admission_shard* shard, const admission_slot* slot)
+{
+	cf_mutex_lock(&shard->lock);
+
+	admission_slot** link = &shard->head;
+
+	while (*link != slot) {
+		link = &(*link)->next;
+	}
+
+	*link = slot->next;
+	cf_mutex_unlock(&shard->lock);
 }
 
 static inline const char*
@@ -305,30 +344,41 @@ as_tsvc_process_transaction(as_transaction* tr)
 	if (rv == 0) {
 		// <><><><><><>  Reservation Succeeded  <><><><><><>
 
-		uint32_t* admitted = NULL;
+		admission_slot slot;
+		admission_shard* shard = NULL;
+		uint32_t* active = NULL;
 
 		// Client-origin XDR and MRT messages use the same lanes. Their
 		// wire flags must not let a request bypass admission.
 		if (tr->origin == FROM_CLIENT) {
 			uint32_t* configured_limit = is_write
-					? &ns->single_record_write_concurrency_limit
-					: &ns->single_record_read_concurrency_limit;
+					? &ns->single_record_write_key_concurrency_limit
+					: &ns->single_record_read_key_concurrency_limit;
 			uint32_t limit = as_load_uint32(configured_limit);
 
 			if (limit != 0) {
-				admitted = is_write ? &ns->single_record_write_active
-									: &ns->single_record_read_active;
+				slot.ns = ns;
+				slot.keyd = tr->keyd;
+				slot.is_write = is_write;
 
-				if (! try_admit(admitted, limit)) {
+				uint32_t hash = ((uint32_t)slot.keyd.digest[DIGEST_HASH_BASE_BYTE] << 8) |
+						slot.keyd.digest[DIGEST_HASH_BASE_BYTE + 1];
+				shard = &g_admission_shards[hash % ADMISSION_SHARDS];
+
+				if (! try_admit(shard, &slot, limit)) {
 					as_incr_uint64(is_write ? &ns->n_fail_write_admission
 											: &ns->n_fail_read_admission);
 					cf_ticker_detail(AS_KEY_BUSY,
-							"{%s} %s admission limit reached", ns->name,
+							"{%s} %s key admission limit reached", ns->name,
 							is_write ? "write" : "read");
 					as_partition_release(&tr->rsv);
 					as_transaction_error(tr, ns, AS_ERR_KEY_BUSY);
 					goto Cleanup;
 				}
+
+				active = is_write ? &ns->single_record_write_active
+								  : &ns->single_record_read_active;
+				as_incr_uint32(active);
 			}
 		}
 
@@ -366,8 +416,9 @@ as_tsvc_process_transaction(as_transaction* tr)
 			}
 		}
 
-		if (admitted != NULL) {
-			as_decr_uint32(admitted);
+		if (shard != NULL) {
+			release_admission(shard, &slot);
+			as_decr_uint32(active);
 		}
 
 		switch (status) {

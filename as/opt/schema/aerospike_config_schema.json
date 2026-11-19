@@ -2268,21 +2268,21 @@
               "dynamic": true,
               "enterpriseOnly": false
             },
-            "single-record-read-concurrency-limit": {
+            "single-record-read-key-concurrency-limit": {
               "type": "integer",
               "default": 0,
               "minimum": 0,
               "maximum": 4294967295,
-              "description": "Node-local cap on synchronous single-record read handlers for direct clients in this namespace. Read-only requests, including direct client MRT verify-reads, use this lane. Proxy, batch and query requests are excluded. An asynchronous handoff releases the slot at handler return. A cap at or above service-threads cannot shed load. Zero disables the cap. Excess requests receive KEY_BUSY before the handler.",
+              "description": "Node-local cap on synchronous single-record read handlers per digest for direct clients in this namespace. Read-only requests, including direct client MRT verify-reads, use this lane. Proxy, batch and query requests are excluded. An asynchronous handoff releases the slot at handler return. Zero disables the cap. Excess requests receive KEY_BUSY before the handler.",
               "dynamic": true,
               "enterpriseOnly": false
             },
-            "single-record-write-concurrency-limit": {
+            "single-record-write-key-concurrency-limit": {
               "type": "integer",
               "default": 0,
               "minimum": 0,
               "maximum": 4294967295,
-              "description": "Node-local cap on synchronous single-record write handlers for direct clients in this namespace. Requests with INFO2_WRITE, including deletes, UDFs, mixed read/write operations, and direct client XDR writes and MRT rolls, use this lane. Proxy, batch and query requests are excluded. An asynchronous handoff releases the slot at handler return. A cap at or above service-threads cannot shed load. Zero disables the cap. Excess requests receive KEY_BUSY before the handler.",
+              "description": "Node-local cap on synchronous single-record write handlers per digest for direct clients in this namespace. Requests with INFO2_WRITE, including deletes, UDFs, mixed read/write operations, and direct client XDR writes and MRT rolls, use this lane. Proxy, batch and query requests are excluded. An asynchronous handoff releases the slot at handler return. Zero disables the cap. Excess requests receive KEY_BUSY before the handler.",
               "dynamic": true,
               "enterpriseOnly": false
             },
