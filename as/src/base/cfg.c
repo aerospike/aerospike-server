@@ -492,6 +492,8 @@ typedef enum {
 	CASE_NAMESPACE_REPLICATION_FACTOR,
 	CASE_NAMESPACE_SINDEX_STAGE_SIZE,
 	CASE_NAMESPACE_SINGLE_QUERY_THREADS,
+	CASE_NAMESPACE_SINGLE_RECORD_READ_KEY_CONCURRENCY_LIMIT,
+	CASE_NAMESPACE_SINGLE_RECORD_WRITE_KEY_CONCURRENCY_LIMIT,
 	CASE_NAMESPACE_STOP_WRITES_SYS_MEMORY_PCT,
 	CASE_NAMESPACE_STRONG_CONSISTENCY,
 	CASE_NAMESPACE_STRONG_CONSISTENCY_ALLOW_EXPUNGE,
@@ -1107,6 +1109,8 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "replication-factor",				CASE_NAMESPACE_REPLICATION_FACTOR },
 		{ "sindex-stage-size",				CASE_NAMESPACE_SINDEX_STAGE_SIZE },
 		{ "single-query-threads",			CASE_NAMESPACE_SINGLE_QUERY_THREADS },
+		{ "single-record-read-key-concurrency-limit", CASE_NAMESPACE_SINGLE_RECORD_READ_KEY_CONCURRENCY_LIMIT },
+		{ "single-record-write-key-concurrency-limit", CASE_NAMESPACE_SINGLE_RECORD_WRITE_KEY_CONCURRENCY_LIMIT },
 		{ "stop-writes-sys-memory-pct",		CASE_NAMESPACE_STOP_WRITES_SYS_MEMORY_PCT },
 		{ "strong-consistency",				CASE_NAMESPACE_STRONG_CONSISTENCY },
 		{ "strong-consistency-allow-expunge", CASE_NAMESPACE_STRONG_CONSISTENCY_ALLOW_EXPUNGE },
@@ -1883,6 +1887,25 @@ cfg_u64_power_of_2(const cfg_line* p_line, uint64_t min, uint64_t max)
 		cf_crash_nostack(AS_CFG,
 				"line %d :: %s must be an exact power of 2, not %lu",
 				p_line->num, p_line->name_tok, value);
+	}
+
+	return value;
+}
+
+static uint32_t
+cfg_u32_decimal(const cfg_line* p_line)
+{
+	uint32_t value;
+
+	if (*p_line->val_tok_2 != '\0') {
+		cf_crash_nostack(AS_CFG, "line %d :: %s expects a single decimal value",
+				p_line->num, p_line->name_tok);
+	}
+
+	if (cf_strtoul_u32(p_line->val_tok_1, &value) != 0) {
+		cf_crash_nostack(AS_CFG,
+				"line %d :: %s requires a decimal integer from 0 to %u, got '%s'",
+				p_line->num, p_line->name_tok, UINT32_MAX, p_line->val_tok_1);
 	}
 
 	return value;
@@ -3272,6 +3295,14 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_SINGLE_QUERY_THREADS:
 				ns->n_single_query_threads = cfg_u32(&line, 1, 128);
+				break;
+			case CASE_NAMESPACE_SINGLE_RECORD_READ_KEY_CONCURRENCY_LIMIT:
+				ns->single_record_read_key_concurrency_limit =
+						cfg_u32_decimal(&line);
+				break;
+			case CASE_NAMESPACE_SINGLE_RECORD_WRITE_KEY_CONCURRENCY_LIMIT:
+				ns->single_record_write_key_concurrency_limit =
+						cfg_u32_decimal(&line);
 				break;
 			case CASE_NAMESPACE_STOP_WRITES_SYS_MEMORY_PCT:
 				ns->stop_writes_sys_memory_pct = cfg_u32(&line, 0, 100);

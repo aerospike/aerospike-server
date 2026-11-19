@@ -506,6 +506,10 @@ cfg_get_namespace(const as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint32(db, "replication-factor", ns->cfg_replication_factor);
 	info_append_uint64(db, "sindex-stage-size", ns->sindex_stage_size);
 	info_append_uint32(db, "single-query-threads", ns->n_single_query_threads);
+	info_append_uint32(db, "single-record-read-key-concurrency-limit",
+			as_load_uint32(&ns->single_record_read_key_concurrency_limit));
+	info_append_uint32(db, "single-record-write-key-concurrency-limit",
+			as_load_uint32(&ns->single_record_write_key_concurrency_limit));
 	info_append_uint32(db, "stop-writes-sys-memory-pct",
 			ns->stop_writes_sys_memory_pct);
 	info_append_bool(db, "strong-consistency", ns->cp);
@@ -1436,6 +1440,23 @@ cfg_set_network(const char* cmd)
 }
 
 static bool
+set_admission_limit(as_namespace* ns, const char* name, const char* value,
+		uint32_t* limit)
+{
+	uint32_t next;
+	if (cf_strtoul_u32(value, &next) != 0) {
+		cf_warning(AS_INFO, "{%s} invalid %s - expected a uint32", ns->name,
+				name);
+		return false;
+	}
+
+	cf_info(AS_INFO, "Changing value of %s of ns %s from %u to %u", name,
+			ns->name, as_load_uint32(limit), next);
+	as_store_uint32(limit, next);
+	return true;
+}
+
+static bool
 cfg_set_namespace(const char* cmd, as_namespace* ns)
 {
 	char v[1024];
@@ -2159,6 +2180,18 @@ cfg_set_namespace(const char* cmd, as_namespace* ns)
 				"Changing value of single-query-threads of ns %s from %u to %d ",
 				ns->name, ns->n_single_query_threads, val);
 		ns->n_single_query_threads = (uint32_t)val;
+	}
+	else if (as_info_parameter_get(cmd,
+					 "single-record-read-key-concurrency-limit", v, &v_len) == 0) {
+		return set_admission_limit(ns, "single-record-read-key-concurrency-limit",
+				v, &ns->single_record_read_key_concurrency_limit);
+	}
+	else if (as_info_parameter_get(cmd,
+					 "single-record-write-key-concurrency-limit", v,
+					 &v_len) == 0) {
+		return set_admission_limit(ns,
+				"single-record-write-key-concurrency-limit", v,
+				&ns->single_record_write_key_concurrency_limit);
 	}
 	else if (as_info_parameter_get(cmd, "stop-writes-sys-memory-pct", v,
 					 &v_len) == 0) {

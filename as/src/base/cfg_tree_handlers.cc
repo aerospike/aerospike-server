@@ -583,6 +583,8 @@ static void apply_namespace_set(const std::string& name,
 		{"/replication-factor", offsetof(as_namespace, cfg_replication_factor), apply_uint32_field},
 		{"/sindex-stage-size", offsetof(as_namespace, sindex_stage_size), apply_uint64_field, UnitType::SIZE_U64},
 		{"/single-query-threads", offsetof(as_namespace, n_single_query_threads), apply_uint32_field},
+		{"/single-record-read-key-concurrency-limit", offsetof(as_namespace, single_record_read_key_concurrency_limit), apply_uint32_field},
+		{"/single-record-write-key-concurrency-limit", offsetof(as_namespace, single_record_write_key_concurrency_limit), apply_uint32_field},
 		{"/stop-writes-sys-memory-pct", offsetof(as_namespace, stop_writes_sys_memory_pct), apply_uint32_field},
 		{"/strong-consistency", offsetof(as_namespace, cp), apply_bool_field, EnterpriseOnly{}}, // enterprise-only
 		{"/strong-consistency-allow-expunge", offsetof(as_namespace, cp_allow_drops), apply_bool_field, EnterpriseOnly{}}, // enterprise-only

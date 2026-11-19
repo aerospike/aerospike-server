@@ -879,6 +879,8 @@ typedef struct as_namespace_s {
 	uint32_t replication_factor; // indirect config - can become less than cfg_replication_factor
 	uint64_t sindex_stage_size;
 	uint32_t n_single_query_threads;
+	uint32_t single_record_read_key_concurrency_limit; // 0 means unlimited
+	uint32_t single_record_write_key_concurrency_limit; // 0 means unlimited
 	uint32_t stop_writes_sys_memory_pct;
 	uint32_t tomb_raider_eligible_age; // relevant only for enterprise edition
 	uint32_t tomb_raider_period; // relevant only for enterprise edition
@@ -1338,9 +1340,16 @@ typedef struct as_namespace_s {
 	uint64_t n_mrt_monitor_roll_back_error;
 	uint64_t n_mrt_monitor_roll_back_timeout;
 
+	// Active single-record client handlers with an admission slot.
+
+	uint32_t single_record_read_active;
+	uint32_t single_record_write_active;
+
 	// Special errors that deserve their own counters:
 
 	uint64_t n_fail_xdr_forbidden;
+	uint64_t n_fail_read_admission;
+	uint64_t n_fail_write_admission;
 	uint64_t n_fail_key_busy;
 	uint64_t n_fail_xdr_key_busy;
 	uint64_t n_fail_generation;
